@@ -1,0 +1,36 @@
+# Planning/design docs — local only
+docs/
+*.plan.md
+.claude/
+CLAUDE.md
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node / Tauri frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log

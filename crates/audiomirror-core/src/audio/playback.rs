@@ -23,14 +23,7 @@ impl PlaybackHandle {
     }
 
     pub fn start(device_name: &str, consumer: RingConsumer) -> Result<Self, AudioError> {
-        let host = cpal::default_host();
-        let device = host
-            .output_devices()
-            .map_err(|e| AudioError::BuildStream {
-                source: Box::new(e),
-            })?
-            .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
-            .ok_or_else(|| AudioError::DeviceNotFound(device_name.to_string()))?;
+        let device = resolve_output_device(device_name)?;
         Self::from_device(device, consumer)
     }
 
@@ -129,8 +122,24 @@ impl PlaybackHandle {
 }
 
 fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
-    let target_name = device_id.splitn(3, ':').nth(2).unwrap_or(device_id);
     let host = cpal::default_host();
+    if let Some(rest) = device_id.strip_prefix("out:") {
+        let idx: usize = rest
+            .parse()
+            .map_err(|_| AudioError::DeviceNotFound(device_id.to_string()))?;
+        let mut devices: Vec<cpal::Device> = host
+            .output_devices()
+            .map_err(|e| AudioError::BuildStream {
+                source: Box::new(e),
+            })?
+            .collect();
+        devices.sort_by_key(|d| d.name().unwrap_or_default());
+        return devices
+            .into_iter()
+            .nth(idx)
+            .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()));
+    }
+    let target_name = device_id.splitn(3, ':').nth(2).unwrap_or(device_id);
     host.output_devices()
         .map_err(|e| AudioError::BuildStream {
             source: Box::new(e),

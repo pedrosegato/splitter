@@ -8,6 +8,7 @@ use crate::FRAME_SAMPLES;
 use bytes::{Bytes, BytesMut};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -707,5 +708,105 @@ mod source_pump_tests {
         let _ = pump.await;
 
         assert!(stats.packets_sent.load(Ordering::Relaxed) >= 1);
+    }
+}
+
+use crate::audio::ring::AudioRing;
+use crate::net::stream::StreamRoute;
+
+pub async fn open_stream_as_source_inproc(
+    registry: Arc<StreamRegistry>,
+    session_id: SessionId,
+    stream_id: StreamId,
+    route: StreamRoute,
+    remote: SocketAddr,
+) -> Result<(), NetError> {
+    let (_producer, consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+    let notify = Arc::new(Notify::new());
+
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("bind source udp: {e}"),
+        })?;
+    socket
+        .connect(remote)
+        .await
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("connect source udp to {remote}: {e}"),
+        })?;
+
+    let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
+    let stats = Arc::new(StreamStats::default());
+    let stats_clone = stats.clone();
+    let notify_clone = notify.clone();
+    let bitrate = route.codec.bitrate;
+
+    let join = tokio::spawn(spawn_source_pump_inner(
+        session_id,
+        stream_id,
+        consumer,
+        notify_clone,
+        socket,
+        control_rx,
+        stats_clone,
+        bitrate,
+    ));
+
+    let rt = StreamRuntime {
+        session_id,
+        stream_id,
+        stats,
+        control_tx,
+        bound_device_id: Some(route.source.device_id.clone()),
+        join,
+    };
+    registry.register(rt).await
+}
+
+#[cfg(test)]
+mod open_source_tests {
+    use super::*;
+    use crate::net::signaling::{CodecParams, Endpoint};
+    use crate::net::stream::StreamRoute;
+    use std::net::SocketAddr;
+    use tokio::net::UdpSocket;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn open_stream_as_source_registers_runtime() {
+        let registry = StreamRegistry::new();
+        let session_id = Uuid::new_v4();
+
+        let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote: SocketAddr = sink_socket.local_addr().unwrap();
+
+        let route = StreamRoute {
+            source: Endpoint {
+                peer_id: "a".into(),
+                device_id: "mic-or-loopback".into(),
+            },
+            sink: Endpoint {
+                peer_id: "b".into(),
+                device_id: "ignored".into(),
+            },
+            codec: CodecParams {
+                name: "opus".into(),
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            volume: 1.0,
+        };
+
+        let result =
+            open_stream_as_source_inproc(registry.clone(), session_id, 0, route, remote).await;
+        assert!(
+            result.is_ok(),
+            "open_stream_as_source_inproc returned {result:?}"
+        );
+
+        let listed = registry.list().await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].stream_id, 0);
     }
 }

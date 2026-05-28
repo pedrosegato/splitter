@@ -3,7 +3,7 @@ use audiomirror_core::audio::capture::CaptureHandle;
 use audiomirror_core::audio::codec::{OpusDecoder, OpusEncoder};
 use audiomirror_core::audio::playback::PlaybackHandle;
 use audiomirror_core::audio::ring::AudioRing;
-use audiomirror_core::FRAME_SAMPLES;
+use audiomirror_core::FRAME_STEREO_SAMPLES;
 use bytes::BytesMut;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -41,8 +41,8 @@ pub(crate) async fn run(
     fec_mode: crate::SendFecMode,
     simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
-    let (cap_prod, mut cap_cons) = AudioRing::new(2_880);
-    let (mut play_prod, play_cons) = AudioRing::new(2_880);
+    let (cap_prod, mut cap_cons) = AudioRing::new(5_760);
+    let (mut play_prod, play_cons) = AudioRing::new(5_760);
 
     let _capture: CaptureGuard = match source {
         Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, cap_prod)?),
@@ -71,8 +71,8 @@ pub(crate) async fn run(
     let mut enc = OpusEncoder::new(bitrate)?;
     let mut dec = OpusDecoder::new()?;
     let mut payload = BytesMut::with_capacity(400);
-    let mut frame = vec![0.0f32; FRAME_SAMPLES];
-    let mut out_frame = vec![0.0f32; FRAME_SAMPLES];
+    let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
+    let mut out_frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let mut frame_count: u32 = 0;
 
     loop {
@@ -82,7 +82,7 @@ pub(crate) async fn run(
                 tracing::warn!("no audio frame signal in 50ms — capture stalled?");
             }
         }
-        while cap_cons.occupied() >= FRAME_SAMPLES {
+        while cap_cons.occupied() >= FRAME_STEREO_SAMPLES {
             cap_cons.pop_slice(&mut frame);
 
             // Every 100 frames: inject simulated loss samples and re-evaluate FEC.

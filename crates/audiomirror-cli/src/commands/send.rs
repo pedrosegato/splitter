@@ -3,7 +3,7 @@ use audiomirror_core::audio::capture::CaptureHandle;
 use audiomirror_core::audio::codec::OpusEncoder;
 use audiomirror_core::audio::ring::AudioRing;
 use audiomirror_core::net::packet::Packet;
-use audiomirror_core::FRAME_SAMPLES;
+use audiomirror_core::FRAME_STEREO_SAMPLES;
 use bytes::{Bytes, BytesMut};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::net::SocketAddr;
@@ -48,7 +48,7 @@ pub(crate) async fn run(
     simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
     let dest: SocketAddr = SocketAddr::from_str(addr)?;
-    let (producer, mut consumer) = AudioRing::new(2_880);
+    let (producer, mut consumer) = AudioRing::new(5_760);
     let _capture: CaptureGuard = match source {
         Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, producer)?),
         Source::System => {
@@ -75,7 +75,7 @@ pub(crate) async fn run(
     let mut encoder = OpusEncoder::new(bitrate)?;
     let mut payload_buf = BytesMut::with_capacity(400);
     let mut out_buf = BytesMut::with_capacity(512);
-    let mut frame = vec![0.0f32; FRAME_SAMPLES];
+    let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let start = Instant::now();
     let mut seq: u32 = 0;
     let mut frame_count: u32 = 0;
@@ -87,13 +87,13 @@ pub(crate) async fn run(
                 tracing::warn!("no audio frame signal in 50ms — capture stalled?");
             }
         }
-        while consumer.occupied() >= FRAME_SAMPLES {
+        while consumer.occupied() >= FRAME_STEREO_SAMPLES {
             let popped = consumer.pop_slice(&mut frame);
             debug_assert_eq!(
-                popped, FRAME_SAMPLES,
+                popped, FRAME_STEREO_SAMPLES,
                 "ring SPSC invariant: occupied check passed but pop_slice returned less"
             );
-            if popped < FRAME_SAMPLES {
+            if popped < FRAME_STEREO_SAMPLES {
                 continue;
             }
 

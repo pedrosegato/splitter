@@ -21,5 +21,8 @@ pub use settings::{settings_path, FecMode, JitterMode, LogLevel, Settings, Setti
 #[cfg(target_os = "macos")]
 pub use audio::loopback::MacosLoopbackHandle;
 
+/// Samples per channel per 20ms Opus frame at 48 kHz.
 pub const FRAME_SAMPLES: usize = 960;
+/// Interleaved stereo samples per 20ms Opus frame (L,R pairs).
+pub const FRAME_STEREO_SAMPLES: usize = FRAME_SAMPLES * 2;
 pub const SAMPLE_RATE: u32 = 48_000;

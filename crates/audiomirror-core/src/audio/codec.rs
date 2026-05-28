@@ -1,5 +1,5 @@
 use crate::error::CodecError;
-use crate::FRAME_SAMPLES;
+use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
 use bytes::BytesMut;
 
 use audiopus::{coder, packet::Packet, Application, Bitrate, Channels, MutSignals, SampleRate};
@@ -13,10 +13,12 @@ pub struct OpusEncoder {
 
 impl OpusEncoder {
     pub fn new(bitrate: i32) -> Result<Self, CodecError> {
-        let mut enc = coder::Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Audio)
-            .map_err(|e| CodecError::OpusInit {
-                source: Box::new(e),
-            })?;
+        // stereo end-to-end; see audio docs for rationale
+        let mut enc =
+            coder::Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)
+                .map_err(|e| CodecError::OpusInit {
+                    source: Box::new(e),
+                })?;
         enc.set_bitrate(Bitrate::BitsPerSecond(bitrate))
             .map_err(|e| CodecError::OpusInit {
                 source: Box::new(e),
@@ -30,9 +32,12 @@ impl OpusEncoder {
     }
 
     pub fn encode(&mut self, input: &[f32], out: &mut BytesMut) -> Result<usize, CodecError> {
-        if input.len() != FRAME_SAMPLES {
+        if input.len() != FRAME_STEREO_SAMPLES {
             return Err(CodecError::InvalidFrame {
-                reason: format!("expected {FRAME_SAMPLES} samples, got {}", input.len()),
+                reason: format!(
+                    "expected {FRAME_STEREO_SAMPLES} interleaved stereo samples, got {}",
+                    input.len()
+                ),
             });
         }
         out.clear();
@@ -71,7 +76,7 @@ pub struct OpusDecoder {
 
 impl OpusDecoder {
     pub fn new() -> Result<Self, CodecError> {
-        let dec = coder::Decoder::new(SampleRate::Hz48000, Channels::Mono).map_err(|e| {
+        let dec = coder::Decoder::new(SampleRate::Hz48000, Channels::Stereo).map_err(|e| {
             CodecError::OpusInit {
                 source: Box::new(e),
             }
@@ -89,9 +94,9 @@ impl OpusDecoder {
         out: &mut [f32],
         use_fec: bool,
     ) -> Result<(), CodecError> {
-        if out.len() < FRAME_SAMPLES {
+        if out.len() < FRAME_STEREO_SAMPLES {
             return Err(CodecError::InvalidFrame {
-                reason: format!("output buffer must be at least {FRAME_SAMPLES}"),
+                reason: format!("output buffer must be at least {FRAME_STEREO_SAMPLES}"),
             });
         }
         let pkt = match input {
@@ -100,7 +105,7 @@ impl OpusDecoder {
             })?),
             None => None,
         };
-        let signals = MutSignals::try_from(&mut out[..FRAME_SAMPLES]).map_err(|e| {
+        let signals = MutSignals::try_from(&mut out[..FRAME_STEREO_SAMPLES]).map_err(|e| {
             CodecError::OpusDecode {
                 source: Box::new(e),
             }
@@ -113,7 +118,7 @@ impl OpusDecoder {
             })?;
         if n != FRAME_SAMPLES {
             return Err(CodecError::InvalidFrame {
-                reason: format!("decoder produced {n} samples, expected {FRAME_SAMPLES}"),
+                reason: format!("decoder produced {n} frames, expected {FRAME_SAMPLES}"),
             });
         }
         Ok(())
@@ -124,9 +129,12 @@ impl OpusDecoder {
 mod tests {
     use super::*;
 
-    fn sine_frame(freq_hz: f32) -> Vec<f32> {
-        (0..FRAME_SAMPLES)
-            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * (i as f32) / 48_000.0).sin() * 0.5)
+    fn sine_frame_stereo(freq_hz: f32) -> Vec<f32> {
+        (0..FRAME_STEREO_SAMPLES)
+            .map(|i| {
+                let t = (i / 2) as f32;
+                (2.0 * std::f32::consts::PI * freq_hz * t / 48_000.0).sin() * 0.5
+            })
             .collect()
     }
 
@@ -135,15 +143,15 @@ mod tests {
         let mut enc = OpusEncoder::new(64_000).unwrap();
         let mut dec = OpusDecoder::new().unwrap();
 
-        let input = sine_frame(440.0);
+        let input = sine_frame_stereo(440.0);
         let mut payload = BytesMut::with_capacity(512);
         let n = enc.encode(&input, &mut payload).unwrap();
         assert!(
-            n > 0 && n < 200,
-            "expected typical opus 20ms@64kbps payload, got {n}"
+            n > 0 && n < 400,
+            "expected typical opus 20ms@64kbps stereo payload, got {n}"
         );
 
-        let mut output = vec![0.0f32; FRAME_SAMPLES];
+        let mut output = vec![0.0f32; FRAME_STEREO_SAMPLES];
         dec.decode(Some(&payload[..n]), &mut output).unwrap();
 
         let in_energy: f32 = input.iter().map(|x| x * x).sum();
@@ -158,7 +166,7 @@ mod tests {
     #[test]
     fn decode_plc_returns_silence_or_close() {
         let mut dec = OpusDecoder::new().unwrap();
-        let mut output = vec![0.0f32; FRAME_SAMPLES];
+        let mut output = vec![0.0f32; FRAME_STEREO_SAMPLES];
         dec.decode(None, &mut output).unwrap();
         let energy: f32 = output.iter().map(|x| x * x).sum();
         assert!(energy < 1.0, "PLC frame should be low energy, got {energy}");
@@ -167,7 +175,7 @@ mod tests {
     #[test]
     fn encode_rejects_wrong_frame_size() {
         let mut enc = OpusEncoder::new(64_000).unwrap();
-        let bad_input = vec![0.0f32; FRAME_SAMPLES + 1];
+        let bad_input = vec![0.0f32; FRAME_STEREO_SAMPLES + 1];
         let mut payload = BytesMut::with_capacity(512);
         let result = enc.encode(&bad_input, &mut payload);
         assert!(result.is_err());
@@ -176,14 +184,14 @@ mod tests {
     #[test]
     fn encode_into_oversized_buffer_respects_byte_budget() {
         let mut enc = OpusEncoder::new(64_000).unwrap();
-        let input = sine_frame(440.0);
+        let input = sine_frame_stereo(440.0);
 
         let mut payload = BytesMut::with_capacity(4096);
         let n = enc.encode(&input, &mut payload).unwrap();
 
         assert!(
-            n <= 200,
-            "encode wrote {n} bytes, expected <= 200 for 64kbps/20ms"
+            n <= 400,
+            "encode wrote {n} bytes, expected <= 400 for 64kbps/20ms stereo"
         );
         assert_eq!(
             payload.len(),
@@ -196,7 +204,7 @@ mod tests {
     fn set_fec_enables_inband_fec_on_encoder() {
         let mut enc = OpusEncoder::new(64_000).unwrap();
         enc.set_fec(true, 5).unwrap();
-        let input = sine_frame(440.0);
+        let input = sine_frame_stereo(440.0);
         let mut payload = BytesMut::with_capacity(512);
         let n = enc.encode(&input, &mut payload).unwrap();
         assert!(n > 0);
@@ -215,11 +223,11 @@ mod tests {
         let mut enc = OpusEncoder::new(64_000).unwrap();
         enc.set_fec(true, 10).unwrap();
         let mut payload = BytesMut::with_capacity(512);
-        let input = sine_frame(440.0);
+        let input = sine_frame_stereo(440.0);
         let _ = enc.encode(&input, &mut payload).unwrap();
 
         let mut dec = OpusDecoder::new().unwrap();
-        let mut out = vec![0.0f32; FRAME_SAMPLES];
+        let mut out = vec![0.0f32; FRAME_STEREO_SAMPLES];
         dec.decode_with_fec(Some(&payload), &mut out, true).unwrap();
     }
 
@@ -227,13 +235,13 @@ mod tests {
     fn decode_with_fec_false_matches_legacy_decode() {
         let mut enc = OpusEncoder::new(64_000).unwrap();
         let mut payload = BytesMut::with_capacity(512);
-        let input = sine_frame(880.0);
+        let input = sine_frame_stereo(880.0);
         enc.encode(&input, &mut payload).unwrap();
 
         let mut a = OpusDecoder::new().unwrap();
         let mut b = OpusDecoder::new().unwrap();
-        let mut out_a = vec![0.0f32; FRAME_SAMPLES];
-        let mut out_b = vec![0.0f32; FRAME_SAMPLES];
+        let mut out_a = vec![0.0f32; FRAME_STEREO_SAMPLES];
+        let mut out_b = vec![0.0f32; FRAME_STEREO_SAMPLES];
         a.decode(Some(&payload), &mut out_a).unwrap();
         b.decode_with_fec(Some(&payload), &mut out_b, false)
             .unwrap();

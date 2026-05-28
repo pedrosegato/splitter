@@ -176,33 +176,42 @@ fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
 }
 
 // The chunk size fed into the resampler — must divide evenly into FRAME_SAMPLES at 48k.
-// 441 samples at 44100 Hz → 480 samples at 48000 Hz (10ms slices).
+// 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices).
 const RESAMPLE_CHUNK: usize = 441;
 
-/// Routes multi-channel interleaved samples → mono → optional resampler → ring.
+/// Routes multi-channel interleaved samples -> stereo interleaved (L,R) -> optional resampler -> ring.
+/// Mono sources are upmixed to stereo by duplicating the channel.
+/// N>2 channel sources are downmixed to stereo using the first two channels.
 /// Pre-allocated; no heap activity inside the cpal callback.
 struct SampleRouter {
     channels: usize,
-    resampler: Option<Resampler>,
-    // scratch: accumulates mono samples before feeding the resampler in fixed chunks
+    // Separate resamplers for L and R to keep per-channel state independent.
+    resampler_l: Option<Resampler>,
+    resampler_r: Option<Resampler>,
+    // scratch: accumulates stereo-interleaved samples before feeding the resamplers
     scratch: Vec<f32>,
     resampled: Vec<f32>,
 }
 
 impl SampleRouter {
     fn new(sample_rate: u32, channels: u16) -> Result<Self, AudioError> {
-        let resampler = if sample_rate != SAMPLE_RATE {
+        let (resampler_l, resampler_r) = if sample_rate != SAMPLE_RATE {
+            let l = Resampler::new(sample_rate, SAMPLE_RATE, RESAMPLE_CHUNK).map_err(|e| {
+                AudioError::BuildStream {
+                    source: Box::new(e),
+                }
+            })?;
             let r = Resampler::new(sample_rate, SAMPLE_RATE, RESAMPLE_CHUNK).map_err(|e| {
                 AudioError::BuildStream {
                     source: Box::new(e),
                 }
             })?;
-            Some(r)
+            (Some(l), Some(r))
         } else {
-            None
+            (None, None)
         };
 
-        let scratch_cap = if resampler.is_some() {
+        let scratch_cap = if resampler_l.is_some() {
             RESAMPLE_CHUNK * 4
         } else {
             1024
@@ -210,25 +219,26 @@ impl SampleRouter {
 
         Ok(Self {
             channels: channels as usize,
-            resampler,
+            resampler_l,
+            resampler_r,
             scratch: Vec::with_capacity(scratch_cap),
             resampled: Vec::with_capacity(scratch_cap * 2),
         })
     }
 
     fn push_f32(&mut self, samples: &[f32], prod: &Mutex<RingProducer>, notify: &Notify) {
-        self.downmix_and_route(samples, |s| s, prod, notify);
+        self.convert_and_route(samples, |s| s, prod, notify);
     }
 
     fn push_i16(&mut self, samples: &[i16], prod: &Mutex<RingProducer>, notify: &Notify) {
-        self.downmix_and_route(samples, |s| s as f32 / i16::MAX as f32, prod, notify);
+        self.convert_and_route(samples, |s| s as f32 / i16::MAX as f32, prod, notify);
     }
 
     fn push_u16(&mut self, samples: &[u16], prod: &Mutex<RingProducer>, notify: &Notify) {
-        self.downmix_and_route(samples, |s| (s as f32 - 32_768.0) / 32_768.0, prod, notify);
+        self.convert_and_route(samples, |s| (s as f32 - 32_768.0) / 32_768.0, prod, notify);
     }
 
-    fn downmix_and_route<T: Copy>(
+    fn convert_and_route<T: Copy>(
         &mut self,
         interleaved: &[T],
         to_f32: impl Fn(T) -> f32,
@@ -238,40 +248,60 @@ impl SampleRouter {
         let ch = self.channels.max(1);
         let frame_count = interleaved.len() / ch;
 
-        if self.resampler.is_none() {
-            // Fast path: no resampling, downmix directly to a stack buffer.
-            let mut tmp = [0f32; 1024];
-            let n = frame_count.min(tmp.len());
-            for (i, slot) in tmp.iter_mut().enumerate().take(n) {
+        if self.resampler_l.is_none() {
+            // Fast path: no resampling, convert to stereo directly into a stack buffer.
+            // Output is 2 * frame_count f32 values.
+            let mut tmp = [0f32; 2048];
+            let stereo_count = (frame_count * 2).min(tmp.len());
+            let frames = stereo_count / 2;
+            for i in 0..frames {
                 let base = i * ch;
-                let mut sum = 0.0f32;
-                for c in 0..ch {
-                    sum += to_f32(interleaved[base + c]);
-                }
-                *slot = sum / ch as f32;
+                let l = to_f32(interleaved[base]);
+                let r = if ch >= 2 {
+                    to_f32(interleaved[base + 1])
+                } else {
+                    l
+                };
+                tmp[i * 2] = l;
+                tmp[i * 2 + 1] = r;
             }
-            flush_to_ring(&tmp[..n], prod, notify);
+            flush_to_ring(&tmp[..frames * 2], prod, notify);
             return;
         }
 
-        // Accumulate downmixed mono into scratch, flush resampler in RESAMPLE_CHUNK slices.
+        // Resampling path: accumulate stereo-interleaved samples in scratch,
+        // flush resampler in RESAMPLE_CHUNK slices.
+        // Note: RESAMPLE_CHUNK is per-channel; scratch holds stereo pairs so
+        // we flush when we have RESAMPLE_CHUNK frames = RESAMPLE_CHUNK*2 samples.
         for i in 0..frame_count {
             let base = i * ch;
-            let mut sum = 0.0f32;
-            for c in 0..ch {
-                sum += to_f32(interleaved[base + c]);
-            }
-            self.scratch.push(sum / ch as f32);
+            let l = to_f32(interleaved[base]);
+            let r = if ch >= 2 {
+                to_f32(interleaved[base + 1])
+            } else {
+                l
+            };
+            self.scratch.push(l);
+            self.scratch.push(r);
 
-            while self.scratch.len() >= RESAMPLE_CHUNK {
-                let chunk: Vec<f32> = self.scratch.drain(..RESAMPLE_CHUNK).collect();
-                if let Ok(()) = self
-                    .resampler
-                    .as_mut()
-                    .unwrap()
-                    .process(&chunk, &mut self.resampled)
-                {
+            while self.scratch.len() >= RESAMPLE_CHUNK * 2 {
+                let chunk: Vec<f32> = self.scratch.drain(..RESAMPLE_CHUNK * 2).collect();
+                // Resampler operates on mono; run L and R channels separately then interleave.
+                let l_in: Vec<f32> = chunk.iter().step_by(2).copied().collect();
+                let r_in: Vec<f32> = chunk.iter().skip(1).step_by(2).copied().collect();
+                let mut l_out = Vec::new();
+                let mut r_out = Vec::new();
+                let rl = self.resampler_l.as_mut().unwrap();
+                let rr = self.resampler_r.as_mut().unwrap();
+                if rl.process(&l_in, &mut l_out).is_ok() && rr.process(&r_in, &mut r_out).is_ok() {
+                    let stereo: Vec<f32> = l_out
+                        .iter()
+                        .zip(r_out.iter())
+                        .flat_map(|(&lv, &rv)| [lv, rv])
+                        .collect();
+                    self.resampled.extend_from_slice(&stereo);
                     flush_to_ring(&self.resampled, prod, notify);
+                    self.resampled.clear();
                 }
             }
         }
@@ -279,10 +309,10 @@ impl SampleRouter {
 }
 
 fn flush_to_ring(samples: &[f32], prod: &Mutex<RingProducer>, notify: &Notify) {
-    use crate::FRAME_SAMPLES;
+    use crate::FRAME_STEREO_SAMPLES;
     if let Ok(mut p) = prod.try_lock() {
         let pushed = p.push_slice(samples);
-        if pushed >= FRAME_SAMPLES {
+        if pushed >= FRAME_STEREO_SAMPLES {
             notify.notify_one();
         }
     }
@@ -292,7 +322,7 @@ fn flush_to_ring(samples: &[f32], prod: &Mutex<RingProducer>, notify: &Notify) {
 mod tests {
     use super::*;
     use crate::audio::ring::AudioRing;
-    use crate::FRAME_SAMPLES;
+    use crate::FRAME_STEREO_SAMPLES;
 
     #[test]
     fn start_with_unknown_device_returns_error() {
@@ -354,77 +384,117 @@ mod tests {
         }
     }
 
-    /// Verifies that SampleRouter at 48k (no resampler) correctly downmixes stereo and
-    /// delivers samples to the ring, triggering the notify after enough samples accumulate.
+    /// Verifies that SampleRouter at 48k (no resampler) correctly converts stereo to stereo
+    /// and delivers interleaved L,R pairs to the ring.
     #[test]
-    fn sample_router_48k_stereo_downmix_reaches_ring() {
-        let (prod, mut cons) = AudioRing::new(4096);
+    fn sample_router_48k_stereo_passthrough_reaches_ring() {
+        let (prod, mut cons) = AudioRing::new(8192);
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
         let mut router = SampleRouter::new(48_000, 2).expect("router init");
 
-        // Feed FRAME_SAMPLES stereo frames (L=0.4, R=0.8) → mono expected = 0.6
+        // Feed FRAME_STEREO_SAMPLES/2 stereo frames (L=0.4, R=0.8)
+        use crate::FRAME_SAMPLES;
         let stereo: Vec<f32> = (0..FRAME_SAMPLES).flat_map(|_| [0.4f32, 0.8f32]).collect();
         router.push_f32(&stereo, &prod, &notify);
 
-        let mut out = vec![0.0f32; FRAME_SAMPLES];
+        let mut out = vec![0.0f32; FRAME_STEREO_SAMPLES];
         let popped = cons.pop_slice(&mut out);
-        assert_eq!(popped, FRAME_SAMPLES);
-        for s in &out {
-            assert!((s - 0.6).abs() < 1e-5, "expected 0.6, got {s}");
+        assert_eq!(popped, FRAME_STEREO_SAMPLES);
+        for i in 0..FRAME_SAMPLES {
+            assert!(
+                (out[i * 2] - 0.4).abs() < 1e-5,
+                "L ch expected 0.4, got {}",
+                out[i * 2]
+            );
+            assert!(
+                (out[i * 2 + 1] - 0.8).abs() < 1e-5,
+                "R ch expected 0.8, got {}",
+                out[i * 2 + 1]
+            );
+        }
+    }
+
+    /// Mono input is upmixed to stereo by duplicating the channel.
+    #[test]
+    fn sample_router_48k_mono_upmix_to_stereo() {
+        let (prod, mut cons) = AudioRing::new(8192);
+        let prod = Arc::new(Mutex::new(prod));
+        let notify = Arc::new(Notify::new());
+
+        let mut router = SampleRouter::new(48_000, 1).expect("router init");
+
+        use crate::FRAME_SAMPLES;
+        let mono: Vec<f32> = vec![0.5f32; FRAME_SAMPLES];
+        router.push_f32(&mono, &prod, &notify);
+
+        let mut out = vec![0.0f32; FRAME_STEREO_SAMPLES];
+        let popped = cons.pop_slice(&mut out);
+        assert_eq!(popped, FRAME_STEREO_SAMPLES);
+        for i in 0..FRAME_SAMPLES {
+            assert!(
+                (out[i * 2] - 0.5).abs() < 1e-5,
+                "L ch expected 0.5, got {}",
+                out[i * 2]
+            );
+            assert!(
+                (out[i * 2 + 1] - 0.5).abs() < 1e-5,
+                "R ch expected 0.5, got {}",
+                out[i * 2 + 1]
+            );
         }
     }
 
     /// Verifies that SampleRouter at 44100 Hz (with resampler) delivers approximately the
-    /// right number of output samples (48000/44100 ratio) into the ring.
+    /// right number of output stereo samples (48000/44100 ratio * 2 for stereo) into the ring.
     #[test]
     fn sample_router_44100_resamples_to_48k() {
-        let ring_cap = 8192;
+        let ring_cap = 16384;
         let (prod, cons) = AudioRing::new(ring_cap);
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
         let mut router = SampleRouter::new(44_100, 1).expect("router init");
 
-        // Feed 4410 mono samples at 44100 Hz → expect ~4800 samples at 48000 Hz
+        // Feed 4410 mono samples at 44100 Hz -> expect ~4800 stereo pairs = ~9600 samples at 48000 Hz
         let input = vec![0.5f32; 4410];
         router.push_f32(&input, &prod, &notify);
 
         let available = cons.occupied();
-        // Expect within 5% of the ideal ratio
-        let expected = 4800usize;
+        // Expect within 5% of the ideal ratio (stereo output)
+        let expected = 9600usize;
         let lo = expected * 95 / 100;
         let hi = expected * 105 / 100;
         assert!(
             available >= lo && available <= hi,
-            "expected ~{expected} resampled samples, got {available}"
+            "expected ~{expected} resampled stereo samples, got {available}"
         );
     }
 
-    /// Verifies that flush_to_ring signals the Notify exactly when at least FRAME_SAMPLES
-    /// samples have been pushed — sub-frame pushes must NOT signal.
+    /// Verifies that flush_to_ring signals the Notify exactly when at least FRAME_STEREO_SAMPLES
+    /// samples have been pushed -- sub-frame pushes must NOT signal.
     #[tokio::test]
     async fn flush_to_ring_notifies_at_frame_boundary() {
-        let (prod, _cons) = AudioRing::new(4096);
+        let (prod, _cons) = AudioRing::new(8192);
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
-        // Push fewer than FRAME_SAMPLES — Notify must NOT be triggered.
-        flush_to_ring(&[0.0f32; FRAME_SAMPLES - 1], &prod, &notify);
+        // Push fewer than FRAME_STEREO_SAMPLES -- Notify must NOT be triggered.
+        flush_to_ring(&[0.0f32; FRAME_STEREO_SAMPLES - 1], &prod, &notify);
         let timed_out =
             tokio::time::timeout(std::time::Duration::from_millis(10), notify.notified())
                 .await
                 .is_err();
         assert!(timed_out, "notify must NOT fire for sub-frame push");
 
-        // Push exactly FRAME_SAMPLES — Notify must fire.
-        flush_to_ring(&[0.0f32; FRAME_SAMPLES], &prod, &notify);
+        // Push exactly FRAME_STEREO_SAMPLES -- Notify must fire.
+        flush_to_ring(&[0.0f32; FRAME_STEREO_SAMPLES], &prod, &notify);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(100), notify.notified()).await;
         assert!(
             result.is_ok(),
-            "notify must fire after a full frame is pushed"
+            "notify must fire after a full stereo frame is pushed"
         );
     }
 }

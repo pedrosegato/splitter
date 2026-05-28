@@ -4,7 +4,7 @@ use crate::error::NetError;
 use crate::net::packet::Packet;
 use crate::net::session::SessionId;
 use crate::net::stream::StreamId;
-use crate::FRAME_SAMPLES;
+use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
 use bytes::{Bytes, BytesMut};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -395,7 +395,7 @@ pub async fn spawn_source_pump_inner(
         }
     };
     let mut seq: u32 = 0;
-    let mut frame = vec![0.0f32; FRAME_SAMPLES];
+    let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let mut payload = BytesMut::with_capacity(400);
     let mut packet_buf = BytesMut::with_capacity(1500);
     let mut gain: f32 = 1.0;
@@ -416,7 +416,7 @@ pub async fn spawn_source_pump_inner(
                 }
             }
             _ = frame_ready.notified() => {
-                while consumer.occupied() >= FRAME_SAMPLES {
+                while consumer.occupied() >= FRAME_STEREO_SAMPLES {
                     consumer.pop_slice(&mut frame);
                     if paused {
                         continue;
@@ -469,7 +469,7 @@ pub async fn spawn_sink_pump_inner(
             return;
         }
     };
-    let mut decoded = vec![0.0f32; FRAME_SAMPLES];
+    let mut decoded = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let mut buf = vec![0u8; 1500];
     let mut last_seq: Option<u32> = None;
     let mut gain: f32 = 1.0;
@@ -562,7 +562,7 @@ mod sink_pump_tests {
     use crate::audio::codec::OpusEncoder;
     use crate::audio::ring::AudioRing;
     use crate::net::packet::Packet;
-    use crate::FRAME_SAMPLES;
+    use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
     use bytes::{Bytes, BytesMut};
     use tokio::net::UdpSocket;
     use uuid::Uuid;
@@ -587,7 +587,7 @@ mod sink_pump_tests {
         ));
 
         let mut enc = OpusEncoder::new(64_000).unwrap();
-        let frame = vec![0.1f32; FRAME_SAMPLES];
+        let frame = vec![0.1f32; FRAME_STEREO_SAMPLES];
         let mut payload = BytesMut::with_capacity(400);
         enc.encode(&frame, &mut payload).unwrap();
 
@@ -604,12 +604,12 @@ mod sink_pump_tests {
         sender.send_to(&wire[..], sink_addr).await.unwrap();
 
         for _ in 0..30 {
-            if cons.occupied() >= FRAME_SAMPLES {
+            if cons.occupied() >= FRAME_STEREO_SAMPLES {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        assert!(cons.occupied() >= FRAME_SAMPLES);
+        assert!(cons.occupied() >= FRAME_STEREO_SAMPLES);
         assert_eq!(stats.packets_received.load(Ordering::Relaxed), 1);
 
         let _ = ctrl_tx.send(StreamControlSignal::Close).await;
@@ -636,7 +636,7 @@ mod sink_pump_tests {
         ));
 
         let mut enc = OpusEncoder::new(64_000).unwrap();
-        let frame = vec![0.1f32; FRAME_SAMPLES];
+        let frame = vec![0.1f32; FRAME_STEREO_SAMPLES];
         let mut payload = BytesMut::with_capacity(400);
         enc.encode(&frame, &mut payload).unwrap();
 
@@ -670,7 +670,7 @@ mod sink_pump_tests {
 mod source_pump_tests {
     use super::*;
     use crate::audio::ring::AudioRing;
-    use crate::FRAME_SAMPLES;
+    use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
     use tokio::net::UdpSocket;
     use tokio::sync::Notify;
     use uuid::Uuid;
@@ -701,7 +701,7 @@ mod source_pump_tests {
             64_000,
         ));
 
-        let frame = vec![0.25f32; FRAME_SAMPLES];
+        let frame = vec![0.25f32; FRAME_STEREO_SAMPLES];
         for _ in 0..3 {
             prod.push_slice(&frame);
             notify.notify_one();

@@ -2,7 +2,7 @@
 
 use crate::audio::ring::RingProducer;
 use crate::error::AudioError;
-use crate::FRAME_SAMPLES;
+use crate::FRAME_STEREO_SAMPLES;
 use crate::SAMPLE_RATE;
 use screencapturekit::{
     cm::{CMSampleBuffer, CMTime},
@@ -58,54 +58,40 @@ impl SCStreamOutputTrait for AudioHandler {
             return;
         };
 
-        let mut mono_buf = [0f32; 4096];
-        let mut mono_len = 0usize;
+        // SCK with channel_count=2 emits interleaved single-buffer ABL: L,R,L,R,...
+        // Pass interleaved stereo samples directly to the ring; no downmix.
+        let mut stereo_buf = [0f32; 4096];
+        let mut stereo_len = 0usize;
 
-        // SCK with channel_count=2 emits interleaved single-buffer ABL; planar would mis-downmix here.
         for buf in abl.iter() {
             let channels = buf.number_channels as usize;
             if channels == 0 {
                 continue;
             }
             let bytes = buf.data();
-            if bytes.len() % (size_of::<f32>() * channels) != 0 {
+            if bytes.len() % size_of::<f32>() != 0 {
                 continue;
             }
-            let frame_count = bytes.len() / (size_of::<f32>() * channels);
+            let sample_count = bytes.len() / size_of::<f32>();
 
-            // SAFETY: CoreAudio always allocates AudioBuffer.mData on ≥4-byte boundaries for
+            // SAFETY: CoreAudio always allocates AudioBuffer.mData on >=4-byte boundaries for
             // Float32 LPCM (CoreAudioTypes.h); SCK guarantees Float32 LPCM for audio output.
-            let samples: &[f32] = unsafe {
-                std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), frame_count * channels)
-            };
+            let samples: &[f32] =
+                unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), sample_count) };
 
-            let available = mono_buf.len() - mono_len;
-            let frames_to_copy = frame_count.min(available);
-
-            if channels == 1 {
-                mono_buf[mono_len..mono_len + frames_to_copy]
-                    .copy_from_slice(&samples[..frames_to_copy]);
-                mono_len += frames_to_copy;
-            } else {
-                for (i, chunk) in samples
-                    .chunks_exact(channels)
-                    .take(frames_to_copy)
-                    .enumerate()
-                {
-                    let sum: f32 = chunk.iter().sum();
-                    mono_buf[mono_len + i] = sum / channels as f32;
-                }
-                mono_len += frames_to_copy;
-            }
+            let available = stereo_buf.len() - stereo_len;
+            let to_copy = samples.len().min(available);
+            stereo_buf[stereo_len..stereo_len + to_copy].copy_from_slice(&samples[..to_copy]);
+            stereo_len += to_copy;
         }
 
-        if mono_len == 0 {
+        if stereo_len == 0 {
             return;
         }
 
         if let Ok(mut p) = self.producer.try_lock() {
-            let pushed = p.push_slice(&mono_buf[..mono_len]);
-            if pushed >= FRAME_SAMPLES {
+            let pushed = p.push_slice(&stereo_buf[..stereo_len]);
+            if pushed >= FRAME_STEREO_SAMPLES {
                 self.frame_notify.notify_one();
             }
         }
@@ -174,7 +160,7 @@ impl MacosLoopbackHandle {
         let config = SCStreamConfiguration::new()
             .with_captures_audio(true)
             .with_sample_rate(SAMPLE_RATE as i32)
-            .with_channel_count(1i32)
+            .with_channel_count(2i32)
             .with_excludes_current_process_audio(true)
             .with_width(2)
             .with_height(2)

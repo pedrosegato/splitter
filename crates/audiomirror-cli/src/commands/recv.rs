@@ -3,7 +3,7 @@ use audiomirror_core::audio::playback::PlaybackHandle;
 use audiomirror_core::audio::ring::{AudioRing, RingProducer};
 use audiomirror_core::net::jitter::{JitterBuffer, JitterOutput};
 use audiomirror_core::net::packet::Packet;
-use audiomirror_core::FRAME_SAMPLES;
+use audiomirror_core::FRAME_STEREO_SAMPLES;
 use bytes::Bytes;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::net::SocketAddr;
@@ -20,12 +20,12 @@ pub(crate) async fn run_with_settings(
     let sock = make_udp_socket(bind_addr)?;
     tracing::info!("receiving on {bind_addr}, playing to {output}");
 
-    let (mut producer, consumer) = AudioRing::new(2_880);
+    let (mut producer, consumer) = AudioRing::new(5_760);
     let _playback = PlaybackHandle::start(output, consumer)?;
 
     let mut decoder = OpusDecoder::new()?;
     let mut udp_buf = vec![0u8; 1500];
-    let mut frame = vec![0.0f32; FRAME_SAMPLES];
+    let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let mut jitter = JitterBuffer::new(jitter_mode, jitter_max_depth_ms);
     let mut pending_fec_recover = false;
 

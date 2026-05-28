@@ -1,5 +1,5 @@
-use crate::audio::codec::OpusEncoder;
-use crate::audio::ring::RingConsumer;
+use crate::audio::codec::{OpusDecoder, OpusEncoder};
+use crate::audio::ring::{RingConsumer, RingProducer};
 use crate::error::NetError;
 use crate::net::packet::Packet;
 use crate::net::session::SessionId;
@@ -421,6 +421,219 @@ pub(crate) async fn spawn_source_pump_inner(
                 }
             }
         }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) async fn spawn_sink_pump_inner(
+    _session_id: SessionId,
+    stream_id: StreamId,
+    socket: UdpSocket,
+    mut producer: RingProducer,
+    mut control_rx: mpsc::Receiver<StreamControlSignal>,
+    stats: Arc<StreamStats>,
+) {
+    let mut decoder = match OpusDecoder::new() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("opus decoder init failed: {e}");
+            return;
+        }
+    };
+    let mut decoded = vec![0.0f32; FRAME_SAMPLES];
+    let mut buf = vec![0u8; 1500];
+    let mut last_seq: Option<u32> = None;
+    let mut gain: f32 = 1.0;
+    let muted = Arc::new(AtomicBool::new(false));
+    let mut paused = false;
+
+    loop {
+        tokio::select! {
+            biased;
+            maybe_sig = control_rx.recv() => {
+                match maybe_sig {
+                    Some(StreamControlSignal::Close) | None => return,
+                    Some(StreamControlSignal::SetVolume(v)) => gain = v.clamp(0.0, 2.0),
+                    Some(StreamControlSignal::SetMuted(m)) => muted.store(m, Ordering::Relaxed),
+                    Some(StreamControlSignal::Pause) => paused = true,
+                    Some(StreamControlSignal::Resume) => paused = false,
+                }
+            }
+            recv_res = socket.recv(&mut buf) => {
+                let n = match recv_res {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::warn!("udp recv failed: {e}");
+                        continue;
+                    }
+                };
+                let bytes = Bytes::copy_from_slice(&buf[..n]);
+                let pkt = match Packet::decode(bytes) {
+                    Ok(p) if p.stream_id == stream_id => p,
+                    Ok(_) => continue,
+                    Err(e) => {
+                        tracing::warn!("packet decode failed: {e}");
+                        continue;
+                    }
+                };
+                stats.packets_received.fetch_add(1, Ordering::Relaxed);
+                stats.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+                stats.last_seq_received.store(pkt.seq, Ordering::Relaxed);
+
+                if let Some(prev) = last_seq {
+                    let expected = prev.wrapping_add(1) & 0x00FF_FFFF;
+                    if pkt.seq != expected {
+                        let lost = if pkt.seq > expected {
+                            (pkt.seq - expected) as u64
+                        } else {
+                            0
+                        };
+                        if lost > 0 && lost < 100 {
+                            for _ in 0..lost {
+                                if decoder.decode(None, &mut decoded).is_ok() {
+                                    stats.packets_lost.fetch_add(1, Ordering::Relaxed);
+                                    apply_gain_and_push(&mut decoded, gain, muted.load(Ordering::Relaxed), paused, &mut producer);
+                                }
+                            }
+                        }
+                    }
+                }
+                last_seq = Some(pkt.seq);
+
+                if decoder.decode(Some(&pkt.payload[..]), &mut decoded).is_ok() {
+                    apply_gain_and_push(&mut decoded, gain, muted.load(Ordering::Relaxed), paused, &mut producer);
+                }
+            }
+        }
+    }
+}
+
+fn apply_gain_and_push(
+    frame: &mut [f32],
+    gain: f32,
+    muted: bool,
+    paused: bool,
+    producer: &mut RingProducer,
+) {
+    if paused {
+        return;
+    }
+    let effective = if muted { 0.0 } else { gain };
+    if (effective - 1.0).abs() > f32::EPSILON {
+        for s in frame.iter_mut() {
+            *s *= effective;
+        }
+    }
+    let _ = producer.push_slice(frame);
+}
+
+#[cfg(test)]
+mod sink_pump_tests {
+    use super::*;
+    use crate::audio::codec::OpusEncoder;
+    use crate::audio::ring::AudioRing;
+    use crate::net::packet::Packet;
+    use crate::FRAME_SAMPLES;
+    use bytes::{Bytes, BytesMut};
+    use tokio::net::UdpSocket;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn sink_pump_decodes_into_playback_ring() {
+        let (prod, mut cons) = AudioRing::new(FRAME_SAMPLES * 8);
+        let stats = Arc::new(StreamStats::default());
+
+        let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let sink_addr = sink_socket.local_addr().unwrap();
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+
+        let stats_clone = stats.clone();
+        let pump = tokio::spawn(spawn_sink_pump_inner(
+            Uuid::new_v4(),
+            5u8,
+            sink_socket,
+            prod,
+            ctrl_rx,
+            stats_clone,
+        ));
+
+        let mut enc = OpusEncoder::new(64_000).unwrap();
+        let frame = vec![0.1f32; FRAME_SAMPLES];
+        let mut payload = BytesMut::with_capacity(400);
+        enc.encode(&frame, &mut payload).unwrap();
+
+        let pkt = Packet {
+            stream_id: 5,
+            seq: 0,
+            timestamp_ms: 0,
+            payload: Bytes::copy_from_slice(&payload[..]),
+        };
+        let mut wire = BytesMut::with_capacity(1500);
+        pkt.encode(&mut wire).unwrap();
+
+        let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        sender.send_to(&wire[..], sink_addr).await.unwrap();
+
+        for _ in 0..30 {
+            if cons.occupied() >= FRAME_SAMPLES {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(cons.occupied() >= FRAME_SAMPLES);
+        assert_eq!(stats.packets_received.load(Ordering::Relaxed), 1);
+
+        let _ = ctrl_tx.send(StreamControlSignal::Close).await;
+        let _ = pump.await;
+    }
+
+    #[tokio::test]
+    async fn sink_pump_records_lost_packets_on_seq_gap() {
+        let (prod, _cons) = AudioRing::new(FRAME_SAMPLES * 8);
+        let stats = Arc::new(StreamStats::default());
+
+        let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let sink_addr = sink_socket.local_addr().unwrap();
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+
+        let stats_clone = stats.clone();
+        let pump = tokio::spawn(spawn_sink_pump_inner(
+            Uuid::new_v4(),
+            5u8,
+            sink_socket,
+            prod,
+            ctrl_rx,
+            stats_clone,
+        ));
+
+        let mut enc = OpusEncoder::new(64_000).unwrap();
+        let frame = vec![0.1f32; FRAME_SAMPLES];
+        let mut payload = BytesMut::with_capacity(400);
+        enc.encode(&frame, &mut payload).unwrap();
+
+        let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        for seq in [0u32, 3] {
+            let pkt = Packet {
+                stream_id: 5,
+                seq,
+                timestamp_ms: 0,
+                payload: Bytes::copy_from_slice(&payload[..]),
+            };
+            let mut wire = BytesMut::with_capacity(1500);
+            pkt.encode(&mut wire).unwrap();
+            sender.send_to(&wire[..], sink_addr).await.unwrap();
+        }
+
+        for _ in 0..30 {
+            if stats.packets_lost.load(Ordering::Relaxed) >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(stats.packets_lost.load(Ordering::Relaxed), 2);
+
+        let _ = ctrl_tx.send(StreamControlSignal::Close).await;
+        let _ = pump.await;
     }
 }
 

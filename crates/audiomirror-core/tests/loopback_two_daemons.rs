@@ -240,3 +240,100 @@ async fn connection_established_fires_on_both_accept_paths() {
         "auto-accepted trusted peer must not appear in the pending queue"
     );
 }
+
+/// After the first handshake (manual accept), the dialer's TrustStore should
+/// have been populated with the echoed auth_token.  A second `connect_to_peer`
+/// must therefore land on the auto-accept-trusted path without any `accept_pending`
+/// call — i.e. the pending queue stays empty and the connection is accepted
+/// immediately.
+#[tokio::test]
+async fn second_connect_skips_pending_after_first_accept() {
+    let dir = tempdir().unwrap();
+
+    let server_identity = id("server");
+    let server_peer_id = server_identity.peer_id;
+    let server_trust = Arc::new(RwLock::new(
+        TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
+    ));
+    let settings = Arc::new(RwLock::new(Settings {
+        auto_accept_trusted: true,
+        ..Settings::default()
+    }));
+    let server = SignalingServer::start(
+        "127.0.0.1:0".parse().unwrap(),
+        server_identity,
+        server_trust.clone(),
+        SessionManager::new(),
+        settings,
+    )
+    .await
+    .unwrap();
+
+    let client_identity = id("client");
+    let client_trust = Arc::new(RwLock::new(
+        TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
+    ));
+
+    // First connect — unknown peer → goes to pending, server accepts manually.
+    let first_dial = tokio::spawn({
+        let trust = client_trust.clone();
+        let ident = client_identity.clone();
+        let addr = server.bind_addr;
+        async move {
+            connect_to_peer(
+                addr,
+                &ident,
+                trust,
+                Some(server_peer_id),
+                Duration::from_secs(5),
+            )
+            .await
+        }
+    });
+    let first_accept = tokio::spawn({
+        let pending = server.pending.clone();
+        let conns = server.connections.clone();
+        let trust = server_trust.clone();
+        let tx = server.connection_established_tx.clone();
+        async move {
+            for _ in 0..50 {
+                if !pending.list().await.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            accept_pending(&pending, &trust, &conns, &tx, 0).await
+        }
+    });
+    let (first_dial_res, first_accept_res) = tokio::join!(first_dial, first_accept);
+    let first_outcome = first_dial_res.unwrap().unwrap();
+    first_accept_res.unwrap().unwrap();
+    assert!(first_outcome.accepted, "first connect must be accepted");
+
+    // Verify the dialer now has the server's token stored.
+    assert!(
+        client_trust.read().await.contains(&server_peer_id),
+        "client TrustStore must contain the server after first accept"
+    );
+
+    // Second connect — dialer sends the stored token; server auto-accepts.
+    let second_outcome = connect_to_peer(
+        server.bind_addr,
+        &client_identity,
+        client_trust.clone(),
+        Some(server_peer_id),
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    assert!(
+        second_outcome.accepted,
+        "second connect must be auto-accepted"
+    );
+
+    // Pending queue must stay empty — no manual accept required.
+    assert!(
+        server.pending.list().await.is_empty(),
+        "second connect must not land in pending queue"
+    );
+}

@@ -3,7 +3,7 @@ use crate::net::identity::PeerIdentity;
 use crate::net::signaling::connection::{spawn_peer_connection, PeerConnectionHandle, PeerEvent};
 use crate::net::signaling::message::{SignalingMessage, PROTOCOL_VERSION};
 use crate::net::signaling::server::local_capabilities;
-use crate::net::trust::TrustStore;
+use crate::net::trust::{TrustStore, TrustedPeer};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -61,8 +61,12 @@ pub async fn connect_to_peer(
     let ack = tokio::time::timeout(handshake_timeout, async {
         loop {
             match events.recv().await {
-                Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, reason })) => {
-                    return Ok((accepted, reason));
+                Ok(PeerEvent::Message(SignalingMessage::HelloAck {
+                    accepted,
+                    reason,
+                    auth_token,
+                })) => {
+                    return Ok((accepted, reason, auth_token));
                 }
                 Ok(PeerEvent::Disconnected { reason }) => {
                     return Err(NetError::SignalingProtocol { reason });
@@ -82,11 +86,28 @@ pub async fn connect_to_peer(
         millis: handshake_timeout.as_millis() as u64,
     })??;
 
+    let (accepted, reason, received_token) = ack;
+
+    if accepted {
+        if let (Some(token), Some(peer_id)) = (received_token, remote_peer_id_hint) {
+            let mut t = trust.write().await;
+            let peer_name = t
+                .peer_for(&peer_id)
+                .map(|p| p.peer_name.clone())
+                .unwrap_or_default();
+            let _ = t.add(TrustedPeer {
+                peer_id,
+                peer_name,
+                auth_token: token,
+            });
+        }
+    }
+
     Ok(ConnectOutcome {
         remote_peer_id: remote_peer_id_hint,
         handle,
-        accepted: ack.0,
-        reason: ack.1,
+        accepted,
+        reason,
     })
 }
 
@@ -174,6 +195,82 @@ mod tests {
         assert!(
             outcome.accepted,
             "client should receive HelloAck.accepted=true"
+        );
+    }
+
+    #[tokio::test]
+    async fn accept_pending_token_in_hello_ack_is_persisted_in_dialer_trust_store() {
+        let dir = tempdir().unwrap();
+        let server_identity = make_identity("server");
+        let server_peer_id = server_identity.peer_id;
+        let server_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
+        ));
+        let sessions = SessionManager::new();
+        let settings = Arc::new(RwLock::new(Settings {
+            auto_accept_trusted: true,
+            ..Settings::default()
+        }));
+        let server = SignalingServer::start(
+            "127.0.0.1:0".parse().unwrap(),
+            server_identity,
+            server_trust.clone(),
+            sessions,
+            settings,
+        )
+        .await
+        .unwrap();
+
+        let client_identity = make_identity("client");
+        let client_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
+        ));
+
+        let bind_addr = server.bind_addr;
+        let dial = tokio::spawn({
+            let client_trust = client_trust.clone();
+            let client_identity = client_identity.clone();
+            async move {
+                connect_to_peer(
+                    bind_addr,
+                    &client_identity,
+                    client_trust,
+                    Some(server_peer_id),
+                    Duration::from_secs(5),
+                )
+                .await
+            }
+        });
+
+        let acceptor = tokio::spawn({
+            let pending = server.pending.clone();
+            let conns = server.connections.clone();
+            let trust = server_trust.clone();
+            let tx = server.connection_established_tx.clone();
+            async move {
+                for _ in 0..50 {
+                    if !pending.list().await.is_empty() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                accept_pending(&pending, &trust, &conns, &tx, 0).await
+            }
+        });
+
+        let (dial_res, accept_res) = tokio::join!(dial, acceptor);
+        let outcome = dial_res.unwrap().unwrap();
+        let (_, stored_token) = accept_res.unwrap().unwrap();
+        assert!(outcome.accepted);
+
+        let t = client_trust.read().await;
+        assert!(
+            t.contains(&server_peer_id),
+            "dialer's TrustStore must contain the server after accept"
+        );
+        assert!(
+            t.verify(&server_peer_id, &stored_token),
+            "dialer's token must match the server's stored token"
         );
     }
 

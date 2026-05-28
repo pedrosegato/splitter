@@ -70,6 +70,10 @@ impl TrustStore {
             .map(|p| p.auth_token.clone())
     }
 
+    pub fn peer_for(&self, peer_id: &Uuid) -> Option<&TrustedPeer> {
+        self.trusted.get(peer_id)
+    }
+
     pub fn first_peer_id(&self) -> Option<Uuid> {
         self.trusted.keys().next().copied()
     }

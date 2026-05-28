@@ -123,6 +123,7 @@ impl SignalingServer {
                             .send(SignalingMessage::HelloAck {
                                 accepted: false,
                                 reason: Some("first message must be hello".into()),
+                                auth_token: None,
                             })
                             .await;
                         return;
@@ -135,6 +136,7 @@ impl SignalingServer {
                                 reason: Some(format!(
                                     "protocol_version mismatch: got {protocol_version}, expected {PROTOCOL_VERSION}"
                                 )),
+                                auth_token: None,
                             })
                             .await;
                         return;
@@ -145,6 +147,7 @@ impl SignalingServer {
                             .send(SignalingMessage::HelloAck {
                                 accepted: false,
                                 reason: Some("invalid peer_id uuid".into()),
+                                auth_token: None,
                             })
                             .await;
                         return;
@@ -165,6 +168,7 @@ impl SignalingServer {
                                 .send(SignalingMessage::HelloAck {
                                     accepted: false,
                                     reason: Some("auth_token mismatch".into()),
+                                    auth_token: None,
                                 })
                                 .await;
                             return;
@@ -176,6 +180,7 @@ impl SignalingServer {
                                 .send(SignalingMessage::HelloAck {
                                     accepted: true,
                                     reason: None,
+                                    auth_token: Some(auth_token.clone()),
                                 })
                                 .await;
                             c_inner.write().await.insert(peer_uuid, handle);
@@ -243,6 +248,7 @@ pub async fn accept_pending(
             .send(SignalingMessage::HelloAck {
                 accepted: true,
                 reason: None,
+                auth_token: Some(token.clone()),
             })
             .await
             .map_err(|_| NetError::SignalingProtocol {
@@ -361,8 +367,9 @@ mod tests {
             .unwrap();
         let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, reason })) =
-                    events.recv().await
+                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck {
+                    accepted, reason, ..
+                })) = events.recv().await
                 {
                     return (accepted, reason);
                 }

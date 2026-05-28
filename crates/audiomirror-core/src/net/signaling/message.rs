@@ -57,6 +57,8 @@ pub enum SignalingMessage {
         accepted: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auth_token: Option<String>,
     },
     SessionRequest {
         session_id: String,
@@ -131,6 +133,52 @@ mod tests {
         let bytes = msg.encode_to_bytes().unwrap();
         let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
         assert_eq!(msg, back);
+    }
+
+    #[test]
+    fn hello_ack_with_token_round_trips() {
+        let msg = SignalingMessage::HelloAck {
+            accepted: true,
+            reason: None,
+            auth_token: Some("secret-tok".into()),
+        };
+        let bytes = msg.encode_to_bytes().unwrap();
+        let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
+        assert_eq!(msg, back);
+        let raw = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(raw.contains("\"auth_token\":\"secret-tok\""));
+    }
+
+    #[test]
+    fn hello_ack_without_token_omits_field() {
+        let msg = SignalingMessage::HelloAck {
+            accepted: false,
+            reason: Some("rejected".into()),
+            auth_token: None,
+        };
+        let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
+        assert!(
+            !raw.contains("auth_token"),
+            "auth_token must be absent when None"
+        );
+        let back = SignalingMessage::decode_from_slice(raw.as_bytes()).unwrap();
+        assert_eq!(msg, back);
+    }
+
+    #[test]
+    fn hello_ack_without_token_field_decodes_as_none() {
+        let legacy = br#"{"type":"hello_ack","accepted":true}"#;
+        let msg = SignalingMessage::decode_from_slice(legacy).unwrap();
+        assert!(
+            matches!(
+                msg,
+                SignalingMessage::HelloAck {
+                    auth_token: None,
+                    ..
+                }
+            ),
+            "older HelloAck without auth_token must decode with auth_token=None"
+        );
     }
 
     #[test]

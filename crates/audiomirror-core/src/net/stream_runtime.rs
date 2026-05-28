@@ -569,7 +569,7 @@ mod sink_pump_tests {
 
     #[tokio::test]
     async fn sink_pump_decodes_into_playback_ring() {
-        let (prod, cons) = AudioRing::new(FRAME_SAMPLES * 8);
+        let (prod, cons) = AudioRing::new(FRAME_SAMPLES * 20);
         let stats = Arc::new(StreamStats::default());
 
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -618,7 +618,7 @@ mod sink_pump_tests {
 
     #[tokio::test]
     async fn sink_pump_records_lost_packets_on_seq_gap() {
-        let (prod, _cons) = AudioRing::new(FRAME_SAMPLES * 8);
+        let (prod, _cons) = AudioRing::new(FRAME_SAMPLES * 20);
         let stats = Arc::new(StreamStats::default());
 
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -677,7 +677,7 @@ mod source_pump_tests {
 
     #[tokio::test]
     async fn source_pump_sends_a_packet_per_frame() {
-        let (mut prod, cons) = AudioRing::new(FRAME_SAMPLES * 8);
+        let (mut prod, cons) = AudioRing::new(FRAME_SAMPLES * 20);
         let notify = Arc::new(Notify::new());
         let stats = Arc::new(StreamStats::default());
 
@@ -748,7 +748,7 @@ pub async fn open_stream_as_sink_inproc(
         })?
         .port();
 
-    let (producer, _consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+    let (producer, _consumer) = AudioRing::new(FRAME_SAMPLES * 20);
 
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
@@ -783,7 +783,7 @@ pub async fn open_stream_as_source_inproc(
     route: StreamRoute,
     remote: SocketAddr,
 ) -> Result<(), NetError> {
-    let (_producer, consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+    let (_producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);
     let notify = Arc::new(Notify::new());
 
     let socket = UdpSocket::bind("0.0.0.0:0")
@@ -841,7 +841,7 @@ pub async fn open_stream_as_source(
     remote: SocketAddr,
     source_kind: SourceKind,
 ) -> Result<(), NetError> {
-    let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+    let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);
 
     let (device_guard, frame_ready) =
         match source_kind {
@@ -932,7 +932,7 @@ pub async fn open_stream_as_sink(
         })?
         .port();
 
-    let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+    let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);
     let playback = crate::audio::playback::PlaybackHandle::start_by_id(&output_device_id, consumer)
         .map_err(|e| NetError::SignalingProtocol {
             reason: format!("playback start_by_id failed: {e}"),

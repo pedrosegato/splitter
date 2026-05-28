@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1024">
+<title>AudioMirror — Neumorphism</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --base: #e2e8f0;
+    --dark: #c5cdd8;
+    --light: #ffffff;
+    --text-hi: #334155;
+    --text-md: #64748b;
+    --text-lo: #94a3b8;
+    --accent: #5b7ec0;
+    --sh-dark: rgba(163,177,198,0.7);
+    --sh-light: rgba(255,255,255,0.85);
+  }
+
+  body {
+    font-family: 'Manrope', system-ui, sans-serif;
+    background: var(--base);
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .window {
+    width: 1024px;
+    height: 640px;
+    background: var(--base);
+    border-radius: 20px;
+    box-shadow:
+      12px 12px 24px var(--sh-dark),
+      -12px -12px 24px var(--sh-light);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Raised surface */
+  .raised {
+    box-shadow:
+      6px 6px 12px var(--sh-dark),
+      -6px -6px 12px var(--sh-light);
+    border-radius: 14px;
+  }
+  /* Inset surface */
+  .inset {
+    box-shadow:
+      inset 4px 4px 8px var(--sh-dark),
+      inset -4px -4px 8px var(--sh-light);
+    border-radius: 10px;
+  }
+
+  /* Titlebar */
+  .titlebar {
+    height: 48px;
+    background: var(--base);
+    box-shadow:
+      0 4px 8px var(--sh-dark),
+      0 -2px 4px var(--sh-light);
+    display: flex; align-items: center;
+    padding: 0 20px; gap: 14px;
+    flex-shrink: 0; z-index: 2;
+  }
+
+  .traffic-lights { display: flex; gap: 8px; align-items: center; }
+  .dot {
+    width: 13px; height: 13px; border-radius: 50%;
+    box-shadow: 2px 2px 4px var(--sh-dark), -1px -1px 3px var(--sh-light);
+    transition: box-shadow 0.15s;
+  }
+  .dot:hover { box-shadow: 1px 1px 3px var(--sh-dark), -1px -1px 2px var(--sh-light); }
+  .dot-red    { background: radial-gradient(circle at 35% 35%, #ff7f7a, #dc2626); }
+  .dot-yellow { background: radial-gradient(circle at 35% 35%, #ffe066, #ca8a04); }
+  .dot-green  { background: radial-gradient(circle at 35% 35%, #6ee7b7, #15803d); }
+
+  .app-title {
+    font-size: 13px; font-weight: 700; color: var(--text-hi);
+    flex: 1; text-align: center; letter-spacing: -0.01em;
+  }
+
+  .peer-pill {
+    font-size: 11px; font-weight: 600; color: var(--text-md);
+    background: var(--base);
+    padding: 4px 12px; border-radius: 20px;
+    box-shadow: 3px 3px 6px var(--sh-dark), -2px -2px 4px var(--sh-light);
+  }
+
+  .status-indicator {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; color: var(--accent);
+  }
+  .s-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px rgba(91,126,192,0.5);
+    animation: glow-neu 2s ease-in-out infinite;
+  }
+  @keyframes glow-neu {
+    0%, 100% { box-shadow: 0 0 6px rgba(91,126,192,0.5); }
+    50%       { box-shadow: 0 0 12px rgba(91,126,192,0.8); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .s-dot    { animation: none; }
+    .cta-neu  { transition: none; }
+    .bw-fill-neu { animation: none; }
+  }
+
+  /* Main */
+  .main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 228px 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 14px;
+    padding: 16px;
+    overflow: hidden;
+  }
+
+  .panel-neu {
+    background: var(--base);
+    border-radius: 16px;
+    box-shadow:
+      6px 6px 14px var(--sh-dark),
+      -6px -6px 14px var(--sh-light);
+    padding: 16px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .panel-devices { grid-row: 1 / 3; }
+
+  .neu-label {
+    font-size: 9.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-lo); margin-bottom: 12px;
+  }
+
+  /* Devices */
+  .dev-neu {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: 10px;
+    margin-bottom: 6px;
+    background: var(--base);
+    box-shadow:
+      inset 3px 3px 6px var(--sh-dark),
+      inset -3px -3px 6px var(--sh-light);
+    cursor: default; transition: box-shadow 0.15s;
+  }
+  .dev-neu:hover {
+    box-shadow:
+      inset 4px 4px 8px var(--sh-dark),
+      inset -4px -4px 8px var(--sh-light);
+  }
+
+  .neu-badge {
+    font-size: 9px; font-weight: 800; font-family: monospace;
+    padding: 2px 7px; border-radius: 6px; flex-shrink: 0;
+    background: var(--base);
+    box-shadow: 2px 2px 4px var(--sh-dark), -1px -1px 3px var(--sh-light);
+  }
+  .nb-in  { color: var(--accent); }
+  .nb-out { color: #7c5cc4; }
+
+  .dev-name-neu { font-size: 11.5px; font-weight: 600; color: var(--text-hi); }
+  .dev-spec-neu { font-size: 9.5px; color: var(--text-lo); margin-top: 1px; }
+
+  /* Peers */
+  .peer-neu {
+    background: var(--base);
+    border-radius: 12px;
+    box-shadow:
+      inset 3px 3px 7px var(--sh-dark),
+      inset -3px -3px 7px var(--sh-light);
+    padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .peer-top { display: flex; align-items: center; gap: 10px; }
+  .peer-av-neu {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: var(--base);
+    box-shadow: 4px 4px 8px var(--sh-dark), -3px -3px 6px var(--sh-light);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: var(--accent); flex-shrink: 0;
+  }
+  .peer-name-neu { font-size: 13px; font-weight: 700; color: var(--text-hi); }
+  .peer-ip-neu   { font-family: monospace; font-size: 10px; color: var(--text-lo); margin-top: 2px; }
+
+  .neu-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .neu-tag {
+    font-size: 10px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
+    background: var(--base);
+    box-shadow: 2px 2px 5px var(--sh-dark), -2px -2px 4px var(--sh-light);
+    color: var(--text-md);
+  }
+  .nt-trusted { color: #15803d; }
+  .nt-rtt     { color: var(--accent); }
+
+  /* Streams */
+  .stream-neu {
+    background: var(--base);
+    border-radius: 12px;
+    box-shadow:
+      inset 3px 3px 6px var(--sh-dark),
+      inset -3px -3px 6px var(--sh-light);
+    padding: 12px; margin-bottom: 10px;
+  }
+  .sn-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+  .sn-id {
+    font-family: monospace; font-size: 10px; font-weight: 700;
+    color: var(--accent);
+    background: var(--base);
+    box-shadow: 2px 2px 4px var(--sh-dark), -1px -1px 3px var(--sh-light);
+    padding: 2px 8px; border-radius: 6px; flex-shrink: 0; margin-top: 1px;
+  }
+  .sn-route { font-size: 12px; font-weight: 600; color: var(--text-hi); line-height: 1.4; }
+  .sn-route em { color: var(--accent); font-style: normal; }
+  .sn-stats { display: flex; gap: 12px; }
+  .sn-s { font-size: 10.5px; color: var(--text-md); }
+  .sn-s strong { color: var(--text-hi); font-weight: 700; }
+  .sn-warn { color: #b45309; }
+  .sn-warn strong { color: #92400e; }
+
+  .bw-neu {
+    height: 4px; border-radius: 2px; margin-top: 7px;
+    background: var(--base);
+    box-shadow: inset 1px 1px 3px var(--sh-dark), inset -1px -1px 2px var(--sh-light);
+    overflow: hidden;
+  }
+  .bw-fill-neu {
+    height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent), #7c5cc4);
+    background-size: 200% 100%;
+    animation: slide-neu 3s ease-in-out infinite;
+  }
+  @keyframes slide-neu {
+    0%, 100% { background-position: 0% 0; }
+    50%       { background-position: 100% 0; }
+  }
+
+  /* Footer */
+  .footer {
+    height: 52px;
+    background: var(--base);
+    box-shadow:
+      0 -4px 8px var(--sh-dark),
+      0 2px 4px var(--sh-light);
+    display: flex; align-items: center;
+    padding: 0 20px; gap: 10px;
+    flex-shrink: 0; z-index: 2;
+  }
+
+  .cta-neu {
+    background: var(--base); color: var(--accent);
+    border: none; border-radius: 10px;
+    padding: 9px 20px;
+    font-size: 13px; font-weight: 700; font-family: inherit;
+    box-shadow: 5px 5px 10px var(--sh-dark), -4px -4px 8px var(--sh-light);
+    cursor: pointer;
+    transition: box-shadow 0.15s;
+  }
+  .cta-neu:hover {
+    box-shadow: 7px 7px 14px var(--sh-dark), -5px -5px 10px var(--sh-light);
+  }
+  .cta-neu:active {
+    box-shadow: inset 4px 4px 8px var(--sh-dark), inset -4px -4px 8px var(--sh-light);
+  }
+
+  .sec-neu {
+    background: var(--base); color: var(--text-md);
+    border: none; border-radius: 8px;
+    padding: 7px 14px; font-size: 12px; font-weight: 600; font-family: inherit;
+    box-shadow: 3px 3px 6px var(--sh-dark), -2px -2px 5px var(--sh-light);
+    cursor: pointer; transition: box-shadow 0.15s;
+  }
+  .sec-neu:hover { box-shadow: 4px 4px 8px var(--sh-dark), -3px -3px 6px var(--sh-light); }
+  .sec-neu:active {
+    box-shadow: inset 2px 2px 4px var(--sh-dark), inset -2px -2px 4px var(--sh-light);
+  }
+
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic-lights">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-yellow"></div>
+      <div class="dot dot-green"></div>
+    </div>
+    <div class="app-title">AudioMirror</div>
+    <div class="peer-pill">alice</div>
+    <div class="status-indicator"><div class="s-dot"></div>connected</div>
+  </div>
+
+  <div class="main">
+    <!-- Devices -->
+    <div class="panel-neu panel-devices">
+      <div class="neu-label">Audio Devices</div>
+
+      <div class="dev-neu">
+        <span class="neu-badge nb-in">in:0</span>
+        <div>
+          <div class="dev-name-neu">BlackHole 2ch</div>
+          <div class="dev-spec-neu">2ch · 48kHz</div>
+        </div>
+      </div>
+      <div class="dev-neu">
+        <span class="neu-badge nb-in">in:1</span>
+        <div>
+          <div class="dev-name-neu">Microfone (MacBook Air)</div>
+          <div class="dev-spec-neu">1ch · 48kHz</div>
+        </div>
+      </div>
+      <div class="dev-neu">
+        <span class="neu-badge nb-out">out:0</span>
+        <div>
+          <div class="dev-name-neu">MCHOSE V9 PRO</div>
+          <div class="dev-spec-neu">2ch · 48kHz</div>
+        </div>
+      </div>
+      <div class="dev-neu">
+        <span class="neu-badge nb-out">out:1</span>
+        <div>
+          <div class="dev-name-neu">MacBook Speakers</div>
+          <div class="dev-spec-neu">2ch · 48kHz</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Peers -->
+    <div class="panel-neu">
+      <div class="neu-label">Peers</div>
+      <div class="peer-neu">
+        <div class="peer-top">
+          <div class="peer-av-neu">W</div>
+          <div>
+            <div class="peer-name-neu">windows</div>
+            <div class="peer-ip-neu">192.168.1.68:7001</div>
+          </div>
+        </div>
+        <div class="neu-tags">
+          <span class="neu-tag nt-trusted">trusted</span>
+          <span class="neu-tag nt-rtt">12ms</span>
+          <span class="neu-tag">v0.1.0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Streams -->
+    <div class="panel-neu">
+      <div class="neu-label">Active Streams</div>
+
+      <div class="stream-neu">
+        <div class="sn-head">
+          <span class="sn-id">00</span>
+          <div class="sn-route">BlackHole 2ch → <em>windows</em>:MCHOSE V9 PRO</div>
+        </div>
+        <div class="sn-stats">
+          <div class="sn-s"><strong>64 kbps</strong></div>
+          <div class="sn-s"><strong>0</strong> lost</div>
+          <div class="sn-s"><strong>12ms</strong> RTT</div>
+        </div>
+        <div class="bw-neu"><div class="bw-fill-neu" style="width:55%"></div></div>
+      </div>
+
+      <div class="stream-neu">
+        <div class="sn-head">
+          <span class="sn-id">01</span>
+          <div class="sn-route"><em>windows</em>:Microfone → MacBook Speakers</div>
+        </div>
+        <div class="sn-stats">
+          <div class="sn-s"><strong>64 kbps</strong></div>
+          <div class="sn-s sn-warn"><strong>3</strong> lost</div>
+          <div class="sn-s"><strong>14ms</strong> RTT</div>
+        </div>
+        <div class="bw-neu"><div class="bw-fill-neu" style="width:68%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="cta-neu">+ open stream</button>
+    <div class="spacer"></div>
+    <button class="sec-neu">settings</button>
+    <button class="sec-neu">quit</button>
+  </div>
+</div>
+</body>
+</html>

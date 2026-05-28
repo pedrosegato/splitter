@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1024">
+<title>AudioMirror — Tactile</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:    #007aff;
+    --blue-dk: #0063d1;
+    --blue-lt: #e8f1ff;
+    --surface: #ffffff;
+    --surface2: #f7f8fa;
+    --surface3: #eef0f3;
+    --text1:   #1c1c1e;
+    --text2:   #3c3c43;
+    --text3:   #6e6e73;
+    --border:  #e5e5ea;
+    --green:   #34c759;
+    --red:     #ff3b30;
+    --orange:  #ff9500;
+    --radius:  14px;
+  }
+
+  body {
+    font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+    background: linear-gradient(165deg, #f0f4f8 0%, #e8ecf0 40%, #f4f6f8 100%);
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .window {
+    width: 1024px;
+    height: 640px;
+    background: var(--surface);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow:
+      0 1px 1px rgba(0,0,0,0.05),
+      0 4px 12px rgba(0,0,0,0.08),
+      0 16px 40px rgba(0,0,0,0.1),
+      0 32px 64px rgba(0,0,0,0.06);
+    display: flex; flex-direction: column;
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+
+  /* Titlebar */
+  .titlebar {
+    height: 52px;
+    background: rgba(246,246,248,0.9);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 20px; gap: 12px;
+    flex-shrink: 0;
+    backdrop-filter: blur(20px);
+  }
+
+  .traffic-lights { display: flex; gap: 8px; align-items: center; }
+  .dot {
+    width: 13px; height: 13px; border-radius: 50%;
+    box-shadow: inset 0 -1px 1px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.1);
+    transition: filter 0.15s;
+  }
+  .dot:hover { filter: brightness(0.88); }
+  .dot-red    { background: radial-gradient(circle at 40% 35%, #ff7b72, #c5211b); }
+  .dot-yellow { background: radial-gradient(circle at 40% 35%, #ffd166, #c48a00); }
+  .dot-green  { background: radial-gradient(circle at 40% 35%, #7dffad, #1a8a3c); }
+
+  .title-area { flex: 1; text-align: center; }
+  .app-title {
+    font-size: 14px; font-weight: 600; color: var(--text1);
+    letter-spacing: -0.015em;
+  }
+  .app-sub { font-size: 11px; color: var(--text3); margin-top: 0; }
+
+  .peer-badge {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 4px 12px 4px 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .peer-av-sm {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--blue), #5856d6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: white;
+  }
+  .peer-name-sm { font-size: 12px; font-weight: 500; color: var(--text1); }
+
+  .conn-pill {
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(52,199,89,0.1); border: 1px solid rgba(52,199,89,0.2);
+    border-radius: 20px; padding: 4px 10px;
+  }
+  .conn-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 5px rgba(52,199,89,0.5);
+    animation: conn-pulse 2s ease-in-out infinite;
+  }
+  @keyframes conn-pulse {
+    0%, 100% { box-shadow: 0 0 5px rgba(52,199,89,0.5); }
+    50%       { box-shadow: 0 0 10px rgba(52,199,89,0.8); transform: scale(1.2); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .conn-dot  { animation: none; }
+    .cta-tact  { transition: none; }
+    .bw-tact   { animation: none; }
+  }
+  .conn-text { font-size: 11px; font-weight: 500; color: #1a6b30; }
+
+  /* Main */
+  .main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 228px 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 12px;
+    padding: 14px;
+    background: var(--surface2);
+    overflow: hidden;
+  }
+
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04);
+    border: 1px solid rgba(0,0,0,0.05);
+    padding: 16px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.08), 0 6px 20px rgba(0,0,0,0.06); }
+
+  .card-devices { grid-row: 1 / 3; }
+
+  .card-label {
+    font-size: 11px; font-weight: 600; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 12px; flex-shrink: 0;
+  }
+
+  /* Devices */
+  .dev-tact {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 10px;
+    border-radius: 10px; margin-bottom: 4px;
+    transition: background 0.12s;
+    cursor: default;
+  }
+  .dev-tact:hover { background: var(--surface2); }
+
+  .dev-icon {
+    width: 36px; height: 36px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 16px;
+    background: var(--surface2);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .dev-icon.in  { background: rgba(0,122,255,0.08); }
+  .dev-icon.out { background: rgba(88,86,214,0.08); }
+
+  .dev-info { flex: 1; min-width: 0; }
+  .dev-name-t { font-size: 13px; font-weight: 500; color: var(--text1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dev-id-t {
+    font-size: 10px; font-weight: 600; color: var(--blue);
+    font-family: 'SF Mono', monospace; margin-bottom: 1px;
+  }
+  .dev-spec-t { font-size: 11px; color: var(--text3); }
+
+  .dev-dot-t { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+
+  /* Peers */
+  .peer-card {
+    background: linear-gradient(135deg, rgba(0,122,255,0.04) 0%, rgba(88,86,214,0.03) 100%);
+    border: 1px solid rgba(0,122,255,0.12);
+    border-radius: 11px; padding: 12px;
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+  .peer-av-tact {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--blue), #5856d6);
+    box-shadow: 0 3px 8px rgba(0,122,255,0.25);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: white; flex-shrink: 0;
+  }
+  .peer-info-t { flex: 1; }
+  .peer-host-t { font-size: 15px; font-weight: 600; color: var(--text1); margin-bottom: 2px; }
+  .peer-ip-t   { font-family: 'SF Mono', monospace; font-size: 10.5px; color: var(--text3); margin-bottom: 7px; }
+  .peer-tags-t { display: flex; gap: 5px; flex-wrap: wrap; }
+  .tag-t {
+    font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 20px;
+    background: var(--surface2); color: var(--text2);
+    border: 1px solid var(--border);
+  }
+  .tag-trusted { background: rgba(52,199,89,0.1); color: #1a6b30; border-color: rgba(52,199,89,0.25); }
+  .tag-rtt     { background: var(--blue-lt); color: var(--blue); border-color: rgba(0,122,255,0.2); }
+
+  /* Streams */
+  .stream-tact {
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 8px;
+    transition: box-shadow 0.15s;
+  }
+  .stream-tact:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .st-top { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+  .st-num {
+    font-family: 'SF Mono', monospace; font-size: 11px; font-weight: 600;
+    color: var(--blue); background: var(--blue-lt); border-radius: 6px;
+    padding: 2px 8px; flex-shrink: 0; margin-top: 1px;
+  }
+  .st-route { font-size: 13px; font-weight: 500; color: var(--text1); line-height: 1.4; }
+  .st-route em { color: var(--blue); font-style: normal; }
+
+  .st-stats { display: flex; gap: 14px; margin-bottom: 7px; }
+  .st-s { font-size: 11.5px; color: var(--text3); }
+  .st-s strong { color: var(--text1); font-weight: 600; }
+  .st-warn { color: var(--orange); }
+  .st-warn strong { color: var(--red); }
+
+  .bw-tact {
+    height: 4px; border-radius: 2px; background: var(--surface3); overflow: hidden;
+  }
+  .bw-fill-t {
+    height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, var(--blue) 0%, #5856d6 100%);
+    animation: bw-breathe 3s ease-in-out infinite;
+  }
+  .bw-fill-t2 { animation-delay: 0.5s; }
+  @keyframes bw-breathe {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.6; }
+  }
+
+  /* Footer */
+  .footer {
+    height: 56px;
+    background: rgba(246,246,248,0.95);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 20px; gap: 10px;
+    flex-shrink: 0;
+    backdrop-filter: blur(20px);
+  }
+
+  .cta-tact {
+    background: var(--blue); color: white;
+    border: none; border-radius: 10px;
+    padding: 9px 20px;
+    font-size: 13px; font-weight: 600;
+    font-family: inherit; letter-spacing: -0.01em;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,122,255,0.3), 0 1px 2px rgba(0,122,255,0.2);
+    transition: transform 0.12s, box-shadow 0.12s;
+  }
+  .cta-tact:hover  { transform: scale(1.02); box-shadow: 0 4px 12px rgba(0,122,255,0.35); background: var(--blue-dk); }
+  .cta-tact:active { transform: scale(0.97); }
+
+  .sec-tact {
+    background: var(--surface); color: var(--text2);
+    border: 1px solid var(--border); border-radius: 9px;
+    padding: 8px 15px; font-size: 12px; font-weight: 500; font-family: inherit;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    transition: background 0.12s, box-shadow 0.12s;
+  }
+  .sec-tact:hover { background: var(--surface2); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic-lights">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-yellow"></div>
+      <div class="dot dot-green"></div>
+    </div>
+    <div class="title-area">
+      <div class="app-title">AudioMirror</div>
+    </div>
+    <div class="peer-badge">
+      <div class="peer-av-sm">A</div>
+      <div class="peer-name-sm">alice</div>
+    </div>
+    <div class="conn-pill">
+      <div class="conn-dot"></div>
+      <span class="conn-text">Connected</span>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- Devices -->
+    <div class="card card-devices">
+      <div class="card-label">Audio Devices</div>
+
+      <div class="dev-tact">
+        <div class="dev-icon in">🎤</div>
+        <div class="dev-info">
+          <div class="dev-id-t">in:0</div>
+          <div class="dev-name-t">BlackHole 2ch</div>
+          <div class="dev-spec-t">2ch · 48kHz</div>
+        </div>
+        <div class="dev-dot-t"></div>
+      </div>
+
+      <div class="dev-tact">
+        <div class="dev-icon in">🎙</div>
+        <div class="dev-info">
+          <div class="dev-id-t">in:1</div>
+          <div class="dev-name-t">Microfone (MacBook Air)</div>
+          <div class="dev-spec-t">1ch · 48kHz</div>
+        </div>
+        <div class="dev-dot-t"></div>
+      </div>
+
+      <div class="dev-tact">
+        <div class="dev-icon out">🔊</div>
+        <div class="dev-info">
+          <div class="dev-id-t">out:0</div>
+          <div class="dev-name-t">MCHOSE V9 PRO</div>
+          <div class="dev-spec-t">2ch · 48kHz</div>
+        </div>
+        <div class="dev-dot-t"></div>
+      </div>
+
+      <div class="dev-tact">
+        <div class="dev-icon out">🔈</div>
+        <div class="dev-info">
+          <div class="dev-id-t">out:1</div>
+          <div class="dev-name-t">MacBook Speakers</div>
+          <div class="dev-spec-t">2ch · 48kHz</div>
+        </div>
+        <div class="dev-dot-t"></div>
+      </div>
+    </div>
+
+    <!-- Peers -->
+    <div class="card">
+      <div class="card-label">Peers</div>
+      <div class="peer-card">
+        <div class="peer-av-tact">W</div>
+        <div class="peer-info-t">
+          <div class="peer-host-t">windows</div>
+          <div class="peer-ip-t">192.168.1.68:7001</div>
+          <div class="peer-tags-t">
+            <span class="tag-t tag-trusted">trusted</span>
+            <span class="tag-t tag-rtt">12ms</span>
+            <span class="tag-t">v0.1.0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Streams -->
+    <div class="card">
+      <div class="card-label">Active Streams</div>
+
+      <div class="stream-tact">
+        <div class="st-top">
+          <span class="st-num">00</span>
+          <div class="st-route">BlackHole 2ch → <em>windows</em>:MCHOSE V9 PRO</div>
+        </div>
+        <div class="st-stats">
+          <div class="st-s"><strong>64 kbps</strong></div>
+          <div class="st-s"><strong>0</strong> lost</div>
+          <div class="st-s"><strong>12ms</strong> RTT</div>
+        </div>
+        <div class="bw-tact"><div class="bw-fill-t" style="width:55%"></div></div>
+      </div>
+
+      <div class="stream-tact">
+        <div class="st-top">
+          <span class="st-num">01</span>
+          <div class="st-route"><em>windows</em>:Microfone → MacBook Speakers</div>
+        </div>
+        <div class="st-stats">
+          <div class="st-s"><strong>64 kbps</strong></div>
+          <div class="st-s st-warn"><strong>3</strong> lost</div>
+          <div class="st-s"><strong>14ms</strong> RTT</div>
+        </div>
+        <div class="bw-tact"><div class="bw-fill-t bw-fill-t2" style="width:68%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="cta-tact">+ open stream</button>
+    <div class="spacer"></div>
+    <button class="sec-tact">settings</button>
+    <button class="sec-tact">quit</button>
+  </div>
+</div>
+</body>
+</html>

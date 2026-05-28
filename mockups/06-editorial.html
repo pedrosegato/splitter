@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1024">
+<title>AudioMirror — Editorial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,600;1,8..60,300&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #f8fafc;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    color: #0f172a;
+  }
+
+  .window {
+    width: 1024px;
+    height: 640px;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 32px rgba(0,0,0,0.07), 0 32px 64px rgba(0,0,0,0.04);
+    border: 1px solid #e2e8f0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Titlebar */
+  .titlebar {
+    height: 46px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex; align-items: center;
+    padding: 0 20px; gap: 14px;
+    flex-shrink: 0;
+  }
+
+  .traffic-lights { display: flex; gap: 7px; align-items: center; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; transition: filter 0.15s; }
+  .dot:hover { filter: brightness(0.82); }
+  .dot-red    { background: #ff5f57; }
+  .dot-yellow { background: #febc2e; }
+  .dot-green  { background: #28c840; }
+
+  .app-name {
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 15px; font-weight: 600; color: #0f172a;
+    letter-spacing: -0.01em; flex: 1; text-align: center;
+    font-style: italic;
+  }
+
+  .peer-text {
+    font-size: 11px; font-weight: 500; color: #64748b;
+  }
+
+  .status-line {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 400; color: #64748b;
+  }
+  .s-circle {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #7c3aed;
+    animation: fade-in-out 2.4s ease-in-out infinite;
+  }
+  @keyframes fade-in-out {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.25; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .s-circle  { animation: none; }
+    .cta-edit  { transition: none; }
+    .bw-line   { animation: none; }
+  }
+
+  /* Main */
+  .main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1px 220px;
+    overflow: hidden;
+  }
+
+  .divider-v {
+    background: #e2e8f0;
+    width: 1px;
+  }
+
+  .left-col {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  .right-col {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Sections */
+  .section {
+    padding: 18px 22px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .section:last-child { border-bottom: none; flex: 1; }
+
+  .section-title {
+    font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: #94a3b8; margin-bottom: 14px;
+  }
+
+  /* Devices — table-ish layout */
+  .dev-table { display: flex; flex-direction: column; gap: 0; }
+  .dev-row {
+    display: grid;
+    grid-template-columns: 52px 1fr 70px;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background 0.1s;
+    cursor: default;
+  }
+  .dev-row:last-child { border-bottom: none; }
+  .dev-row:hover { background: #fafafa; margin: 0 -22px; padding: 6px 22px; }
+
+  .dev-code {
+    font-family: 'SF Mono', 'Fira Mono', monospace;
+    font-size: 10px; font-weight: 500; color: #7c3aed;
+  }
+  .dev-n { font-size: 12.5px; font-weight: 400; color: #0f172a; }
+  .dev-sp { font-size: 10.5px; color: #94a3b8; text-align: right; }
+
+  /* Streams */
+  .stream-row {
+    padding: 10px 0;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: default;
+    transition: padding 0.12s;
+  }
+  .stream-row:last-child { border-bottom: none; }
+  .stream-row:hover { padding-left: 4px; }
+
+  .sr-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+  .sr-id {
+    font-family: 'SF Mono', monospace; font-size: 10px;
+    font-weight: 600; color: #7c3aed;
+  }
+  .sr-route { font-size: 12.5px; font-weight: 500; color: #0f172a; line-height: 1.3; }
+  .sr-route em { color: #7c3aed; font-style: normal; }
+  .sr-stats { display: flex; gap: 16px; }
+  .sr-s { font-size: 11px; color: #64748b; }
+  .sr-s strong { color: #0f172a; font-weight: 600; }
+  .warn-e { color: #ea580c; }
+  .warn-e strong { color: #c2410c; }
+
+  .bw-line-wrap { margin-top: 6px; height: 1px; background: #f1f5f9; overflow: hidden; }
+  .bw-line {
+    height: 100%; background: #7c3aed;
+    animation: extend 3s ease-in-out infinite;
+  }
+  @keyframes extend {
+    0%, 100% { width: 50%; margin-left: 0; }
+    50%       { width: 65%; margin-left: 5%; }
+  }
+
+  /* Peer side */
+  .peer-section { padding: 18px 18px 14px; border-bottom: 1px solid #e2e8f0; }
+  .peer-sect-title {
+    font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: #94a3b8; margin-bottom: 12px;
+  }
+
+  .peer-entry { display: flex; flex-direction: column; gap: 6px; }
+  .peer-host-e {
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 16px; font-weight: 600; color: #0f172a;
+    letter-spacing: -0.01em;
+  }
+  .peer-ip-e {
+    font-family: 'SF Mono', monospace; font-size: 10.5px; color: #94a3b8;
+  }
+  .peer-pills-e { display: flex; gap: 5px; flex-wrap: wrap; }
+  .pill-e {
+    font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 3px;
+    color: #475569; background: #f8fafc; border: 1px solid #e2e8f0;
+  }
+  .pill-trust-e { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; }
+  .pill-rtt-e   { color: #7c3aed; border-color: #ddd6fe; background: #fdf4ff; }
+
+  .meta-box { padding: 16px 18px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .meta-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .meta-k { font-size: 11px; color: #94a3b8; font-weight: 400; }
+  .meta-v { font-size: 12px; font-weight: 600; color: #0f172a; }
+  .meta-divider { height: 1px; background: #f1f5f9; }
+
+  /* Footer */
+  .footer {
+    height: 50px;
+    border-top: 1px solid #e2e8f0;
+    display: flex; align-items: center;
+    padding: 0 22px; gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .cta-edit {
+    background: #7c3aed; color: white;
+    border: none; border-radius: 5px;
+    padding: 7px 16px; font-size: 12px; font-weight: 600; font-family: inherit;
+    cursor: pointer;
+    transition: transform 0.12s, background 0.12s;
+  }
+  .cta-edit:hover  { transform: scale(1.02); background: #6d28d9; }
+  .cta-edit:active { transform: scale(0.98); }
+
+  .sec-edit {
+    background: none; color: #64748b;
+    border: 1px solid #e2e8f0; border-radius: 5px;
+    padding: 6px 12px; font-size: 12px; font-weight: 500; font-family: inherit;
+    cursor: pointer; transition: border-color 0.12s, color 0.12s;
+  }
+  .sec-edit:hover { border-color: #94a3b8; color: #0f172a; }
+
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic-lights">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-yellow"></div>
+      <div class="dot dot-green"></div>
+    </div>
+    <div class="app-name">AudioMirror</div>
+    <div class="peer-text">alice</div>
+    <div class="status-line"><div class="s-circle"></div>connected</div>
+  </div>
+
+  <div class="main">
+    <div class="left-col">
+      <!-- Devices -->
+      <div class="section">
+        <div class="section-title">Devices</div>
+        <div class="dev-table">
+          <div class="dev-row">
+            <span class="dev-code">in:0</span>
+            <div><div class="dev-n">BlackHole 2ch</div></div>
+            <span class="dev-sp">2ch · 48kHz</span>
+          </div>
+          <div class="dev-row">
+            <span class="dev-code">in:1</span>
+            <div><div class="dev-n">Microfone (MacBook Air)</div></div>
+            <span class="dev-sp">1ch · 48kHz</span>
+          </div>
+          <div class="dev-row">
+            <span class="dev-code">out:0</span>
+            <div><div class="dev-n">MCHOSE V9 PRO</div></div>
+            <span class="dev-sp">2ch · 48kHz</span>
+          </div>
+          <div class="dev-row">
+            <span class="dev-code">out:1</span>
+            <div><div class="dev-n">MacBook Speakers</div></div>
+            <span class="dev-sp">2ch · 48kHz</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Streams -->
+      <div class="section">
+        <div class="section-title">Active Streams</div>
+        <div class="stream-row">
+          <div class="sr-top">
+            <span class="sr-id">00</span>
+            <div class="sr-route">BlackHole 2ch → <em>windows</em>:MCHOSE V9 PRO</div>
+          </div>
+          <div class="sr-stats">
+            <div class="sr-s"><strong>64 kbps</strong></div>
+            <div class="sr-s"><strong>0</strong> lost</div>
+            <div class="sr-s"><strong>12ms</strong> RTT</div>
+          </div>
+          <div class="bw-line-wrap"><div class="bw-line" style="width:55%"></div></div>
+        </div>
+        <div class="stream-row">
+          <div class="sr-top">
+            <span class="sr-id">01</span>
+            <div class="sr-route"><em>windows</em>:Microfone → MacBook Speakers</div>
+          </div>
+          <div class="sr-stats">
+            <div class="sr-s"><strong>64 kbps</strong></div>
+            <div class="sr-s warn-e"><strong>3</strong> lost</div>
+            <div class="sr-s"><strong>14ms</strong> RTT</div>
+          </div>
+          <div class="bw-line-wrap"><div class="bw-line" style="width:68%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider-v"></div>
+
+    <div class="right-col">
+      <!-- Peers -->
+      <div class="peer-section">
+        <div class="peer-sect-title">Peers</div>
+        <div class="peer-entry">
+          <div class="peer-host-e">windows</div>
+          <div class="peer-ip-e">192.168.1.68:7001</div>
+          <div class="peer-pills-e">
+            <span class="pill-e pill-trust-e">trusted</span>
+            <span class="pill-e pill-rtt-e">12ms RTT</span>
+            <span class="pill-e">v0.1.0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Session meta -->
+      <div class="meta-box">
+        <div class="meta-row">
+          <span class="meta-k">Streams</span>
+          <span class="meta-v">2 active</span>
+        </div>
+        <div class="meta-divider"></div>
+        <div class="meta-row">
+          <span class="meta-k">Codec</span>
+          <span class="meta-v">Opus</span>
+        </div>
+        <div class="meta-divider"></div>
+        <div class="meta-row">
+          <span class="meta-k">Avg RTT</span>
+          <span class="meta-v" style="color:#7c3aed">13ms</span>
+        </div>
+        <div class="meta-divider"></div>
+        <div class="meta-row">
+          <span class="meta-k">Lost pkts</span>
+          <span class="meta-v" style="color:#ea580c">3</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="cta-edit">+ open stream</button>
+    <div class="spacer"></div>
+    <button class="sec-edit">settings</button>
+    <button class="sec-edit">quit</button>
+  </div>
+</div>
+</body>
+</html>

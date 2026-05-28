@@ -57,6 +57,24 @@ pub enum NetError {
 
     #[error("udp io: {0}")]
     UdpIo(#[from] std::io::Error),
+
+    #[error("handshake failed: {reason}")]
+    Handshake { reason: String },
+
+    #[error("peer {peer_id} rejected: {reason}")]
+    PeerRejected { peer_id: String, reason: String },
+
+    #[error("signaling protocol error: {reason}")]
+    SignalingProtocol { reason: String },
+
+    #[error("timeout waiting for {what} after {millis}ms")]
+    Timeout { what: String, millis: u64 },
+
+    #[error("mdns: {reason}")]
+    Mdns { reason: String },
+
+    #[error("config io: {0}")]
+    ConfigIo(String),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -164,5 +182,52 @@ mod tests {
         let msg = e.to_string();
         assert!(msg.contains("Screen Recording"));
         assert!(msg.contains("System Settings"));
+    }
+
+    #[test]
+    fn net_error_handshake_display_mentions_peer() {
+        let e = NetError::Handshake {
+            reason: "version mismatch".into(),
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("handshake"));
+        assert!(msg.contains("version mismatch"));
+    }
+
+    #[test]
+    fn net_error_peer_rejected_display() {
+        let e = NetError::PeerRejected {
+            peer_id: "abc".into(),
+            reason: "untrusted".into(),
+        };
+        assert!(e.to_string().contains("abc"));
+        assert!(e.to_string().contains("untrusted"));
+    }
+
+    #[test]
+    fn net_error_signaling_protocol_display() {
+        let e = NetError::SignalingProtocol {
+            reason: "unknown type".into(),
+        };
+        assert!(e.to_string().contains("signaling"));
+    }
+
+    #[test]
+    fn net_error_timeout_display() {
+        let e = NetError::Timeout {
+            what: "hello_ack".into(),
+            millis: 5_000,
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("hello_ack"));
+        assert!(msg.contains("5000"));
+    }
+
+    #[test]
+    fn net_error_config_io_propagates_io() {
+        fn inner() -> Result<(), NetError> {
+            Err(NetError::from(std::io::Error::other("disk full")))
+        }
+        assert!(matches!(inner().unwrap_err(), NetError::UdpIo(_)));
     }
 }

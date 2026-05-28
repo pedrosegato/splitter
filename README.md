@@ -21,7 +21,7 @@ cargo run -p audiomirror-cli -- loop --input <id> --output <id>
 
 AudioMirror can mirror your desktop audio (not just a microphone) between two computers.
 
-````
+```
 cargo run -p audiomirror-cli -- loop --input ignored --output <output id> --source system
 cargo run -p audiomirror-cli -- send --input ignored --addr <ip>:5004 --source system
 ```
@@ -31,4 +31,3 @@ cargo run -p audiomirror-cli -- send --input ignored --addr <ip>:5004 --source s
 **Windows:** WASAPI loopback runs automatically; no extra setup.
 
 **Linux:** Any PulseAudio or PipeWire `.monitor` source is picked up automatically.
-````

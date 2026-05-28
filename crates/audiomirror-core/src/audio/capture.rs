@@ -68,11 +68,13 @@ impl CaptureHandle {
         producer: RingProducer,
         frame_notify: Arc<Notify>,
     ) -> Result<Self, AudioError> {
-        let supported = device
-            .default_input_config()
-            .map_err(|e| AudioError::BuildStream {
-                source: Box::new(e),
-            })?;
+        let supported = device.default_input_config().or_else(|_| {
+            device
+                .default_output_config()
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })
+        })?;
         let channels = supported.channels();
         let sample_rate = supported.sample_rate().0;
         let sample_format = supported.sample_format();

@@ -162,10 +162,7 @@ impl CaptureHandle {
 }
 
 fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
-    let target_name = device_id
-        .splitn(3, ':')
-        .nth(2)
-        .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))?;
+    let target_name = device_id.splitn(3, ':').nth(2).unwrap_or(device_id);
     let host = cpal::default_host();
     host.input_devices()
         .map_err(|e| AudioError::BuildStream {

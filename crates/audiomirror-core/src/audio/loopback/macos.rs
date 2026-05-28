@@ -12,6 +12,7 @@ use screencapturekit::{
         output_trait::SCStreamOutputTrait, output_type::SCStreamOutputType, sc_stream::SCStream,
     },
 };
+use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 pub struct MacosLoopbackHandle {
@@ -43,19 +44,20 @@ impl SCStreamOutputTrait for AudioHandler {
         let mut mono_buf = [0f32; 4096];
         let mut mono_len = 0usize;
 
+        // SCK with channel_count=2 emits interleaved single-buffer ABL; planar would mis-downmix here.
         for buf in abl.iter() {
             let channels = buf.number_channels as usize;
             if channels == 0 {
                 continue;
             }
             let bytes = buf.data();
-            if bytes.len() % (4 * channels) != 0 {
+            if bytes.len() % (size_of::<f32>() * channels) != 0 {
                 continue;
             }
-            let frame_count = bytes.len() / (4 * channels);
+            let frame_count = bytes.len() / (size_of::<f32>() * channels);
 
-            // Reinterpret bytes as f32 samples (interleaved).
-            // SAFETY: SCK always delivers LPCM float32 for audio; bytes are 4-byte aligned.
+            // SAFETY: CoreAudio always allocates AudioBuffer.mData on ≥4-byte boundaries for
+            // Float32 LPCM (CoreAudioTypes.h); SCK guarantees Float32 LPCM for audio output.
             let samples: &[f32] = unsafe {
                 std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), frame_count * channels)
             };

@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
     #[cfg(target_os = "macos")]
     add_swift_rpath();
 }

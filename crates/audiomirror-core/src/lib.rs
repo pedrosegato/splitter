@@ -5,5 +5,8 @@ pub mod net;
 
 pub use error::CoreError;
 
+#[cfg(target_os = "macos")]
+pub use audio::loopback::MacosLoopbackHandle;
+
 pub const FRAME_SAMPLES: usize = 960;
 pub const SAMPLE_RATE: u32 = 48_000;

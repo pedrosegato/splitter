@@ -1,3 +1,4 @@
+use crate::Source;
 use audiomirror_core::audio::capture::CaptureHandle;
 use audiomirror_core::audio::codec::OpusEncoder;
 use audiomirror_core::audio::ring::AudioRing;
@@ -10,15 +11,40 @@ use std::str::FromStr;
 use std::time::Instant;
 use tokio::net::UdpSocket;
 
+#[cfg(target_os = "macos")]
+use audiomirror_core::MacosLoopbackHandle;
+
+#[allow(dead_code)]
+enum CaptureGuard {
+    Mic(CaptureHandle),
+    #[cfg(target_os = "macos")]
+    MacSystem(MacosLoopbackHandle),
+    #[cfg(not(target_os = "macos"))]
+    Loopback(CaptureHandle),
+}
+
 pub(crate) async fn run(
     input: &str,
     addr: &str,
     stream_id: u8,
     bitrate: i32,
+    source: Source,
 ) -> anyhow::Result<()> {
     let dest: SocketAddr = SocketAddr::from_str(addr)?;
     let (producer, mut consumer) = AudioRing::new(9_600);
-    let _capture = CaptureHandle::start(input, producer)?;
+    let _capture = match source {
+        Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, producer)?),
+        Source::System => {
+            #[cfg(target_os = "macos")]
+            {
+                CaptureGuard::MacSystem(MacosLoopbackHandle::start(producer)?)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                CaptureGuard::Loopback(CaptureHandle::start_loopback(producer)?)
+            }
+        }
+    };
 
     let sock = make_udp_socket(SocketAddr::from(([0, 0, 0, 0], 0)))?;
     tracing::info!("sending stream_id={stream_id} to {dest} at {bitrate} bps");
@@ -63,4 +89,13 @@ fn make_udp_socket(bind: SocketAddr) -> anyhow::Result<UdpSocket> {
     sock.set_nonblocking(true)?;
     let std_sock: std::net::UdpSocket = sock.into();
     Ok(UdpSocket::from_std(std_sock)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn capture_guard_variants_compile() {
+        fn _accept(_g: CaptureGuard) {}
+    }
 }

@@ -28,6 +28,8 @@ enum Cmd {
         stream_id: u8,
         #[arg(long, default_value_t = 64_000)]
         bitrate: i32,
+        #[arg(long, value_enum, default_value_t = Source::Mic)]
+        source: Source,
     },
 
     Recv {
@@ -62,7 +64,8 @@ async fn main() -> anyhow::Result<()> {
             addr,
             stream_id,
             bitrate,
-        } => commands::send::run(&input, &addr, stream_id, bitrate).await,
+            source,
+        } => commands::send::run(&input, &addr, stream_id, bitrate, source).await,
         Cmd::Recv { output, bind } => commands::recv::run(&output, &bind).await,
         Cmd::Loop {
             input,

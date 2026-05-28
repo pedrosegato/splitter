@@ -1,7 +1,7 @@
 use super::stream_repl;
 use audiomirror_core::audio::devices::{list_devices, DeviceKind};
 use audiomirror_core::net::device_watcher;
-use audiomirror_core::net::discovery::{Discovery, DiscoveryEvent};
+use audiomirror_core::net::discovery::{DiscoveredPeer, Discovery, DiscoveryEvent};
 use audiomirror_core::net::signaling::{
     connect_to_peer, server::accept_pending, server::SignalingServer, CodecParams, Endpoint,
     PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
@@ -21,6 +21,30 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+fn short(u: &Uuid) -> String {
+    u.to_string().chars().take(8).collect()
+}
+
+async fn peer_display_name(
+    peer_id: &Uuid,
+    discovered: &Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
+    trust: &Arc<RwLock<TrustStore>>,
+) -> String {
+    {
+        let map = discovered.read().await;
+        if let Some(p) = map.values().find(|p| p.peer_id == peer_id.to_string()) {
+            return p.peer_name.clone();
+        }
+    }
+    {
+        let t = trust.read().await;
+        if let Some(p) = t.peer_for(peer_id) {
+            return p.peer_name.clone();
+        }
+    }
+    short(peer_id)
+}
 
 fn pick_default_output_device_id() -> Option<String> {
     list_devices()
@@ -130,14 +154,26 @@ pub(crate) async fn run(
         let mut conn_est_rx = server.connection_established_tx.subscribe();
         let conns = server.connections.clone();
         let registry = stream_registry.clone();
+        let disc_clone = discovered.clone();
+        let trust_clone = trust.clone();
+        let sessions_clone = sessions.clone();
         tokio::spawn(async move {
             while let Ok(peer_id) = conn_est_rx.recv().await {
+                let name = peer_display_name(&peer_id, &disc_clone, &trust_clone).await;
+                #[allow(clippy::print_stdout)]
+                {
+                    println!(">> {name} connected (peer_id {})", short(&peer_id));
+                }
                 let guard = conns.read().await;
                 if let Some(conn) = guard.get(&peer_id) {
                     spawn_stream_open_acceptor(
                         conn.tx.clone(),
                         conn.events.subscribe(),
                         registry.clone(),
+                        peer_id,
+                        disc_clone.clone(),
+                        trust_clone.clone(),
+                        sessions_clone.clone(),
                     );
                 }
             }
@@ -457,6 +493,10 @@ async fn handle_line(
                     outcome.handle.tx.clone(),
                     outcome.handle.events.subscribe(),
                     stream_registry.clone(),
+                    peer_uuid,
+                    discovered.clone(),
+                    trust.clone(),
+                    sessions.clone(),
                 );
                 let mut events_rx = outcome.handle.events.subscribe();
                 outgoing_connections
@@ -469,7 +509,6 @@ async fn handle_line(
                         match events_rx.recv().await {
                             Ok(PeerEvent::Disconnected { .. }) | Err(_) => {
                                 map.write().await.remove(&peer_uuid);
-                                tracing::info!("outgoing connection to {peer_uuid} removed");
                                 break;
                             }
                             Ok(_) => {}
@@ -573,73 +612,145 @@ fn spawn_stream_open_acceptor(
     conn_tx: tokio::sync::mpsc::Sender<SignalingMessage>,
     mut events: tokio::sync::broadcast::Receiver<PeerEvent>,
     registry: Arc<StreamRegistry>,
+    peer_id: Uuid,
+    discovered: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
+    trust: Arc<RwLock<TrustStore>>,
+    sessions: Arc<SessionManager>,
 ) {
     let default_output =
         pick_default_output_device_id().unwrap_or_else(|| "Output:0:default".into());
     tokio::spawn(async move {
-        while let Ok(PeerEvent::Message(msg)) = events.recv().await {
-            if let SignalingMessage::StreamOpen {
-                session_id,
-                stream_id,
-                source,
-                sink,
-                codec,
-                ..
-            } = msg
-            {
-                let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
-                    continue;
-                };
-                let route = StreamRoute {
-                    source: Endpoint {
-                        peer_id: source.peer_id.clone(),
-                        device_id: source.device_id.clone(),
-                    },
-                    sink: Endpoint {
-                        peer_id: sink.peer_id.clone(),
-                        device_id: sink.device_id.clone(),
-                    },
-                    codec: CodecParams {
-                        name: codec.name.clone(),
-                        bitrate: codec.bitrate,
-                        frame_ms: codec.frame_ms,
-                    },
-                    volume: 1.0,
-                };
-                let chosen_output = if sink.device_id == "default" {
-                    default_output.clone()
-                } else {
-                    sink.device_id.clone()
-                };
-                match open_stream_as_sink(
-                    registry.clone(),
-                    sid_uuid,
-                    stream_id,
-                    route,
-                    chosen_output,
-                )
-                .await
-                {
-                    Ok(port) => {
-                        let _ = conn_tx
-                            .send(SignalingMessage::StreamOpenAck {
-                                stream_id,
-                                accepted: true,
-                                udp_port: Some(port),
-                            })
+        loop {
+            match events.recv().await {
+                Ok(PeerEvent::Message(msg)) => match msg {
+                    SignalingMessage::SessionRequest {
+                        session_id,
+                        requested_by,
+                    } => {
+                        let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+                            continue;
+                        };
+                        let Ok(requester_uuid) = Uuid::parse_str(&requested_by) else {
+                            continue;
+                        };
+                        let _ = sessions
+                            .register_incoming(sid_uuid, peer_id, requester_uuid)
                             .await;
+                        let _ = sessions.accept(&sid_uuid).await;
+                        let name = peer_display_name(&peer_id, &discovered, &trust).await;
+                        #[allow(clippy::print_stdout)]
+                        {
+                            println!(">> {name} opened session {}", short(&sid_uuid));
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!("stream_open accept failed: {e}");
-                        let _ = conn_tx
-                            .send(SignalingMessage::StreamOpenAck {
-                                stream_id,
-                                accepted: false,
-                                udp_port: None,
-                            })
-                            .await;
+                    SignalingMessage::StreamOpen {
+                        session_id,
+                        stream_id,
+                        source,
+                        sink,
+                        codec,
+                        ..
+                    } => {
+                        let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+                            continue;
+                        };
+                        let route = StreamRoute {
+                            source: Endpoint {
+                                peer_id: source.peer_id.clone(),
+                                device_id: source.device_id.clone(),
+                            },
+                            sink: Endpoint {
+                                peer_id: sink.peer_id.clone(),
+                                device_id: sink.device_id.clone(),
+                            },
+                            codec: CodecParams {
+                                name: codec.name.clone(),
+                                bitrate: codec.bitrate,
+                                frame_ms: codec.frame_ms,
+                            },
+                            volume: 1.0,
+                        };
+                        let chosen_output = if sink.device_id == "default" {
+                            default_output.clone()
+                        } else {
+                            sink.device_id.clone()
+                        };
+                        match open_stream_as_sink(
+                            registry.clone(),
+                            sid_uuid,
+                            stream_id,
+                            route,
+                            chosen_output.clone(),
+                        )
+                        .await
+                        {
+                            Ok(port) => {
+                                let _ = conn_tx
+                                    .send(SignalingMessage::StreamOpenAck {
+                                        stream_id,
+                                        accepted: true,
+                                        udp_port: Some(port),
+                                    })
+                                    .await;
+                                let name = peer_display_name(&peer_id, &discovered, &trust).await;
+                                #[allow(clippy::print_stdout)]
+                                {
+                                    println!(
+                                            ">> {name} opened stream {stream_id} from {} \u{2192} local {chosen_output}",
+                                            source.device_id
+                                        );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("stream_open accept failed: {e}");
+                                let _ = conn_tx
+                                    .send(SignalingMessage::StreamOpenAck {
+                                        stream_id,
+                                        accepted: false,
+                                        udp_port: None,
+                                    })
+                                    .await;
+                            }
+                        }
                     }
+                    SignalingMessage::StreamControl {
+                        stream_id,
+                        action,
+                        volume,
+                    } => {
+                        let name = peer_display_name(&peer_id, &discovered, &trust).await;
+                        #[allow(clippy::print_stdout)]
+                        {
+                            match action {
+                                StreamAction::Close => {
+                                    println!(">> {name} closed stream {stream_id}");
+                                }
+                                StreamAction::Pause => {
+                                    println!(">> {name} paused stream {stream_id}");
+                                }
+                                StreamAction::Resume => {
+                                    println!(">> {name} resumed stream {stream_id}");
+                                }
+                                StreamAction::SetVolume => {
+                                    let pct =
+                                        volume.map(|v| (v * 100.0).round() as u32).unwrap_or(100);
+                                    println!(">> {name} set stream {stream_id} volume to {pct}%");
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                Ok(PeerEvent::Disconnected { reason }) => {
+                    let name = peer_display_name(&peer_id, &discovered, &trust).await;
+                    #[allow(clippy::print_stdout)]
+                    {
+                        println!(">> {name} disconnected (reason: {reason})");
+                    }
+                    break;
                 }
+                Ok(PeerEvent::Connected { .. }) => {}
+                Err(_) => break,
             }
         }
     });

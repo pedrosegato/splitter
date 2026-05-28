@@ -7,7 +7,7 @@ use audiomirror_core::net::signaling::{
     PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
 };
 use audiomirror_core::net::stream_runtime::{
-    dispatch_device_events, open_stream_as_sink, StreamRegistry,
+    dispatch_device_events, open_stream_as_sink, StreamControlSignal, StreamRegistry,
 };
 use audiomirror_core::net::trust::TrustStore;
 use audiomirror_core::observability::metrics::MetricsRegistry;
@@ -157,6 +157,7 @@ pub(crate) async fn run(
         let disc_clone = discovered.clone();
         let trust_clone = trust.clone();
         let sessions_clone = sessions.clone();
+        let local_peer_id = identity.peer_id;
         tokio::spawn(async move {
             while let Ok(peer_id) = conn_est_rx.recv().await {
                 let name = peer_display_name(&peer_id, &disc_clone, &trust_clone).await;
@@ -170,6 +171,7 @@ pub(crate) async fn run(
                         conn.tx.clone(),
                         conn.events.subscribe(),
                         registry.clone(),
+                        local_peer_id,
                         peer_id,
                         disc_clone.clone(),
                         trust_clone.clone(),
@@ -206,6 +208,8 @@ pub(crate) async fn run(
                             &stream_registry, &server, &discovered, &outgoing_connections,
                         ).await {
                             tracing::error!("command failed: {e}");
+                            #[allow(clippy::print_stdout)]
+                            { println!(">> error: {e}"); }
                         }
                         if cmd == "quit" { "quit" } else { continue; }
                     }
@@ -220,7 +224,7 @@ pub(crate) async fn run(
                         discovered.write().await.insert(p.peer_id.clone(), p);
                     }
                     Some(DiscoveryEvent::Removed(name)) => {
-                        tracing::info!("peer removed: {name}");
+                        tracing::debug!("peer removed: {name}");
                     }
                     None => {}
                 }
@@ -240,6 +244,8 @@ pub(crate) async fn run(
                             &stream_registry, &server, &discovered, &outgoing_connections,
                         ).await {
                             tracing::error!("command failed: {e}");
+                            #[allow(clippy::print_stdout)]
+                            { println!(">> error: {e}"); }
                         }
                         if cmd == "quit" { "quit" } else { continue; }
                     }
@@ -253,7 +259,7 @@ pub(crate) async fn run(
                         discovered.write().await.insert(p.peer_id.clone(), p);
                     }
                     Some(DiscoveryEvent::Removed(name)) => {
-                        tracing::info!("peer removed: {name}");
+                        tracing::debug!("peer removed: {name}");
                     }
                     None => {}
                 }
@@ -280,9 +286,10 @@ pub(crate) async fn run(
 }
 
 // Ordered teardown sequence (non-obvious ordering rationale):
-// 1. Send StreamControl{Close} to peers first so the remote side tears down cleanly.
-// 2. Then close local stream runtimes (which also sends Close + aborts the pump task).
-// 3. Sleep 150 ms: gives TCP framing time to flush the Close messages.
+// 1. Send StreamControl{Close} + SessionResponse{accepted:false} to peers so the remote
+//    side tears down cleanly before we drop the TCP connection.
+// 2. Then close local stream runtimes (aborts pump tasks).
+// 3. Sleep 150 ms: gives TCP framing time to flush the outgoing messages.
 // 4. Close SessionManager entries (bookkeeping only at this point).
 async fn graceful_shutdown(
     sessions: &Arc<SessionManager>,
@@ -292,7 +299,7 @@ async fn graceful_shutdown(
 ) {
     let session_snap = sessions.snapshot().await;
 
-    // 1. Notify peers: send StreamControl{Close} for every active stream.
+    // 1. Notify peers: close streams then close sessions.
     let outgoing_guard = outgoing.read().await;
     if let Some(srv) = server {
         let conns = srv.connections.read().await;
@@ -311,6 +318,12 @@ async fn graceful_shutdown(
                         })
                         .await;
                 }
+                let _ = tx
+                    .send(SignalingMessage::SessionResponse {
+                        session_id: sess.id.to_string(),
+                        accepted: false,
+                    })
+                    .await;
             }
         }
     }
@@ -372,7 +385,10 @@ async fn handle_line(
                 "  {:<44}  show stream stats once",
                 "stream stats [sid:stream]"
             );
-            println!("  {:<44}  close one stream", "stream close <sid:stream>");
+            println!(
+                "  {:<44}  close one stream",
+                "stream close <xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:N>"
+            );
             println!(
                 "  {:<44}  set volume (100 = unity)",
                 "stream volume <sid:stream> <0-200>"
@@ -487,12 +503,17 @@ async fn handle_line(
                     "connect not yet accepted (reason={:?}); waiting for remote operator to accept",
                     outcome.reason
                 );
+                println!(
+                    ">> hello sent to {} — waiting for remote operator to accept",
+                    target.peer_name
+                );
             }
             if let Some(peer_uuid) = outcome.remote_peer_id {
                 spawn_stream_open_acceptor(
                     outcome.handle.tx.clone(),
                     outcome.handle.events.subscribe(),
                     stream_registry.clone(),
+                    identity.peer_id,
                     peer_uuid,
                     discovered.clone(),
                     trust.clone(),
@@ -584,6 +605,31 @@ async fn handle_line(
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("usage: disconnect <session_id>"))?;
             let id = Uuid::parse_str(key)?;
+            // Close all local stream runtimes for this session and notify the remote peer.
+            let snap = sessions.snapshot().await;
+            if let Some(sess) = snap.iter().find(|s| s.id == id) {
+                let conn_tx = {
+                    let inbound = server.connections.read().await;
+                    if let Some(h) = inbound.get(&sess.remote_peer_id) {
+                        Some(h.tx.clone())
+                    } else {
+                        let outbound = outgoing_connections.read().await;
+                        outbound.get(&sess.remote_peer_id).map(|h| h.tx.clone())
+                    }
+                };
+                for stream in &sess.streams {
+                    let _ = stream_registry.close(&id, stream.id).await;
+                    if let Some(ref tx) = conn_tx {
+                        let _ = tx
+                            .send(SignalingMessage::StreamControl {
+                                stream_id: stream.id,
+                                action: StreamAction::Close,
+                                volume: None,
+                            })
+                            .await;
+                    }
+                }
+            }
             sessions.close(&id).await?;
             println!(">> disconnected session {id}");
         }
@@ -608,10 +654,12 @@ async fn handle_line(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_stream_open_acceptor(
     conn_tx: tokio::sync::mpsc::Sender<SignalingMessage>,
     mut events: tokio::sync::broadcast::Receiver<PeerEvent>,
     registry: Arc<StreamRegistry>,
+    local_peer_id: Uuid,
     peer_id: Uuid,
     discovered: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     trust: Arc<RwLock<TrustStore>>,
@@ -634,7 +682,7 @@ fn spawn_stream_open_acceptor(
                             continue;
                         };
                         let _ = sessions
-                            .register_incoming(sid_uuid, peer_id, requester_uuid)
+                            .register_incoming(sid_uuid, local_peer_id, requester_uuid)
                             .await;
                         let _ = sessions.accept(&sid_uuid).await;
                         let name = peer_display_name(&peer_id, &discovered, &trust).await;
@@ -738,17 +786,72 @@ fn spawn_stream_open_acceptor(
                                 }
                             }
                         }
-                        if matches!(action, StreamAction::Close) {
-                            let session_ids: Vec<Uuid> = sessions
-                                .snapshot()
-                                .await
-                                .into_iter()
-                                .filter(|s| s.remote_peer_id == peer_id)
-                                .map(|s| s.id)
-                                .collect();
-                            for sid in session_ids {
-                                let _ = registry.close(&sid, stream_id).await;
+                        // Propagate the control signal to every matching local StreamRuntime
+                        // (covers both source and sink runtimes on this daemon).
+                        let session_ids: Vec<Uuid> = sessions
+                            .snapshot()
+                            .await
+                            .into_iter()
+                            .filter(|s| s.remote_peer_id == peer_id)
+                            .map(|s| s.id)
+                            .collect();
+                        match action {
+                            StreamAction::Close => {
+                                for sid in session_ids {
+                                    let _ = registry.close(&sid, stream_id).await;
+                                }
                             }
+                            StreamAction::Pause => {
+                                for sid in &session_ids {
+                                    let _ = registry
+                                        .send_control(sid, stream_id, StreamControlSignal::Pause)
+                                        .await;
+                                }
+                            }
+                            StreamAction::Resume => {
+                                for sid in &session_ids {
+                                    let _ = registry
+                                        .send_control(sid, stream_id, StreamControlSignal::Resume)
+                                        .await;
+                                }
+                            }
+                            StreamAction::SetVolume => {
+                                let gain = volume.unwrap_or(1.0).clamp(0.0, 2.0);
+                                for sid in &session_ids {
+                                    let _ = registry
+                                        .send_control(
+                                            sid,
+                                            stream_id,
+                                            StreamControlSignal::SetVolume(gain),
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                    SignalingMessage::SessionResponse {
+                        session_id,
+                        accepted: false,
+                    } => {
+                        let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+                            continue;
+                        };
+                        // Remote is shutting down this session; close local streams + session.
+                        let stream_ids: Vec<u8> = sessions
+                            .snapshot()
+                            .await
+                            .into_iter()
+                            .find(|s| s.id == sid_uuid)
+                            .map(|s| s.streams.iter().map(|st| st.id).collect())
+                            .unwrap_or_default();
+                        for sid_stream in stream_ids {
+                            let _ = registry.close(&sid_uuid, sid_stream).await;
+                        }
+                        let _ = sessions.close(&sid_uuid).await;
+                        let name = peer_display_name(&peer_id, &discovered, &trust).await;
+                        #[allow(clippy::print_stdout)]
+                        {
+                            println!(">> {name} closed session {}", short(&sid_uuid));
                         }
                     }
                     _ => {}
@@ -758,6 +861,29 @@ fn spawn_stream_open_acceptor(
                     #[allow(clippy::print_stdout)]
                     {
                         println!(">> {name} disconnected (reason: {reason})");
+                    }
+                    // Tear down all streams and sessions for this peer so
+                    // the registry and SessionManager don't accumulate stale
+                    // entries after an abrupt disconnect.
+                    let session_ids: Vec<Uuid> = sessions
+                        .snapshot()
+                        .await
+                        .into_iter()
+                        .filter(|s| s.remote_peer_id == peer_id)
+                        .map(|s| s.id)
+                        .collect();
+                    for sid in &session_ids {
+                        let stream_ids: Vec<u8> = sessions
+                            .snapshot()
+                            .await
+                            .into_iter()
+                            .find(|s| s.id == *sid)
+                            .map(|s| s.streams.iter().map(|st| st.id).collect())
+                            .unwrap_or_default();
+                        for stream_id in stream_ids {
+                            let _ = registry.close(sid, stream_id).await;
+                        }
+                        let _ = sessions.close(sid).await;
                     }
                     break;
                 }

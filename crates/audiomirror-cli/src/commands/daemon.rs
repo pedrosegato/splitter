@@ -312,41 +312,104 @@ async fn handle_line(
     let token_refs: Vec<&str> = tokens.iter().map(|s| s.as_str()).collect();
     let mut parts = token_refs.iter().copied();
     let head = parts.next().unwrap_or("");
+    #[allow(clippy::print_stdout)]
     match head {
         "help" => {
-            tracing::info!(
-                "commands: peers | connect <peer_id|name> | pending | accept <idx> | sessions | open <peer_id> | disconnect <session_id> | quit"
+            const BAR: &str = "═══════════════════════════════════════════════════════════════════";
+            println!("{BAR}");
+            println!("  AUDIOMIRROR DAEMON — COMMANDS");
+            println!("{BAR}");
+            println!("  {:<44}  list discovered peers", "peers");
+            println!("  {:<44}  list peers waiting for accept", "pending");
+            println!("  {:<44}  accept a pending peer (TOFU)", "accept <idx>");
+            println!("  {:<44}  open signaling link", "connect <peer_id|name>");
+            println!(
+                "  {:<44}  open a session with a connected peer",
+                "open <peer_id|name>"
             );
+            println!("  {:<44}  list active sessions", "sessions");
+            println!(
+                "  {:<44}  open a stream (see help below)",
+                "stream open ..."
+            );
+            println!(
+                "  {:<44}  show stream stats once",
+                "stream stats [sid:stream]"
+            );
+            println!("  {:<44}  close one stream", "stream close <sid:stream>");
+            println!(
+                "  {:<44}  set volume (100 = unity)",
+                "stream volume <sid:stream> <0-200>"
+            );
+            println!("  {:<44}  mute", "stream mute <sid:stream>");
+            println!("  {:<44}  unmute", "stream unmute <sid:stream>");
+            println!("  {:<44}  pause", "stream pause <sid:stream>");
+            println!("  {:<44}  resume", "stream resume <sid:stream>");
+            println!(
+                "  {:<44}  close session and all streams",
+                "disconnect <session_id>"
+            );
+            println!(
+                "  {:<44}  runtime settings",
+                "settings show | get <k> | set <k> <v>"
+            );
+            println!("  {:<44}  graceful shutdown", "quit");
+            println!("{BAR}");
         }
         "peers" => {
+            const BAR: &str = "═══════════════════════════════════════════════════════════════════";
             let snap = discovered.read().await.clone();
+            println!("{BAR}");
+            println!("  PEERS DISCOVERED");
+            println!("{BAR}");
             if snap.is_empty() {
-                tracing::info!("no peers discovered yet");
-            }
-            for (idx, p) in snap.values().enumerate() {
-                tracing::info!(
-                    "[{idx}] {} ({}) at {}:{} v{}",
-                    p.peer_name,
-                    p.peer_id,
-                    p.host,
-                    p.port,
-                    p.version
+                println!("  (none)");
+            } else {
+                println!(
+                    "  {:<5}  {:<14}  {:<36}  {:<21}  VERSION",
+                    "IDX", "NAME", "PEER_ID", "ADDR"
                 );
+                println!(
+                    "  {:<5}  {:<14}  {:<36}  {:<21}  ───────",
+                    "───", "────", "───────", "────"
+                );
+                for (idx, p) in snap.values().enumerate() {
+                    let addr = format!("{}:{}", p.host, p.port);
+                    let ver = format!("v{}", p.version);
+                    println!(
+                        "  {:<5}  {:<14}  {:<36}  {:<21}  {}",
+                        format!("[{idx}]"),
+                        p.peer_name,
+                        p.peer_id,
+                        addr,
+                        ver
+                    );
+                }
             }
+            println!("{BAR}");
         }
         "pending" => {
+            const BAR: &str = "═══════════════════════════════════════════════════════════════════";
             let list = server.pending.list().await;
+            println!("{BAR}");
+            println!("  PENDING HELLOS");
+            println!("{BAR}");
             if list.is_empty() {
-                tracing::info!("no pending hellos");
+                println!("  (none)");
+            } else {
+                println!("  {:<5}  {:<14}  {:<36}  ADDR", "IDX", "NAME", "PEER_ID");
+                println!("  {:<5}  {:<14}  {:<36}  ────", "───", "────", "───────");
+                for (i, p) in list.iter().enumerate() {
+                    println!(
+                        "  {:<5}  {:<14}  {:<36}  {}",
+                        format!("[{i}]"),
+                        p.peer_name,
+                        p.peer_id,
+                        p.remote_addr
+                    );
+                }
             }
-            for (i, p) in list.iter().enumerate() {
-                tracing::info!(
-                    "[{i}] {} ({}) from {}",
-                    p.peer_name,
-                    p.peer_id,
-                    p.remote_addr
-                );
-            }
+            println!("{BAR}");
         }
         "accept" => {
             let idx: usize = parts.next().unwrap_or("0").parse()?;
@@ -358,7 +421,7 @@ async fn handle_line(
                 idx,
             )
             .await?;
-            tracing::info!("accepted pending #{idx} → peer {peer_id}");
+            println!(">> accepted pending #{idx} -> peer {peer_id}");
         }
         "connect" => {
             let key = parts
@@ -382,7 +445,7 @@ async fn handle_line(
             )
             .await?;
             if outcome.accepted {
-                tracing::info!("connected to {}", target.peer_name);
+                println!(">> connected to {}", target.peer_name);
             } else {
                 tracing::warn!(
                     "connect not yet accepted (reason={:?}); waiting for remote operator to accept",
@@ -429,7 +492,7 @@ async fn handle_line(
             let remote_uuid = Uuid::parse_str(&target.peer_id)?;
             let session_id = sessions.open_outgoing(identity.peer_id, remote_uuid).await;
             sessions.accept(&session_id).await?;
-            tracing::info!("opened session {session_id} with {}", target.peer_name);
+            println!(">> opened session {session_id} with {}", target.peer_name);
             let conn_tx = {
                 let inbound = server.connections.read().await;
                 if let Some(h) = inbound.get(&remote_uuid) {
@@ -449,28 +512,33 @@ async fn handle_line(
             }
         }
         "sessions" => {
+            const BAR: &str = "═══════════════════════════════════════════════════════════════════";
             let snap = sessions.snapshot().await;
+            println!("{BAR}");
+            println!("  ACTIVE SESSIONS");
+            println!("{BAR}");
             if snap.is_empty() {
-                tracing::info!("no sessions");
-            }
-            for s in snap {
-                tracing::info!(
-                    "session {} ({:?}) ↔ {} : {} streams",
-                    s.id,
-                    s.state,
-                    s.remote_peer_id,
-                    s.streams.len()
+                println!("  (none)");
+            } else {
+                println!(
+                    "  {:<38}  {:<8}  {:<36}  STREAMS",
+                    "SESSION ID", "STATE", "REMOTE PEER ID"
                 );
-                for st in s.streams {
-                    tracing::info!(
-                        "  stream {} ({:?}) {} → {}",
-                        st.id,
-                        st.state,
-                        st.source_peer,
-                        st.sink_peer
+                println!(
+                    "  {:<38}  {:<8}  {:<36}  ───────",
+                    "──────────", "─────", "──────────────"
+                );
+                for s in snap {
+                    println!(
+                        "  {:<38}  {:<8}  {:<36}  {}",
+                        s.id,
+                        format!("{:?}", s.state),
+                        s.remote_peer_id,
+                        s.streams.len()
                     );
                 }
             }
+            println!("{BAR}");
         }
         "disconnect" => {
             let key = parts
@@ -478,7 +546,7 @@ async fn handle_line(
                 .ok_or_else(|| anyhow::anyhow!("usage: disconnect <session_id>"))?;
             let id = Uuid::parse_str(key)?;
             sessions.close(&id).await?;
-            tracing::info!("closed session {id}");
+            println!(">> disconnected session {id}");
         }
         "quit" => {
             // handled in run() via the select! arm — nothing more to do here

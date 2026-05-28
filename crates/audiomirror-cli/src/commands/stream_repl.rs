@@ -212,7 +212,10 @@ async fn stream_open(
         source_kind,
     )
     .await?;
-    tracing::info!("stream {stream_id} on session {session_id} now active");
+    #[allow(clippy::print_stdout)]
+    {
+        println!(">> stream {stream_id} on session {session_id} now active");
+    }
     Ok(())
 }
 
@@ -239,7 +242,10 @@ async fn stream_close(
             .ok();
         }
     }
-    tracing::info!("closed stream {stream_id} on session {sid}");
+    #[allow(clippy::print_stdout)]
+    {
+        println!(">> closed stream {stream_id} on session {sid}");
+    }
     Ok(())
 }
 
@@ -322,7 +328,9 @@ async fn stream_set_paused(
     Ok(())
 }
 
+#[allow(clippy::print_stdout)]
 async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::Result<()> {
+    const BAR: &str = "═══════════════════════════════════════════════════════════════════";
     let target: Option<(Uuid, u8)> = if rest.is_empty() {
         None
     } else {
@@ -336,27 +344,35 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
             .collect(),
         None => snaps,
     };
+    println!("{BAR}");
+    println!("  STREAM STATS");
+    println!("{BAR}");
     if filtered.is_empty() {
-        tracing::info!("(no active streams)");
-        return Ok(());
-    }
-    tracing::info!(
-        "{:<38} sid  sent     recv     lost   kbps↑  kbps↓  rtt(ms)",
-        "session"
-    );
-    for (sid, stream_id, snap) in filtered {
-        tracing::info!(
-            "{:<38} {:>3}  {:>7}  {:>7}  {:>5}  {:>5}  {:>5}  {:>6}",
-            sid,
-            stream_id,
-            snap.packets_sent,
-            snap.packets_received,
-            snap.packets_lost,
-            snap.bitrate_kbps_sent,
-            snap.bitrate_kbps_received,
-            snap.last_rtt_ms,
+        println!("  (no active streams)");
+    } else {
+        println!(
+            "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  RTT",
+            "SESSION", "SID", "SENT", "RECV", "LOST", "↑KBPS", "↓KBPS"
         );
+        println!(
+            "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  ───",
+            "───────", "───", "────", "────", "────", "─────", "─────"
+        );
+        for (sid, stream_id, snap) in filtered {
+            println!(
+                "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  {}",
+                sid,
+                stream_id,
+                snap.packets_sent,
+                snap.packets_received,
+                snap.packets_lost,
+                snap.bitrate_kbps_sent,
+                snap.bitrate_kbps_received,
+                snap.last_rtt_ms,
+            );
+        }
     }
+    println!("{BAR}");
     Ok(())
 }
 

@@ -22,6 +22,8 @@ pub enum AudioError {
     UnsupportedChannels { device: String, requested: u16 },
     #[error("loopback not available on this platform")]
     LoopbackUnsupported,
+    #[error("Screen Recording permission denied; enable in System Settings → Privacy & Security → Screen Recording, then relaunch")]
+    ScreenRecordingPermissionDenied,
     #[error("cpal default device missing")]
     NoDefaultDevice,
     #[error("cpal build stream failed")]
@@ -154,5 +156,13 @@ mod tests {
 
         let source = e.source().expect("BuildStream should expose source");
         assert!(source.to_string().contains("cpal said no"));
+    }
+
+    #[test]
+    fn screen_recording_permission_denied_displays_hint() {
+        let e = AudioError::ScreenRecordingPermissionDenied;
+        let msg = e.to_string();
+        assert!(msg.contains("Screen Recording"));
+        assert!(msg.contains("System Settings"));
     }
 }

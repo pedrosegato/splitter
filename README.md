@@ -21,16 +21,35 @@ cargo run -p audiomirror-cli -- loop --input <id> --output <id>
 
 AudioMirror can mirror your desktop audio (not just a microphone) between two computers.
 
+### macOS (BlackHole required)
+
+ScreenCaptureKit is too limited (mono only, no per-channel separation, extra latency). The reliable path is the [BlackHole](https://existential.audio/blackhole/) virtual audio driver.
+
+1. Install BlackHole 2ch: `brew install --cask blackhole-2ch`
+2. **System Settings → Sound → Output → BlackHole 2ch.** Everything the system plays now routes to BlackHole instead of your speakers/headset.
+3. Run with BlackHole as the input and your real device as the output:
+
+```
+cargo run -p audiomirror-cli -- loop --input "BlackHole 2ch" --output "<your headset or speaker name>"
+```
+
+You can list available devices first with `cargo run -p audiomirror-cli -- devices`.
+
+If you want to keep hearing the desktop audio locally AND capture it, create a **Multi-Output Device** in `/Applications/Utilities/Audio MIDI Setup.app` containing BlackHole 2ch + your real output, then set the system Output to that Multi-Output. Do NOT also use that Multi-Output as the app's `--output` — it creates a feedback loop with BlackHole.
+
+The legacy `--source system` flag still exists and uses ScreenCaptureKit; expect mono and worse latency.
+
+### Windows
+
+WASAPI loopback runs automatically:
+
 ```
 cargo run -p audiomirror-cli -- loop --input ignored --output <output id> --source system
-cargo run -p audiomirror-cli -- send --input ignored --addr <ip>:5004 --source system
 ```
 
-**macOS:** On first run AudioMirror asks for **Screen Recording** permission. Approve it in System Settings → Privacy & Security → Screen Recording, then relaunch. Requires macOS 13 or newer.
+### Linux
 
-**Windows:** WASAPI loopback runs automatically; no extra setup.
-
-**Linux:** Any PulseAudio or PipeWire `.monitor` source is picked up automatically.
+Any PulseAudio or PipeWire `.monitor` source is picked up automatically when you use `--source system`.
 
 ## P2P discovery and signaling (Phase 2)
 

@@ -5,6 +5,9 @@ use audiomirror_core::audio::playback::PlaybackHandle;
 use audiomirror_core::audio::ring::AudioRing;
 use audiomirror_core::FRAME_SAMPLES;
 use bytes::BytesMut;
+use std::sync::Arc;
+use tokio::sync::Notify;
+use tokio::time::Duration;
 
 #[cfg(target_os = "macos")]
 use audiomirror_core::MacosLoopbackHandle;
@@ -18,6 +21,18 @@ enum CaptureGuard {
     Loopback(CaptureHandle),
 }
 
+impl CaptureGuard {
+    fn frame_ready(&self) -> Arc<Notify> {
+        match self {
+            CaptureGuard::Mic(h) => h.frame_ready(),
+            #[cfg(target_os = "macos")]
+            CaptureGuard::MacSystem(h) => h.frame_ready(),
+            #[cfg(not(target_os = "macos"))]
+            CaptureGuard::Loopback(h) => h.frame_ready(),
+        }
+    }
+}
+
 pub(crate) async fn run(
     input: &str,
     output: &str,
@@ -28,7 +43,7 @@ pub(crate) async fn run(
     let (play_prod, play_cons) = AudioRing::new(9_600);
     let play_prod = std::sync::Arc::new(std::sync::Mutex::new(play_prod));
 
-    let _capture = match source {
+    let _capture: CaptureGuard = match source {
         Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, cap_prod)?),
         Source::System => {
             #[cfg(target_os = "macos")]
@@ -47,6 +62,8 @@ pub(crate) async fn run(
         "loopback running: source={source:?} input={input} output={output} @ {bitrate}bps"
     );
 
+    let frame_notify = _capture.frame_ready();
+
     let mut enc = OpusEncoder::new(bitrate)?;
     let mut dec = OpusDecoder::new()?;
     let mut payload = BytesMut::with_capacity(400);
@@ -54,15 +71,19 @@ pub(crate) async fn run(
     let mut out_frame = vec![0.0f32; FRAME_SAMPLES];
 
     loop {
-        if cap_cons.occupied() < FRAME_SAMPLES {
-            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            continue;
+        tokio::select! {
+            _ = frame_notify.notified() => {}
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                tracing::warn!("no audio frame signal in 50ms — capture stalled?");
+            }
         }
-        cap_cons.pop_slice(&mut frame);
-        enc.encode(&frame, &mut payload)?;
-        dec.decode(Some(&payload), &mut out_frame)?;
-        if let Ok(mut p) = play_prod.lock() {
-            let _ = p.push_slice(&out_frame);
+        while cap_cons.occupied() >= FRAME_SAMPLES {
+            cap_cons.pop_slice(&mut frame);
+            enc.encode(&frame, &mut payload)?;
+            dec.decode(Some(&payload), &mut out_frame)?;
+            if let Ok(mut p) = play_prod.lock() {
+                let _ = p.push_slice(&out_frame);
+            }
         }
     }
 }

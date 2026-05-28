@@ -8,8 +8,11 @@ use bytes::{Bytes, BytesMut};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::UdpSocket;
+use tokio::sync::Notify;
+use tokio::time::Duration;
 
 #[cfg(target_os = "macos")]
 use audiomirror_core::MacosLoopbackHandle;
@@ -23,6 +26,18 @@ enum CaptureGuard {
     Loopback(CaptureHandle),
 }
 
+impl CaptureGuard {
+    fn frame_ready(&self) -> Arc<Notify> {
+        match self {
+            CaptureGuard::Mic(h) => h.frame_ready(),
+            #[cfg(target_os = "macos")]
+            CaptureGuard::MacSystem(h) => h.frame_ready(),
+            #[cfg(not(target_os = "macos"))]
+            CaptureGuard::Loopback(h) => h.frame_ready(),
+        }
+    }
+}
+
 pub(crate) async fn run(
     input: &str,
     addr: &str,
@@ -32,7 +47,7 @@ pub(crate) async fn run(
 ) -> anyhow::Result<()> {
     let dest: SocketAddr = SocketAddr::from_str(addr)?;
     let (producer, mut consumer) = AudioRing::new(9_600);
-    let _capture = match source {
+    let _capture: CaptureGuard = match source {
         Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, producer)?),
         Source::System => {
             #[cfg(target_os = "macos")]
@@ -46,6 +61,7 @@ pub(crate) async fn run(
         }
     };
 
+    let frame_notify = _capture.frame_ready();
     let sock = make_udp_socket(SocketAddr::from(([0, 0, 0, 0], 0)))?;
     tracing::info!("sending stream_id={stream_id} to {dest} at {bitrate} bps");
 
@@ -57,28 +73,32 @@ pub(crate) async fn run(
     let mut seq: u32 = 0;
 
     loop {
-        if consumer.occupied() < FRAME_SAMPLES {
-            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            continue;
+        tokio::select! {
+            _ = frame_notify.notified() => {}
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                tracing::warn!("no audio frame signal in 50ms — capture stalled?");
+            }
         }
-        let popped = consumer.pop_slice(&mut frame);
-        debug_assert_eq!(
-            popped, FRAME_SAMPLES,
-            "ring SPSC invariant: occupied check passed but pop_slice returned less"
-        );
-        if popped < FRAME_SAMPLES {
-            continue;
+        while consumer.occupied() >= FRAME_SAMPLES {
+            let popped = consumer.pop_slice(&mut frame);
+            debug_assert_eq!(
+                popped, FRAME_SAMPLES,
+                "ring SPSC invariant: occupied check passed but pop_slice returned less"
+            );
+            if popped < FRAME_SAMPLES {
+                continue;
+            }
+            encoder.encode(&frame, &mut payload_buf)?;
+            let pkt = Packet {
+                stream_id,
+                seq: seq & 0xFF_FFFF,
+                timestamp_ms: start.elapsed().as_millis() as u32,
+                payload: Bytes::copy_from_slice(&payload_buf),
+            };
+            pkt.encode(&mut out_buf)?;
+            sock.send_to(&out_buf, dest).await?;
+            seq = seq.wrapping_add(1);
         }
-        encoder.encode(&frame, &mut payload_buf)?;
-        let pkt = Packet {
-            stream_id,
-            seq: seq & 0xFF_FFFF,
-            timestamp_ms: start.elapsed().as_millis() as u32,
-            payload: Bytes::copy_from_slice(&payload_buf),
-        };
-        pkt.encode(&mut out_buf)?;
-        sock.send_to(&out_buf, dest).await?;
-        seq = seq.wrapping_add(1);
     }
 }
 

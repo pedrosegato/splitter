@@ -27,6 +27,37 @@ impl CaptureHandle {
         Self::from_device(device, producer)
     }
 
+    pub fn start_loopback(producer: RingProducer) -> Result<Self, AudioError> {
+        #[cfg(target_os = "windows")]
+        {
+            let host =
+                cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?;
+            let device = host
+                .default_output_device()
+                .ok_or(AudioError::NoDefaultDevice)?;
+            return Self::from_device(device, producer);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let host = cpal::default_host();
+            let device = host
+                .input_devices()
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?
+                .find(|d| d.name().map(|n| n.ends_with(".monitor")).unwrap_or(false))
+                .ok_or_else(|| AudioError::DeviceNotFound("PulseAudio .monitor source".into()))?;
+            return Self::from_device(device, producer);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        {
+            let _ = producer;
+            Err(AudioError::LoopbackUnsupported)
+        }
+    }
+
     pub fn from_device(device: cpal::Device, producer: RingProducer) -> Result<Self, AudioError> {
         let supported = device
             .default_input_config()
@@ -162,5 +193,26 @@ mod tests {
         let (prod, _cons) = AudioRing::new(1024);
         let res = CaptureHandle::from_device(device, prod);
         assert!(res.is_ok() || matches!(res, Err(AudioError::BuildStream { .. })));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn start_loopback_returns_handle_on_windows() {
+        let (prod, _cons) = AudioRing::new(48_000);
+        let res = CaptureHandle::start_loopback(prod);
+        match res {
+            Ok(_) => {}
+            Err(AudioError::BuildStream { .. }) => {}
+            Err(AudioError::DeviceNotFound(_)) => {}
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn start_loopback_returns_unsupported_on_macos() {
+        let (prod, _cons) = AudioRing::new(48_000);
+        let res = CaptureHandle::start_loopback(prod);
+        assert!(matches!(res, Err(AudioError::LoopbackUnsupported)));
     }
 }

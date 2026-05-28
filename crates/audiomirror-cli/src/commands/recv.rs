@@ -20,7 +20,7 @@ pub(crate) async fn run_with_settings(
     let sock = make_udp_socket(bind_addr)?;
     tracing::info!("receiving on {bind_addr}, playing to {output}");
 
-    let (producer, consumer) = AudioRing::new(9_600);
+    let (producer, consumer) = AudioRing::new(2_880);
     let _playback = PlaybackHandle::start(output, consumer)?;
     let producer = std::sync::Arc::new(std::sync::Mutex::new(producer));
 

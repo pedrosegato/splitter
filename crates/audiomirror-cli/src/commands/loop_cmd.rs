@@ -41,8 +41,8 @@ pub(crate) async fn run(
     fec_mode: crate::SendFecMode,
     simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
-    let (cap_prod, mut cap_cons) = AudioRing::new(9_600);
-    let (play_prod, play_cons) = AudioRing::new(9_600);
+    let (cap_prod, mut cap_cons) = AudioRing::new(2_880);
+    let (play_prod, play_cons) = AudioRing::new(2_880);
     let play_prod = std::sync::Arc::new(std::sync::Mutex::new(play_prod));
 
     let _capture: CaptureGuard = match source {

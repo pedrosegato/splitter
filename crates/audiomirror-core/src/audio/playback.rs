@@ -31,7 +31,18 @@ impl PlaybackHandle {
             })?
             .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
             .ok_or_else(|| AudioError::DeviceNotFound(device_name.to_string()))?;
+        Self::from_device(device, consumer)
+    }
 
+    pub fn start_by_id(device_id: &str, consumer: RingConsumer) -> Result<Self, AudioError> {
+        let resolved = resolve_output_device(device_id)?;
+        Self::from_device(resolved, consumer)
+    }
+
+    pub(crate) fn from_device(
+        device: cpal::Device,
+        consumer: RingConsumer,
+    ) -> Result<Self, AudioError> {
         let supported = device
             .default_output_config()
             .map_err(|e| AudioError::BuildStream {
@@ -115,6 +126,20 @@ impl PlaybackHandle {
             frame_consumed,
         })
     }
+}
+
+fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
+    let target_name = device_id
+        .splitn(3, ':')
+        .nth(2)
+        .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))?;
+    let host = cpal::default_host();
+    host.output_devices()
+        .map_err(|e| AudioError::BuildStream {
+            source: Box::new(e),
+        })?
+        .find(|d| d.name().map(|n| n == target_name).unwrap_or(false))
+        .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))
 }
 
 // Same chunk granularity as capture: 441 input frames at 44100 → 480 at 48000.
@@ -319,6 +344,30 @@ mod tests {
         for (i, s) in out.iter().enumerate() {
             assert_eq!(*s, 0.0, "sample {i} should be silence on underrun, got {s}");
         }
+    }
+
+    #[test]
+    fn start_by_id_with_unknown_id_returns_error() {
+        let (_prod, cons) = AudioRing::new(1024);
+        let err = PlaybackHandle::start_by_id("nonexistent-id", cons).unwrap_err();
+        assert!(matches!(err, AudioError::DeviceNotFound(_)));
+    }
+
+    #[test]
+    fn start_by_id_with_default_output_id_starts() {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let host = cpal::default_host();
+        let Some(default_out) = host.default_output_device() else {
+            return;
+        };
+        let name = default_out.name().unwrap_or_default();
+        if name.is_empty() {
+            return;
+        }
+        let id = format!("Output:0:{name}");
+        let (_prod, cons) = AudioRing::new(1024);
+        let res = PlaybackHandle::start_by_id(&id, cons);
+        assert!(res.is_ok() || matches!(res, Err(AudioError::BuildStream { .. })));
     }
 
     /// Resampler from 48k to 44.1k produces the right approximate sample count.

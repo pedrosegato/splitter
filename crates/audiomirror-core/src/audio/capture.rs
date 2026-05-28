@@ -34,6 +34,11 @@ impl CaptureHandle {
         Self::from_device(device, producer, Arc::new(Notify::new()))
     }
 
+    pub fn start_by_id(device_id: &str, producer: RingProducer) -> Result<Self, AudioError> {
+        let resolved = resolve_input_device(device_id)?;
+        Self::from_device(resolved, producer, Arc::new(Notify::new()))
+    }
+
     pub fn start_loopback(producer: RingProducer) -> Result<Self, AudioError> {
         #[cfg(target_os = "windows")]
         {
@@ -154,6 +159,20 @@ impl CaptureHandle {
             frame_notify,
         })
     }
+}
+
+fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
+    let target_name = device_id
+        .splitn(3, ':')
+        .nth(2)
+        .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))?;
+    let host = cpal::default_host();
+    host.input_devices()
+        .map_err(|e| AudioError::BuildStream {
+            source: Box::new(e),
+        })?
+        .find(|d| d.name().map(|n| n == target_name).unwrap_or(false))
+        .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))
 }
 
 // The chunk size fed into the resampler — must divide evenly into FRAME_SAMPLES at 48k.
@@ -279,6 +298,13 @@ mod tests {
     fn start_with_unknown_device_returns_error() {
         let (prod, _cons) = AudioRing::new(1024);
         let err = CaptureHandle::start("this-device-does-not-exist-xyz", prod).unwrap_err();
+        assert!(matches!(err, AudioError::DeviceNotFound(_)));
+    }
+
+    #[test]
+    fn capture_start_by_id_with_unknown_id_returns_error() {
+        let (prod, _cons) = AudioRing::new(1024);
+        let err = CaptureHandle::start_by_id("nonexistent-id", prod).unwrap_err();
         assert!(matches!(err, AudioError::DeviceNotFound(_)));
     }
 

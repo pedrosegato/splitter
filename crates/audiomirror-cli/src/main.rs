@@ -1,5 +1,13 @@
 use clap::{Parser, Subcommand};
 
+#[derive(Subcommand, Debug)]
+enum LogsAction {
+    /// Print the path of the current log file.
+    Path,
+    /// Tail the current log file (poll every 200 ms).
+    Tail,
+}
+
 mod commands;
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -97,6 +105,12 @@ enum Cmd {
         #[arg(long)]
         peer_name: Option<String>,
     },
+
+    /// Inspect application logs.
+    Logs {
+        #[command(subcommand)]
+        action: LogsAction,
+    },
 }
 
 #[tokio::main]
@@ -167,5 +181,9 @@ async fn main() -> anyhow::Result<()> {
             signaling_port,
             peer_name,
         } => commands::daemon::run(signaling_port, peer_name).await,
+        Cmd::Logs { action } => match action {
+            LogsAction::Path => commands::logs::run_path().await,
+            LogsAction::Tail => commands::logs::run_tail().await,
+        },
     }
 }

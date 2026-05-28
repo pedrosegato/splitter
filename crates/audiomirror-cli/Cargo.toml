@@ -1,0 +1,19 @@
+[package]
+name = "audiomirror-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+audiomirror-core = { path = "../audiomirror-core" }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+socket2 = { workspace = true }
+
+[lints]
+workspace = true

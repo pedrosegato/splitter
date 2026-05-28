@@ -1,0 +1,30 @@
+[package]
+name = "audiomirror-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+bytes = { workspace = true }
+cpal = { workspace = true }
+audiopus = { workspace = true }
+rubato = { workspace = true }
+ringbuf = { workspace = true }
+audio_thread_priority = { workspace = true }
+socket2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+dirs = { workspace = true }
+crossbeam-queue = "0.3"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

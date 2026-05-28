@@ -1,11 +1,18 @@
+use crate::audio::codec::OpusEncoder;
+use crate::audio::ring::RingConsumer;
 use crate::error::NetError;
+use crate::net::packet::Packet;
 use crate::net::session::SessionId;
 use crate::net::stream::StreamId;
+use crate::FRAME_SAMPLES;
+use bytes::{Bytes, BytesMut};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
+use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -337,5 +344,143 @@ mod tests {
         };
         let snap = stats.snapshot(1_000, &prev);
         assert_eq!(snap.last_rtt_ms, 42);
+    }
+}
+
+#[allow(dead_code, clippy::too_many_arguments)]
+pub(crate) async fn spawn_source_pump_inner(
+    _session_id: SessionId,
+    stream_id: StreamId,
+    mut consumer: RingConsumer,
+    frame_ready: Arc<Notify>,
+    socket: UdpSocket,
+    mut control_rx: mpsc::Receiver<StreamControlSignal>,
+    stats: Arc<StreamStats>,
+    bitrate: i32,
+) {
+    let mut encoder = match OpusEncoder::new(bitrate) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("opus encoder init failed: {e}");
+            return;
+        }
+    };
+    let mut seq: u32 = 0;
+    let mut frame = vec![0.0f32; FRAME_SAMPLES];
+    let mut payload = BytesMut::with_capacity(400);
+    let mut packet_buf = BytesMut::with_capacity(1500);
+    let mut gain: f32 = 1.0;
+    let muted = Arc::new(AtomicBool::new(false));
+    let mut paused = false;
+    let start = std::time::Instant::now();
+
+    loop {
+        tokio::select! {
+            biased;
+            maybe_sig = control_rx.recv() => {
+                match maybe_sig {
+                    Some(StreamControlSignal::Close) | None => return,
+                    Some(StreamControlSignal::SetVolume(v)) => gain = v.clamp(0.0, 2.0),
+                    Some(StreamControlSignal::SetMuted(m)) => muted.store(m, Ordering::Relaxed),
+                    Some(StreamControlSignal::Pause) => paused = true,
+                    Some(StreamControlSignal::Resume) => paused = false,
+                }
+            }
+            _ = frame_ready.notified() => {
+                while consumer.occupied() >= FRAME_SAMPLES {
+                    consumer.pop_slice(&mut frame);
+                    if paused {
+                        continue;
+                    }
+                    let effective_gain = if muted.load(Ordering::Relaxed) { 0.0 } else { gain };
+                    if (effective_gain - 1.0).abs() > f32::EPSILON {
+                        for s in frame.iter_mut() {
+                            *s *= effective_gain;
+                        }
+                    }
+                    if let Err(e) = encoder.encode(&frame, &mut payload) {
+                        tracing::warn!("opus encode failed: {e}");
+                        continue;
+                    }
+                    let pkt = Packet {
+                        stream_id,
+                        seq: seq & 0x00FF_FFFF,
+                        timestamp_ms: start.elapsed().as_millis() as u32,
+                        payload: Bytes::copy_from_slice(&payload[..]),
+                    };
+                    if pkt.encode(&mut packet_buf).is_ok() {
+                        match socket.send(&packet_buf[..]).await {
+                            Ok(n) => {
+                                stats.packets_sent.fetch_add(1, Ordering::Relaxed);
+                                stats.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
+                                seq = seq.wrapping_add(1);
+                            }
+                            Err(e) => tracing::warn!("udp send failed: {e}"),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod source_pump_tests {
+    use super::*;
+    use crate::audio::ring::AudioRing;
+    use crate::FRAME_SAMPLES;
+    use tokio::net::UdpSocket;
+    use tokio::sync::Notify;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn source_pump_sends_a_packet_per_frame() {
+        let (mut prod, cons) = AudioRing::new(FRAME_SAMPLES * 8);
+        let notify = Arc::new(Notify::new());
+        let stats = Arc::new(StreamStats::default());
+
+        let recv_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote = recv_socket.local_addr().unwrap();
+        let send_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        send_socket.connect(remote).await.unwrap();
+
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+        let stats_clone = stats.clone();
+        let notify_clone = notify.clone();
+
+        let pump = tokio::spawn(spawn_source_pump_inner(
+            Uuid::new_v4(),
+            3u8,
+            cons,
+            notify_clone,
+            send_socket,
+            ctrl_rx,
+            stats_clone,
+            64_000,
+        ));
+
+        let frame = vec![0.25f32; FRAME_SAMPLES];
+        for _ in 0..3 {
+            prod.push_slice(&frame);
+            notify.notify_one();
+        }
+
+        let mut buf = [0u8; 1500];
+        let (n, _) = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            recv_socket.recv_from(&mut buf),
+        )
+        .await
+        .expect("recv timeout")
+        .unwrap();
+        assert!(
+            n >= 10,
+            "expected at least a header + payload, got {n} bytes"
+        );
+
+        let _ = ctrl_tx.send(StreamControlSignal::Close).await;
+        let _ = pump.await;
+
+        assert!(stats.packets_sent.load(Ordering::Relaxed) >= 1);
     }
 }

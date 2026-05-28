@@ -30,6 +30,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 dirs = "5"
 clap = { version = "4", features = ["derive"] }
+mdns-sd = "0.11"
+toml = "0.8"
+base64 = "0.22"
+rand = "0.8"
+gethostname = "0.5"
 
 [profile.release]
 opt-level = 3

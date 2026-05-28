@@ -55,9 +55,14 @@ mod tests {
     #[test]
     fn flip_enable_persists_to_toml() {
         let path = temp_settings_path("enable");
-        let mut s = Settings::default();
-        assert!(!s.metrics_enabled, "default should be disabled");
-        s.metrics_enabled = true;
+        let s = Settings {
+            metrics_enabled: true,
+            ..Settings::default()
+        };
+        assert!(
+            !Settings::default().metrics_enabled,
+            "default should be disabled"
+        );
         s.save_atomic(&path).unwrap();
         let loaded = Settings::load_or_default(&path).unwrap();
         assert!(loaded.metrics_enabled);
@@ -67,8 +72,10 @@ mod tests {
     #[test]
     fn flip_disable_persists_to_toml() {
         let path = temp_settings_path("disable");
-        let mut s = Settings::default();
-        s.metrics_enabled = true;
+        let s = Settings {
+            metrics_enabled: true,
+            ..Settings::default()
+        };
         s.save_atomic(&path).unwrap();
 
         let mut s2 = Settings::load_or_default(&path).unwrap();

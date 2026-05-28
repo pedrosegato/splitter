@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/audiomirror-core",
     "crates/audiomirror-cli",
+    "crates/audiomirror-integration-tests",
 ]
 
 [workspace.package]
@@ -12,7 +13,7 @@ license = "MIT"
 authors = ["Pedro Segato <pedrosegato4@gmail.com>"]
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "fs", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "fs", "signal", "process"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
 cpal = "0.15"
@@ -37,6 +38,9 @@ rand = "0.8"
 gethostname = "0.5"
 tracing-appender = "0.2"
 prometheus = { version = "0.13", default-features = false, features = ["process"] }
+assert_cmd = "2"
+insta = { version = "1", features = ["yaml"] }
+tempfile = "3"
 
 [profile.release]
 opt-level = 3

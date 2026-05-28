@@ -124,6 +124,10 @@ pub(crate) async fn run(
         }
     }
 
+    #[allow(clippy::print_stdout)]
+    {
+        println!("READY port={}", server.bind_addr.port());
+    }
     tracing::info!(
         peer_id = %identity.peer_id,
         peer_name = %identity.peer_name,

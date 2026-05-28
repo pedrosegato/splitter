@@ -7,3 +7,6 @@ pub mod playback;
 pub mod priority;
 pub mod resampler;
 pub mod ring;
+
+#[cfg(test)]
+pub mod test_fixtures;

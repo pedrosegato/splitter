@@ -1,0 +1,16 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+Show real-time statistics for active streams.
+
+Examples: audiomirror-cli stats audiomirror-cli stats --stream-id 1
+
+Usage: audiomirror-cli stats [OPTIONS]
+
+Options:
+      --stream-id <STREAM_ID>
+          
+
+  -h, --help
+          Print help (see a summary with '-h')

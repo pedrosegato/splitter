@@ -1,0 +1,36 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+Capture audio from a local device and send it over UDP as Opus packets.
+
+Example: audiomirror-cli send --input <device-id> --addr 192.168.1.50:5004
+
+Usage: audiomirror-cli send [OPTIONS] --input <INPUT> --addr <ADDR>
+
+Options:
+      --input <INPUT>
+          
+
+      --addr <ADDR>
+          
+
+      --stream-id <STREAM_ID>
+          [default: 0]
+
+      --bitrate <BITRATE>
+          [default: 64000]
+
+      --source <SOURCE>
+          [default: mic]
+          [possible values: mic, system]
+
+      --fec-mode <FEC_MODE>
+          [default: auto]
+          [possible values: auto, always, never]
+
+      --simulated-loss-pct <SIMULATED_LOSS_PCT>
+          [default: 0]
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -68,8 +68,26 @@ impl From<CliJitterMode> for audiomirror_core::JitterMode {
     }
 }
 
+#[derive(Subcommand, Debug)]
+enum StreamAction {
+    /// Open an audio stream to a remote peer device.
+    ///
+    /// Example:
+    ///   audiomirror-cli stream open --from SystemAudio:0 --to <peer-id>:<device-id>
+    Open {
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long, default_value_t = 64_000)]
+        bitrate: i32,
+    },
+}
+
 #[derive(Parser, Debug)]
-#[command(name = "audiomirror-cli", version, about = "AudioMirror Phase 1 CLI")]
+#[command(name = "audiomirror-cli", version, about = "AudioMirror CLI")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -77,8 +95,13 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
+    /// List available audio input and output devices.
     Devices,
 
+    /// Capture audio from a local device and send it over UDP as Opus packets.
+    ///
+    /// Example:
+    ///   audiomirror-cli send --input <device-id> --addr 192.168.1.50:5004
     Send {
         #[arg(long)]
         input: String,
@@ -96,6 +119,10 @@ enum Cmd {
         simulated_loss_pct: u8,
     },
 
+    /// Receive Opus packets over UDP and play them on a local output device.
+    ///
+    /// Example:
+    ///   audiomirror-cli recv --output <device-id> --bind 0.0.0.0:5004
     Recv {
         #[arg(long)]
         output: String,
@@ -107,6 +134,10 @@ enum Cmd {
         jitter_max_depth_ms: u32,
     },
 
+    /// Capture from a local mic and play back on a local output device (loopback test).
+    ///
+    /// Example:
+    ///   audiomirror-cli loop --input <mic-id> --output <spk-id>
     Loop {
         #[arg(long)]
         input: String,
@@ -122,6 +153,10 @@ enum Cmd {
         simulated_loss_pct: u8,
     },
 
+    /// Discover AudioMirror peers on the local network via mDNS.
+    ///
+    /// Example:
+    ///   audiomirror-cli discover --duration-secs 5
     Discover {
         #[arg(long, default_value_t = 5)]
         duration_secs: u64,
@@ -129,11 +164,34 @@ enum Cmd {
         signaling_port: u16,
     },
 
+    /// Start the AudioMirror background daemon (signaling server + device watcher).
+    ///
+    /// Example:
+    ///   audiomirror-cli daemon --signaling-port 5100
     Daemon {
         #[arg(long, default_value_t = 7_000)]
         signaling_port: u16,
         #[arg(long)]
         peer_name: Option<String>,
+    },
+
+    /// Open or manage peer-to-peer audio streams (requires a running daemon).
+    ///
+    /// Example:
+    ///   audiomirror-cli stream open --from SystemAudio:0 --to <peer-id>:<device-id>
+    Stream {
+        #[command(subcommand)]
+        action: StreamAction,
+    },
+
+    /// Show real-time statistics for active streams.
+    ///
+    /// Examples:
+    ///   audiomirror-cli stats
+    ///   audiomirror-cli stats --stream-id 1
+    Stats {
+        #[arg(long)]
+        stream_id: Option<u8>,
     },
 
     /// Inspect application logs.
@@ -259,5 +317,15 @@ async fn main() -> anyhow::Result<()> {
             MetricsAction::Disable => commands::metrics::run_disable(),
             MetricsAction::Status => commands::metrics::run_status().await,
         },
+        Cmd::Stream { .. } => {
+            anyhow::bail!(
+                "stream subcommand requires a running daemon; start with `audiomirror-cli daemon`"
+            )
+        }
+        Cmd::Stats { .. } => {
+            anyhow::bail!(
+                "stats subcommand requires a running daemon; start with `audiomirror-cli daemon`"
+            )
+        }
     }
 }

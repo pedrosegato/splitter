@@ -1,0 +1,26 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+Receive Opus packets over UDP and play them on a local output device.
+
+Example: audiomirror-cli recv --output <device-id> --bind 0.0.0.0:5004
+
+Usage: audiomirror-cli recv [OPTIONS] --output <OUTPUT> --bind <BIND>
+
+Options:
+      --output <OUTPUT>
+          
+
+      --bind <BIND>
+          
+
+      --jitter-mode <JITTER_MODE>
+          [default: auto]
+          [possible values: auto, min]
+
+      --jitter-max-depth-ms <JITTER_MAX_DEPTH_MS>
+          [default: 100]
+
+  -h, --help
+          Print help (see a summary with '-h')

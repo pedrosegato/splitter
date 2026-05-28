@@ -1,0 +1,26 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+AudioMirror CLI
+
+Usage: audiomirror-cli <COMMAND>
+
+Commands:
+  devices    List available audio input and output devices
+  send       Capture audio from a local device and send it over UDP as Opus packets
+  recv       Receive Opus packets over UDP and play them on a local output device
+  loop       Capture from a local mic and play back on a local output device (loopback test)
+  discover   Discover AudioMirror peers on the local network via mDNS
+  daemon     Start the AudioMirror background daemon (signaling server + device watcher)
+  stream     Open or manage peer-to-peer audio streams (requires a running daemon)
+  stats      Show real-time statistics for active streams
+  logs       Inspect application logs
+  settings   Read or write application settings
+  autostart  Manage autostart (login item / systemd user service / Windows Run key)
+  metrics    Enable, disable, or check the Prometheus metrics endpoint
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version

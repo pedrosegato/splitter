@@ -1,0 +1,19 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+Discover AudioMirror peers on the local network via mDNS.
+
+Example: audiomirror-cli discover --duration-secs 5
+
+Usage: audiomirror-cli discover [OPTIONS]
+
+Options:
+      --duration-secs <DURATION_SECS>
+          [default: 5]
+
+      --signaling-port <SIGNALING_PORT>
+          [default: 7000]
+
+  -h, --help
+          Print help (see a summary with '-h')

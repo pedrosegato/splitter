@@ -1,0 +1,25 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+Open an audio stream to a remote peer device.
+
+Example: audiomirror-cli stream open --from SystemAudio:0 --to <peer-id>:<device-id>
+
+Usage: audiomirror-cli stream open [OPTIONS] --from <FROM> --to <TO>
+
+Options:
+      --from <FROM>
+          
+
+      --to <TO>
+          
+
+      --session <SESSION>
+          
+
+      --bitrate <BITRATE>
+          [default: 64000]
+
+  -h, --help
+          Print help (see a summary with '-h')

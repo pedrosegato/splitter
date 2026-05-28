@@ -1,0 +1,33 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+Capture from a local mic and play back on a local output device (loopback test).
+
+Example: audiomirror-cli loop --input <mic-id> --output <spk-id>
+
+Usage: audiomirror-cli loop [OPTIONS] --input <INPUT> --output <OUTPUT>
+
+Options:
+      --input <INPUT>
+          
+
+      --output <OUTPUT>
+          
+
+      --bitrate <BITRATE>
+          [default: 64000]
+
+      --source <SOURCE>
+          [default: mic]
+          [possible values: mic, system]
+
+      --fec-mode <FEC_MODE>
+          [default: auto]
+          [possible values: auto, always, never]
+
+      --simulated-loss-pct <SIMULATED_LOSS_PCT>
+          [default: 0]
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,19 @@
+---
+source: crates/audiomirror-cli/tests/help_snapshots.rs
+expression: output
+---
+Start the AudioMirror background daemon (signaling server + device watcher).
+
+Example: audiomirror-cli daemon --signaling-port 5100
+
+Usage: audiomirror-cli daemon [OPTIONS]
+
+Options:
+      --signaling-port <SIGNALING_PORT>
+          [default: 7000]
+
+      --peer-name <PEER_NAME>
+          
+
+  -h, --help
+          Print help (see a summary with '-h')

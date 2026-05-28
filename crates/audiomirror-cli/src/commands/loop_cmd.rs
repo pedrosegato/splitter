@@ -42,8 +42,7 @@ pub(crate) async fn run(
     simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
     let (cap_prod, mut cap_cons) = AudioRing::new(2_880);
-    let (play_prod, play_cons) = AudioRing::new(2_880);
-    let play_prod = std::sync::Arc::new(std::sync::Mutex::new(play_prod));
+    let (mut play_prod, play_cons) = AudioRing::new(2_880);
 
     let _capture: CaptureGuard = match source {
         Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, cap_prod)?),
@@ -104,9 +103,7 @@ pub(crate) async fn run(
 
             enc.encode(&frame, &mut payload)?;
             dec.decode(Some(&payload), &mut out_frame)?;
-            if let Ok(mut p) = play_prod.lock() {
-                let _ = p.push_slice(&out_frame);
-            }
+            let _ = play_prod.push_slice(&out_frame);
         }
     }
 }

@@ -1,6 +1,6 @@
 use audiomirror_core::audio::codec::OpusDecoder;
 use audiomirror_core::audio::playback::PlaybackHandle;
-use audiomirror_core::audio::ring::AudioRing;
+use audiomirror_core::audio::ring::{AudioRing, RingProducer};
 use audiomirror_core::net::jitter::{JitterBuffer, JitterOutput};
 use audiomirror_core::net::packet::Packet;
 use audiomirror_core::FRAME_SAMPLES;
@@ -20,9 +20,8 @@ pub(crate) async fn run_with_settings(
     let sock = make_udp_socket(bind_addr)?;
     tracing::info!("receiving on {bind_addr}, playing to {output}");
 
-    let (producer, consumer) = AudioRing::new(2_880);
+    let (mut producer, consumer) = AudioRing::new(2_880);
     let _playback = PlaybackHandle::start(output, consumer)?;
-    let producer = std::sync::Arc::new(std::sync::Mutex::new(producer));
 
     let mut decoder = OpusDecoder::new()?;
     let mut udp_buf = vec![0u8; 1500];
@@ -55,25 +54,20 @@ pub(crate) async fn run_with_settings(
                             .decode_with_fec(Some(&p.payload), &mut frame, true)
                             .is_ok()
                         {
-                            push_frame_to_ring(&producer, &frame);
+                            push_frame_to_ring(&mut producer, &frame);
                         }
                         pending_fec_recover = false;
                     }
                     decoder.decode_with_fec(Some(&p.payload), &mut frame, false)?;
-                    push_frame_to_ring(&producer, &frame);
+                    push_frame_to_ring(&mut producer, &frame);
                 }
             }
         }
     }
 }
 
-fn push_frame_to_ring(
-    producer: &std::sync::Arc<std::sync::Mutex<audiomirror_core::audio::ring::RingProducer>>,
-    frame: &[f32],
-) {
-    if let Ok(mut p) = producer.lock() {
-        let _ = p.push_slice(frame);
-    }
+fn push_frame_to_ring(producer: &mut RingProducer, frame: &[f32]) {
+    let _ = producer.push_slice(frame);
 }
 
 fn make_udp_socket(bind: SocketAddr) -> anyhow::Result<UdpSocket> {

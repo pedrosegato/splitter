@@ -11,6 +11,16 @@ enum AutostartAction {
 }
 
 #[derive(Subcommand, Debug)]
+enum MetricsAction {
+    /// Enable the Prometheus /metrics endpoint (restart daemon to apply).
+    Enable,
+    /// Disable the Prometheus /metrics endpoint (restart daemon to apply).
+    Disable,
+    /// Show metrics_enabled setting and whether the endpoint is currently reachable.
+    Status,
+}
+
+#[derive(Subcommand, Debug)]
 enum LogsAction {
     /// Print the path of the current log file.
     Path,
@@ -143,6 +153,12 @@ enum Cmd {
         #[command(subcommand)]
         action: AutostartAction,
     },
+
+    /// Enable, disable, or check the Prometheus metrics endpoint.
+    Metrics {
+        #[command(subcommand)]
+        action: MetricsAction,
+    },
 }
 
 #[tokio::main]
@@ -226,6 +242,11 @@ async fn main() -> anyhow::Result<()> {
             AutostartAction::Enable => commands::autostart::run_enable(),
             AutostartAction::Disable => commands::autostart::run_disable(),
             AutostartAction::Status => commands::autostart::run_status(),
+        },
+        Cmd::Metrics { action } => match action {
+            MetricsAction::Enable => commands::metrics::run_enable(),
+            MetricsAction::Disable => commands::metrics::run_disable(),
+            MetricsAction::Status => commands::metrics::run_status().await,
         },
     }
 }

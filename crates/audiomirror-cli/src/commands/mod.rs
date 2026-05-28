@@ -4,6 +4,7 @@ pub(crate) mod devices;
 pub(crate) mod discover;
 pub(crate) mod logs;
 pub(crate) mod loop_cmd;
+pub(crate) mod metrics;
 pub(crate) mod recv;
 pub(crate) mod send;
 pub(crate) mod settings;

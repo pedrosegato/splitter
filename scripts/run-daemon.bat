@@ -37,6 +37,10 @@ if errorlevel 1 (
 )
 
 echo.
+echo === Local audio devices ===
+.\target\release\audiomirror-cli.exe devices
+echo.
+
 echo [3/3] launching daemon...
 echo press Ctrl+C inside daemon to graceful shutdown.
 echo.

@@ -24,6 +24,10 @@ echo "[2/3] cargo build --release..."
 cargo build -p audiomirror-cli --release
 
 echo
+echo "=== Local audio devices ==="
+./target/release/audiomirror-cli devices
+echo
+
 echo "[3/3] launching daemon..."
 echo "press Ctrl+C inside daemon for graceful shutdown."
 echo

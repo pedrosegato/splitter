@@ -14,6 +14,7 @@ pub struct DeviceInfo {
 pub enum DeviceKind {
     Input,
     Output,
+    SystemAudio,
 }
 
 use cpal::traits::{DeviceTrait, HostTrait};
@@ -40,6 +41,49 @@ pub fn list_devices() -> Result<Vec<DeviceInfo>, AudioError> {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    out.push(DeviceInfo {
+        id: "SystemAudio:0:ScreenCaptureKit".into(),
+        name: "Desktop Audio (ScreenCaptureKit)".into(),
+        kind: DeviceKind::SystemAudio,
+        default_sample_rate: crate::SAMPLE_RATE,
+        channels: 1,
+    });
+
+    #[cfg(target_os = "windows")]
+    if let Ok(wasapi_host) = cpal::host_from_id(cpal::HostId::Wasapi) {
+        if let Some(d) = wasapi_host.default_output_device() {
+            let name = d.name().unwrap_or_else(|_| "default output".into());
+            out.push(DeviceInfo {
+                id: format!("SystemAudio:0:{name}"),
+                name: format!("Desktop Audio ({name})"),
+                kind: DeviceKind::SystemAudio,
+                default_sample_rate: crate::SAMPLE_RATE,
+                channels: 2,
+            });
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let host_linux = cpal::default_host();
+        if let Ok(inputs) = host_linux.input_devices() {
+            for (idx, d) in inputs.enumerate() {
+                if let Ok(name) = d.name() {
+                    if name.ends_with(".monitor") {
+                        out.push(DeviceInfo {
+                            id: format!("SystemAudio:{idx}:{name}"),
+                            name: format!("Desktop Audio ({name})"),
+                            kind: DeviceKind::SystemAudio,
+                            default_sample_rate: crate::SAMPLE_RATE,
+                            channels: 2,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     Ok(out)
 }
 
@@ -48,6 +92,7 @@ fn device_info(d: &cpal::Device, kind: DeviceKind, idx: usize) -> Option<DeviceI
     let cfg = match kind {
         DeviceKind::Input => d.default_input_config().ok()?,
         DeviceKind::Output => d.default_output_config().ok()?,
+        DeviceKind::SystemAudio => unreachable!("device_info is not called for SystemAudio"),
     };
     let id = format!("{kind:?}:{idx}:{name}");
     Some(DeviceInfo {
@@ -73,7 +118,10 @@ mod tests {
     fn list_returns_inputs_and_outputs_separated() {
         if let Ok(devs) = list_devices() {
             for d in &devs {
-                assert!(matches!(d.kind, DeviceKind::Input | DeviceKind::Output));
+                assert!(matches!(
+                    d.kind,
+                    DeviceKind::Input | DeviceKind::Output | DeviceKind::SystemAudio
+                ));
             }
         }
     }
@@ -86,6 +134,30 @@ mod tests {
             ids.sort();
             ids.dedup();
             assert_eq!(ids.len(), n, "device ids must be unique within a listing");
+        }
+    }
+
+    #[test]
+    fn list_includes_system_audio_entry_on_mac_and_windows() {
+        let devs = list_devices().expect("list");
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        assert!(
+            devs.iter()
+                .any(|d| matches!(d.kind, DeviceKind::SystemAudio)),
+            "expected a SystemAudio entry on this platform"
+        );
+        #[cfg(target_os = "linux")]
+        {
+            let has_monitor = devs
+                .iter()
+                .any(|d| matches!(d.kind, DeviceKind::SystemAudio));
+            let _ = has_monitor;
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        {
+            assert!(!devs
+                .iter()
+                .any(|d| matches!(d.kind, DeviceKind::SystemAudio)));
         }
     }
 }

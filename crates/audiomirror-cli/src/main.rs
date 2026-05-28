@@ -49,6 +49,13 @@ enum Cmd {
         #[arg(long, value_enum, default_value_t = Source::Mic)]
         source: Source,
     },
+
+    Discover {
+        #[arg(long, default_value_t = 5)]
+        duration_secs: u64,
+        #[arg(long, default_value_t = 7_000)]
+        signaling_port: u16,
+    },
 }
 
 #[tokio::main]
@@ -73,5 +80,9 @@ async fn main() -> anyhow::Result<()> {
             bitrate,
             source,
         } => commands::loop_cmd::run(&input, &output, bitrate, source).await,
+        Cmd::Discover {
+            duration_secs,
+            signaling_port,
+        } => commands::discover::run(duration_secs, signaling_port).await,
     }
 }

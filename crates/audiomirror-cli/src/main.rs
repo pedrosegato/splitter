@@ -2,6 +2,12 @@ use clap::{Parser, Subcommand};
 
 mod commands;
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum Source {
+    Mic,
+    System,
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "audiomirror-cli", version, about = "AudioMirror Phase 1 CLI")]
 struct Cli {
@@ -38,6 +44,8 @@ enum Cmd {
         output: String,
         #[arg(long, default_value_t = 64_000)]
         bitrate: i32,
+        #[arg(long, value_enum, default_value_t = Source::Mic)]
+        source: Source,
     },
 }
 
@@ -60,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
             input,
             output,
             bitrate,
-        } => commands::loop_cmd::run(&input, &output, bitrate).await,
+            source,
+        } => commands::loop_cmd::run(&input, &output, bitrate, source).await,
     }
 }

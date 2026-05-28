@@ -49,6 +49,20 @@ impl OpusEncoder {
         out.truncate(n);
         Ok(n)
     }
+
+    pub fn set_fec(&mut self, enable: bool, packet_loss_perc: u8) -> Result<(), CodecError> {
+        self.inner
+            .set_inband_fec(enable)
+            .map_err(|e| CodecError::OpusInit {
+                source: Box::new(e),
+            })?;
+        self.inner
+            .set_packet_loss_perc(packet_loss_perc)
+            .map_err(|e| CodecError::OpusInit {
+                source: Box::new(e),
+            })?;
+        Ok(())
+    }
 }
 
 pub struct OpusDecoder {
@@ -66,6 +80,15 @@ impl OpusDecoder {
     }
 
     pub fn decode(&mut self, input: Option<&[u8]>, out: &mut [f32]) -> Result<(), CodecError> {
+        self.decode_with_fec(input, out, false)
+    }
+
+    pub fn decode_with_fec(
+        &mut self,
+        input: Option<&[u8]>,
+        out: &mut [f32],
+        use_fec: bool,
+    ) -> Result<(), CodecError> {
         if out.len() < FRAME_SAMPLES {
             return Err(CodecError::InvalidFrame {
                 reason: format!("output buffer must be at least {FRAME_SAMPLES}"),
@@ -82,12 +105,12 @@ impl OpusDecoder {
                 source: Box::new(e),
             }
         })?;
-        let n =
-            self.inner
-                .decode_float(pkt, signals, false)
-                .map_err(|e| CodecError::OpusDecode {
-                    source: Box::new(e),
-                })?;
+        let n = self
+            .inner
+            .decode_float(pkt, signals, use_fec)
+            .map_err(|e| CodecError::OpusDecode {
+                source: Box::new(e),
+            })?;
         if n != FRAME_SAMPLES {
             return Err(CodecError::InvalidFrame {
                 reason: format!("decoder produced {n} samples, expected {FRAME_SAMPLES}"),
@@ -167,5 +190,53 @@ mod tests {
             n,
             "payload length should match returned size after truncate"
         );
+    }
+
+    #[test]
+    fn set_fec_enables_inband_fec_on_encoder() {
+        let mut enc = OpusEncoder::new(64_000).unwrap();
+        enc.set_fec(true, 5).unwrap();
+        let input = sine_frame(440.0);
+        let mut payload = BytesMut::with_capacity(512);
+        let n = enc.encode(&input, &mut payload).unwrap();
+        assert!(n > 0);
+    }
+
+    #[test]
+    fn set_fec_disable_then_re_enable_round_trip() {
+        let mut enc = OpusEncoder::new(64_000).unwrap();
+        enc.set_fec(true, 10).unwrap();
+        enc.set_fec(false, 0).unwrap();
+        enc.set_fec(true, 3).unwrap();
+    }
+
+    #[test]
+    fn decode_with_fec_true_against_real_packet_succeeds() {
+        let mut enc = OpusEncoder::new(64_000).unwrap();
+        enc.set_fec(true, 10).unwrap();
+        let mut payload = BytesMut::with_capacity(512);
+        let input = sine_frame(440.0);
+        let _ = enc.encode(&input, &mut payload).unwrap();
+
+        let mut dec = OpusDecoder::new().unwrap();
+        let mut out = vec![0.0f32; FRAME_SAMPLES];
+        dec.decode_with_fec(Some(&payload), &mut out, true).unwrap();
+    }
+
+    #[test]
+    fn decode_with_fec_false_matches_legacy_decode() {
+        let mut enc = OpusEncoder::new(64_000).unwrap();
+        let mut payload = BytesMut::with_capacity(512);
+        let input = sine_frame(880.0);
+        enc.encode(&input, &mut payload).unwrap();
+
+        let mut a = OpusDecoder::new().unwrap();
+        let mut b = OpusDecoder::new().unwrap();
+        let mut out_a = vec![0.0f32; FRAME_SAMPLES];
+        let mut out_b = vec![0.0f32; FRAME_SAMPLES];
+        a.decode(Some(&payload), &mut out_a).unwrap();
+        b.decode_with_fec(Some(&payload), &mut out_b, false)
+            .unwrap();
+        assert_eq!(out_a, out_b);
     }
 }

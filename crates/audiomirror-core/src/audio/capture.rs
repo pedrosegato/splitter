@@ -309,10 +309,9 @@ impl SampleRouter {
 }
 
 fn flush_to_ring(samples: &[f32], prod: &Mutex<RingProducer>, notify: &Notify) {
-    use crate::FRAME_STEREO_SAMPLES;
     if let Ok(mut p) = prod.try_lock() {
         let pushed = p.push_slice(samples);
-        if pushed >= FRAME_STEREO_SAMPLES {
+        if pushed > 0 {
             notify.notify_one();
         }
     }
@@ -472,29 +471,17 @@ mod tests {
         );
     }
 
-    /// Verifies that flush_to_ring signals the Notify exactly when at least FRAME_STEREO_SAMPLES
-    /// samples have been pushed -- sub-frame pushes must NOT signal.
+    /// Verifies that flush_to_ring signals the Notify on any non-empty push so the
+    /// consumer wakes promptly even when cpal callbacks deliver less than one full frame.
     #[tokio::test]
-    async fn flush_to_ring_notifies_at_frame_boundary() {
+    async fn flush_to_ring_notifies_on_any_non_empty_push() {
         let (prod, _cons) = AudioRing::new(8192);
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
-        // Push fewer than FRAME_STEREO_SAMPLES -- Notify must NOT be triggered.
-        flush_to_ring(&[0.0f32; FRAME_STEREO_SAMPLES - 1], &prod, &notify);
-        let timed_out =
-            tokio::time::timeout(std::time::Duration::from_millis(10), notify.notified())
-                .await
-                .is_err();
-        assert!(timed_out, "notify must NOT fire for sub-frame push");
-
-        // Push exactly FRAME_STEREO_SAMPLES -- Notify must fire.
-        flush_to_ring(&[0.0f32; FRAME_STEREO_SAMPLES], &prod, &notify);
+        flush_to_ring(&[0.0f32; 64], &prod, &notify);
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(100), notify.notified()).await;
-        assert!(
-            result.is_ok(),
-            "notify must fire after a full stereo frame is pushed"
-        );
+        assert!(result.is_ok(), "notify must fire on a non-empty push");
     }
 }

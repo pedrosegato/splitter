@@ -2,7 +2,6 @@
 
 use crate::audio::ring::RingProducer;
 use crate::error::AudioError;
-use crate::FRAME_STEREO_SAMPLES;
 use crate::SAMPLE_RATE;
 use screencapturekit::{
     cm::{CMSampleBuffer, CMTime},
@@ -116,7 +115,7 @@ impl SCStreamOutputTrait for AudioHandler {
 
         if let Ok(mut p) = self.producer.try_lock() {
             let pushed = p.push_slice(&stereo_buf[..stereo_len]);
-            if pushed >= FRAME_STEREO_SAMPLES {
+            if pushed > 0 {
                 self.frame_notify.notify_one();
             }
         }

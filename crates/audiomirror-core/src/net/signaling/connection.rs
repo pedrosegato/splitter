@@ -34,6 +34,11 @@ pub fn spawn_peer_connection(stream: TcpStream) -> PeerConnectionHandle {
             .max_frame_length(1 << 20)
             .new_codec();
         let mut framed = Framed::new(stream, codec);
+        let mut hb_tick = tokio::time::interval(Duration::from_secs(1));
+        hb_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_heard = tokio::time::Instant::now();
+        let mut deadline = tokio::time::interval(Duration::from_millis(500));
+        deadline.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 outgoing = msg_rx.recv() => {
@@ -64,6 +69,7 @@ pub fn spawn_peer_connection(stream: TcpStream) -> PeerConnectionHandle {
                     match incoming {
                         Some(Ok(buf)) => match SignalingMessage::decode_from_slice(&buf) {
                             Ok(msg) => {
+                                last_heard = tokio::time::Instant::now();
                                 let _ = event_tx_task.send(PeerEvent::Message(msg));
                             }
                             Err(e) => {
@@ -85,6 +91,37 @@ pub fn spawn_peer_connection(stream: TcpStream) -> PeerConnectionHandle {
                             });
                             break;
                         }
+                    }
+                }
+                _ = hb_tick.tick() => {
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    let hb = SignalingMessage::Heartbeat {
+                        timestamp_ms: now_ms,
+                        streams_stats: Vec::new(),
+                    };
+                    match hb.encode_to_bytes() {
+                        Ok(bytes) => {
+                            if let Err(e) = framed.send(bytes).await {
+                                let _ = event_tx_task.send(PeerEvent::Disconnected {
+                                    reason: format!("hb send: {e}"),
+                                });
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("encode hb: {e}");
+                        }
+                    }
+                }
+                _ = deadline.tick() => {
+                    if last_heard.elapsed() > REMOTE_PEER_HEARTBEAT_TIMEOUT {
+                        let _ = event_tx_task.send(PeerEvent::Disconnected {
+                            reason: "heartbeat timeout".into(),
+                        });
+                        break;
                     }
                 }
             }
@@ -173,5 +210,54 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(matches!(event, PeerEvent::Disconnected { .. }));
+    }
+
+    #[tokio::test]
+    async fn heartbeats_arrive_at_one_per_second_window() {
+        let (server, _client) = _wire_for_tests().await;
+        let mut server_events = server.events.subscribe();
+        let start = std::time::Instant::now();
+        let mut beats = 0u32;
+        while start.elapsed() < Duration::from_millis(2_400) {
+            if let Ok(Ok(PeerEvent::Message(SignalingMessage::Heartbeat { .. }))) =
+                tokio::time::timeout(Duration::from_millis(1_500), server_events.recv()).await
+            {
+                beats += 1;
+            }
+        }
+        assert!(
+            beats >= 2,
+            "expected >= 2 heartbeats in 2.4s window, got {beats}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_heartbeats_for_5s_emits_disconnect() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_fut = tokio::spawn(async move {
+            let (s, _) = listener.accept().await.unwrap();
+            s
+        });
+        let _client = TcpStream::connect(addr).await.unwrap();
+        let server = server_fut.await.unwrap();
+        let handle = spawn_peer_connection(server);
+        let mut events = handle.events.subscribe();
+        let saw_disconnect = tokio::time::timeout(
+            REMOTE_PEER_HEARTBEAT_TIMEOUT + Duration::from_secs(2),
+            async {
+                loop {
+                    if let Ok(PeerEvent::Disconnected { .. }) = events.recv().await {
+                        return true;
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap_or(false);
+        assert!(
+            saw_disconnect,
+            "expected disconnect after 5s of no heartbeats"
+        );
     }
 }

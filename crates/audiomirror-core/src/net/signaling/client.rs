@@ -149,6 +149,7 @@ mod tests {
             let server_trust = server_trust.clone();
             let server_pending = server.pending.clone();
             let server_conns = server.connections.clone();
+            let conn_est_tx = server.connection_established_tx.clone();
             async move {
                 for _ in 0..50 {
                     if !server_pending.list().await.is_empty() {
@@ -156,7 +157,14 @@ mod tests {
                     }
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                accept_pending(&server_pending, &server_trust, &server_conns, 0).await
+                accept_pending(
+                    &server_pending,
+                    &server_trust,
+                    &server_conns,
+                    &conn_est_tx,
+                    0,
+                )
+                .await
             }
         });
 

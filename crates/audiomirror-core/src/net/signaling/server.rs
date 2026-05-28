@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -51,6 +51,9 @@ pub struct SignalingServerHandle {
     pub bind_addr: SocketAddr,
     pub pending: Arc<PendingPeers>,
     pub connections: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    /// Fires once for every peer whose connection is fully established (both
+    /// the auto-accept-trusted path and the manual `accept` path).
+    pub connection_established_tx: broadcast::Sender<Uuid>,
 }
 
 pub struct SignalingServer;
@@ -67,6 +70,7 @@ impl SignalingServer {
         let bind_addr = listener.local_addr().map_err(NetError::UdpIo)?;
         let pending: Arc<PendingPeers> = Arc::new(PendingPeers::default());
         let connections: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>> = Arc::default();
+        let (conn_est_tx, _) = broadcast::channel::<Uuid>(32);
 
         let p_clone = pending.clone();
         let c_clone = connections.clone();
@@ -74,6 +78,7 @@ impl SignalingServer {
         let s_clone = settings;
         let id_clone = identity.clone();
         let _sessions = sessions;
+        let conn_est_tx_task = conn_est_tx.clone();
 
         tokio::spawn(async move {
             loop {
@@ -91,6 +96,7 @@ impl SignalingServer {
                 let t_inner = t_clone.clone();
                 let s_inner = s_clone.clone();
                 let id_inner = id_clone.clone();
+                let conn_est_tx_inner = conn_est_tx_task.clone();
                 tokio::spawn(async move {
                     let first = match tokio::time::timeout(
                         std::time::Duration::from_secs(5),
@@ -174,6 +180,7 @@ impl SignalingServer {
                                 .await;
                             c_inner.write().await.insert(peer_uuid, handle);
                             let _ = id_inner;
+                            let _ = conn_est_tx_inner.send(peer_uuid);
                             return;
                         }
                         // auto_accept_trusted is false — fall through to pending queue
@@ -196,6 +203,7 @@ impl SignalingServer {
             bind_addr,
             pending,
             connections,
+            connection_established_tx: conn_est_tx,
         })
     }
 }
@@ -210,6 +218,7 @@ pub async fn accept_pending(
     pending: &PendingPeers,
     trust: &Arc<RwLock<TrustStore>>,
     connections: &Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    conn_established_tx: &broadcast::Sender<Uuid>,
     idx: usize,
 ) -> Result<(Uuid, String), NetError> {
     let p = pending
@@ -240,6 +249,7 @@ pub async fn accept_pending(
                 reason: "peer disconnected before ack".into(),
             })?;
     }
+    let _ = conn_established_tx.send(p.peer_id);
     Ok((p.peer_id, token))
 }
 
@@ -389,9 +399,15 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        let (accepted_id, _token) = accept_pending(&server.pending, &trust, &server.connections, 0)
-            .await
-            .unwrap();
+        let (accepted_id, _token) = accept_pending(
+            &server.pending,
+            &trust,
+            &server.connections,
+            &server.connection_established_tx,
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(accepted_id, peer_id);
         let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {

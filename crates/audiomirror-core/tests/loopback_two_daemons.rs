@@ -3,7 +3,7 @@ use audiomirror_core::net::signaling::client::connect_to_peer;
 use audiomirror_core::net::signaling::server::{
     accept_pending, local_capabilities, SignalingServer,
 };
-use audiomirror_core::net::trust::TrustStore;
+use audiomirror_core::net::trust::{TrustStore, TrustedPeer};
 use audiomirror_core::settings::Settings;
 use audiomirror_core::PeerIdentity;
 use std::sync::Arc;
@@ -64,6 +64,7 @@ async fn two_local_daemons_full_handshake_and_session() {
     let acceptor = tokio::spawn({
         let pending = a_server.pending.clone();
         let conns = a_server.connections.clone();
+        let conn_est_tx = a_server.connection_established_tx.clone();
         let trust = a_trust.clone();
         async move {
             for _ in 0..50 {
@@ -72,7 +73,7 @@ async fn two_local_daemons_full_handshake_and_session() {
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            accept_pending(&pending, &trust, &conns, 0).await
+            accept_pending(&pending, &trust, &conns, &conn_est_tx, 0).await
         }
     });
     let (dial_res, accept_res) = tokio::join!(dial, acceptor);
@@ -88,4 +89,154 @@ async fn two_local_daemons_full_handshake_and_session() {
     let snap = a_sessions.snapshot().await;
     assert_eq!(snap.len(), 1);
     assert_eq!(snap[0].id, session_id);
+}
+
+/// Verify that `connection_established_tx` fires on both the manual-accept path
+/// and the auto-accept-trusted path.  The daemon background task relies on this
+/// event to spawn `spawn_stream_open_acceptor` for every established connection.
+#[tokio::test]
+async fn connection_established_fires_on_both_accept_paths() {
+    let dir = tempdir().unwrap();
+
+    // ── manual-accept path ────────────────────────────────────────────────────
+    let server_identity = id("server-manual");
+    let server_trust = Arc::new(RwLock::new(
+        TrustStore::load_or_create(&dir.path().join("s1-trust.toml")).unwrap(),
+    ));
+    let settings = Arc::new(RwLock::new(Settings::default())); // auto_accept_trusted = false
+    let server = SignalingServer::start(
+        "127.0.0.1:0".parse().unwrap(),
+        server_identity,
+        server_trust.clone(),
+        SessionManager::new(),
+        settings,
+    )
+    .await
+    .unwrap();
+
+    let mut est_rx = server.connection_established_tx.subscribe();
+
+    let client_identity = id("client-manual");
+    let client_trust = Arc::new(RwLock::new(
+        TrustStore::load_or_create(&dir.path().join("c1-trust.toml")).unwrap(),
+    ));
+
+    let expected_peer_id = client_identity.peer_id;
+    let dial = tokio::spawn({
+        let addr = server.bind_addr;
+        async move {
+            connect_to_peer(
+                addr,
+                &client_identity,
+                client_trust,
+                None,
+                Duration::from_secs(5),
+            )
+            .await
+        }
+    });
+    let manual_accept = tokio::spawn({
+        let pending = server.pending.clone();
+        let conns = server.connections.clone();
+        let trust = server_trust.clone();
+        let tx = server.connection_established_tx.clone();
+        async move {
+            for _ in 0..50 {
+                if !pending.list().await.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            accept_pending(&pending, &trust, &conns, &tx, 0).await
+        }
+    });
+    let (dial_res, accept_res) = tokio::join!(dial, manual_accept);
+    dial_res.unwrap().unwrap();
+    accept_res.unwrap().unwrap();
+
+    let fired_id = tokio::time::timeout(Duration::from_secs(2), est_rx.recv())
+        .await
+        .expect("timed out waiting for connection_established event on manual-accept path")
+        .expect("channel closed");
+    assert_eq!(
+        fired_id, expected_peer_id,
+        "connection_established must carry the accepted peer's UUID"
+    );
+
+    // ── auto-accept-trusted path ──────────────────────────────────────────────
+    let at_server_identity = id("server-auto");
+    let at_server_peer_id = at_server_identity.peer_id;
+    let at_server_trust = Arc::new(RwLock::new(
+        TrustStore::load_or_create(&dir.path().join("s2-trust.toml")).unwrap(),
+    ));
+    let at_settings = Arc::new(RwLock::new(Settings {
+        auto_accept_trusted: true,
+        ..Settings::default()
+    }));
+    let at_server = SignalingServer::start(
+        "127.0.0.1:0".parse().unwrap(),
+        at_server_identity,
+        at_server_trust.clone(),
+        SessionManager::new(),
+        at_settings,
+    )
+    .await
+    .unwrap();
+
+    let mut at_est_rx = at_server.connection_established_tx.subscribe();
+
+    let at_client_identity = id("client-auto");
+    let at_client_peer_id = at_client_identity.peer_id;
+    let at_client_trust = Arc::new(RwLock::new(
+        TrustStore::load_or_create(&dir.path().join("c2-trust.toml")).unwrap(),
+    ));
+    {
+        let token = "shared-auto-tok".to_string();
+        // Server trusts the client by peer_id + token.
+        at_server_trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id: at_client_identity.peer_id,
+                peer_name: at_client_identity.peer_name.clone(),
+                auth_token: token.clone(),
+            })
+            .unwrap();
+        // Client trust store maps the server's peer_id → shared token so
+        // connect_to_peer sends the right auth_token in its Hello.
+        at_client_trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id: at_server_peer_id,
+                peer_name: "server-auto".into(),
+                auth_token: token,
+            })
+            .unwrap();
+    }
+
+    connect_to_peer(
+        at_server.bind_addr,
+        &at_client_identity,
+        at_client_trust,
+        Some(at_server_peer_id),
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+
+    let at_fired_id = tokio::time::timeout(Duration::from_secs(2), at_est_rx.recv())
+        .await
+        .expect("timed out waiting for connection_established event on auto-accept-trusted path")
+        .expect("channel closed");
+    assert_eq!(
+        at_fired_id, at_client_peer_id,
+        "connection_established must carry the auto-accepted peer's UUID"
+    );
+
+    // Pending queue must stay empty on the auto-accept path
+    assert!(
+        at_server.pending.list().await.is_empty(),
+        "auto-accepted trusted peer must not appear in the pending queue"
+    );
 }

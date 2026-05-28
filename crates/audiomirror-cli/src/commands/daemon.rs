@@ -121,6 +121,27 @@ pub(crate) async fn run(
         "daemon ready; type 'help' for commands"
     );
 
+    // Spawn the stream-open acceptor for every newly established peer connection,
+    // regardless of whether it came through the manual `accept` branch or the
+    // auto-accept-trusted shortcut.
+    {
+        let mut conn_est_rx = server.connection_established_tx.subscribe();
+        let conns = server.connections.clone();
+        let registry = stream_registry.clone();
+        tokio::spawn(async move {
+            while let Ok(peer_id) = conn_est_rx.recv().await {
+                let guard = conns.read().await;
+                if let Some(conn) = guard.get(&peer_id) {
+                    spawn_stream_open_acceptor(
+                        conn.tx.clone(),
+                        conn.events.subscribe(),
+                        registry.clone(),
+                    );
+                }
+            }
+        });
+    }
+
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
 
@@ -313,17 +334,15 @@ async fn handle_line(
         }
         "accept" => {
             let idx: usize = parts.next().unwrap_or("0").parse()?;
-            let (peer_id, _token) =
-                accept_pending(&server.pending, trust, &server.connections, idx).await?;
+            let (peer_id, _token) = accept_pending(
+                &server.pending,
+                trust,
+                &server.connections,
+                &server.connection_established_tx,
+                idx,
+            )
+            .await?;
             tracing::info!("accepted pending #{idx} → peer {peer_id}");
-            let conns = server.connections.read().await;
-            if let Some(conn) = conns.get(&peer_id) {
-                spawn_stream_open_acceptor(
-                    conn.tx.clone(),
-                    conn.events.subscribe(),
-                    stream_registry.clone(),
-                );
-            }
         }
         "connect" => {
             let key = parts

@@ -23,7 +23,7 @@ async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
     send_socket.connect(sink_addr).await.unwrap();
 
     let (cap_prod, cap_cons) = AudioRing::new(FRAME_SAMPLES * 32);
-    let (play_prod, mut play_cons) = AudioRing::new(FRAME_SAMPLES * 32);
+    let (play_prod, play_cons) = AudioRing::new(FRAME_SAMPLES * 32);
 
     let frame_ready = Arc::new(Notify::new());
     let src_stats = Arc::new(StreamStats::default());

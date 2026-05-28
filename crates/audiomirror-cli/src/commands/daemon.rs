@@ -358,12 +358,11 @@ mod tests {
 
     #[test]
     fn pick_default_output_device_id_returns_output_kind_or_none() {
-        match pick_default_output_device_id() {
-            Some(id) => assert!(
+        if let Some(id) = pick_default_output_device_id() {
+            assert!(
                 id.starts_with("Output:"),
                 "expected Output: prefix, got {id}"
-            ),
-            None => {}
+            );
         }
     }
 }

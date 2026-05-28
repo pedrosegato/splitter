@@ -1099,7 +1099,7 @@ mod hotplug_tests {
         let sid = Uuid::new_v4();
 
         let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
-        let join = tokio::spawn(async move { while let Some(_) = ctrl_rx.recv().await {} });
+        let join = tokio::spawn(async move { while ctrl_rx.recv().await.is_some() {} });
         registry
             .register(StreamRuntime {
                 session_id: sid,
@@ -1117,7 +1117,7 @@ mod hotplug_tests {
         tx.send(DeviceEvent::Disappeared("Input:0:USB Headset".into()))
             .unwrap();
 
-        let mut probe_rx = ctrl_tx.clone();
+        let probe_rx = ctrl_tx.clone();
         let _ = probe_rx;
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

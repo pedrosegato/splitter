@@ -113,6 +113,7 @@ dependencies = [
  "clap",
  "socket2 0.5.10",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "uuid",

@@ -8,6 +8,16 @@ enum LogsAction {
     Tail,
 }
 
+#[derive(Subcommand, Debug)]
+enum SettingsAction {
+    /// Print all settings as TOML.
+    Show,
+    /// Print the value of a single settings key.
+    Get { key: String },
+    /// Set the value of a single settings key.
+    Set { key: String, value: String },
+}
+
 mod commands;
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -111,6 +121,12 @@ enum Cmd {
         #[command(subcommand)]
         action: LogsAction,
     },
+
+    /// Read or write application settings.
+    Settings {
+        #[command(subcommand)]
+        action: SettingsAction,
+    },
 }
 
 #[tokio::main]
@@ -184,6 +200,11 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Logs { action } => match action {
             LogsAction::Path => commands::logs::run_path().await,
             LogsAction::Tail => commands::logs::run_tail().await,
+        },
+        Cmd::Settings { action } => match action {
+            SettingsAction::Show => commands::settings::run_show(),
+            SettingsAction::Get { key } => commands::settings::run_get(&key),
+            SettingsAction::Set { key, value } => commands::settings::run_set(&key, &value),
         },
     }
 }

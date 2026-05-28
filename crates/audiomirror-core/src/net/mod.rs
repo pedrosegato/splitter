@@ -1,4 +1,5 @@
 pub mod identity;
+pub mod manager;
 pub mod packet;
 pub mod session;
 pub mod signaling;

@@ -2,6 +2,7 @@
 
 use crate::audio::ring::RingProducer;
 use crate::error::AudioError;
+use crate::FRAME_SAMPLES;
 use crate::SAMPLE_RATE;
 use screencapturekit::{
     cm::CMSampleBuffer,
@@ -14,9 +15,11 @@ use screencapturekit::{
 };
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
 pub struct MacosLoopbackHandle {
     stream: SCStream,
+    frame_notify: Arc<Notify>,
 }
 
 impl Drop for MacosLoopbackHandle {
@@ -27,8 +30,15 @@ impl Drop for MacosLoopbackHandle {
     }
 }
 
+impl MacosLoopbackHandle {
+    pub fn frame_ready(&self) -> Arc<Notify> {
+        self.frame_notify.clone()
+    }
+}
+
 struct AudioHandler {
     producer: Arc<Mutex<RingProducer>>,
+    frame_notify: Arc<Notify>,
 }
 
 impl SCStreamOutputTrait for AudioHandler {
@@ -87,7 +97,10 @@ impl SCStreamOutputTrait for AudioHandler {
         }
 
         if let Ok(mut p) = self.producer.try_lock() {
-            let _ = p.push_slice(&mono_buf[..mono_len]);
+            let pushed = p.push_slice(&mono_buf[..mono_len]);
+            if pushed >= FRAME_SAMPLES {
+                self.frame_notify.notify_one();
+            }
         }
     }
 }
@@ -124,6 +137,13 @@ fn map_sck_error(e: SCError) -> AudioError {
 
 impl MacosLoopbackHandle {
     pub fn start(producer: RingProducer) -> Result<Self, AudioError> {
+        Self::start_with_notify(producer, Arc::new(Notify::new()))
+    }
+
+    pub fn start_with_notify(
+        producer: RingProducer,
+        frame_notify: Arc<Notify>,
+    ) -> Result<Self, AudioError> {
         let content = SCShareableContent::get().map_err(map_sck_error)?;
 
         let displays = content.displays();
@@ -149,13 +169,17 @@ impl MacosLoopbackHandle {
 
         let handler = AudioHandler {
             producer: Arc::new(Mutex::new(producer)),
+            frame_notify: frame_notify.clone(),
         };
 
         let mut stream = SCStream::new(&filter, &config);
         stream.add_output_handler(handler, SCStreamOutputType::Audio);
         stream.start_capture().map_err(map_sck_error)?;
 
-        Ok(Self { stream })
+        Ok(Self {
+            stream,
+            frame_notify,
+        })
     }
 }
 

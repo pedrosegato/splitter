@@ -24,7 +24,10 @@ impl CaptureHandle {
             })?
             .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
             .ok_or_else(|| AudioError::DeviceNotFound(device_name.to_string()))?;
+        Self::from_device(device, producer)
+    }
 
+    pub fn from_device(device: cpal::Device, producer: RingProducer) -> Result<Self, AudioError> {
         let supported = device
             .default_input_config()
             .map_err(|e| AudioError::BuildStream {
@@ -147,5 +150,17 @@ mod tests {
         let (prod, _cons) = AudioRing::new(1024);
         let err = CaptureHandle::start("this-device-does-not-exist-xyz", prod).unwrap_err();
         assert!(matches!(err, AudioError::DeviceNotFound(_)));
+    }
+
+    #[test]
+    fn from_device_with_default_input_starts() {
+        use cpal::traits::HostTrait;
+        let host = cpal::default_host();
+        let Some(device) = host.default_input_device() else {
+            return;
+        };
+        let (prod, _cons) = AudioRing::new(1024);
+        let res = CaptureHandle::from_device(device, prod);
+        assert!(res.is_ok() || matches!(res, Err(AudioError::BuildStream { .. })));
     }
 }

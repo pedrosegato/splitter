@@ -77,3 +77,38 @@ Within a daemon REPL, after `open <peer>` has produced a session:
 | `stream stats [<session_id>:<stream_id>]` | Tabular live view of packets sent/recv/lost, kbps, RTT. Refreshes every 1s, exits on Ctrl-C. |
 
 Auto-pause: if a bound device disappears (USB unplug, headset off), the relevant pump pauses and signals the peer. When the device returns, the pump resumes automatically.
+
+## Settings & ops (Phase 4)
+
+AudioMirror reads a single TOML at `~/Library/Application Support/AudioMirror/settings.toml` (macOS) / `~/.config/AudioMirror/settings.toml` (Linux) / `%APPDATA%\AudioMirror\settings.toml` (Windows).
+
+```bash
+audiomirror-cli settings show
+audiomirror-cli settings set fec_mode auto
+audiomirror-cli settings set jitter_mode fixed:40
+audiomirror-cli settings set metrics_enabled true
+```
+
+**Adaptive FEC** is on by default in `auto` mode: above 1% measured loss → inband FEC turns on; below 0.2% → off; 10s hysteresis. Force on/off with `settings set fec_mode always|never`.
+
+**Adaptive jitter buffer** in `auto` mode targets P99 arrival jitter; force a fixed depth with `settings set jitter_mode fixed:<ms>`; minimum with `min`.
+
+**Auto-start with system:**
+
+```bash
+audiomirror-cli autostart enable    # writes launchd / systemd / Windows Run entry
+audiomirror-cli autostart status
+audiomirror-cli autostart disable
+```
+
+**Structured logs:** rotated daily, 7-day retention. View live: `audiomirror-cli logs tail`. Path: `audiomirror-cli logs path`.
+
+**Prometheus metrics (opt-in):**
+
+```bash
+audiomirror-cli metrics enable
+audiomirror-cli daemon &
+curl http://localhost:9000/metrics
+```
+
+**Auto-accept trusted peers:** once a peer is TOFU-trusted, set `settings set auto_accept_trusted true` to skip the manual `accept <n>` step on reconnect.

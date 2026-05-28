@@ -4,6 +4,7 @@ use crate::net::manager::SessionManager;
 use crate::net::signaling::connection::{spawn_peer_connection, PeerConnectionHandle, PeerEvent};
 use crate::net::signaling::message::{Capabilities, SignalingMessage, PROTOCOL_VERSION};
 use crate::net::trust::{TrustStore, TrustedPeer};
+use crate::settings::SettingsHandle;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use rand::RngCore;
@@ -60,6 +61,7 @@ impl SignalingServer {
         identity: PeerIdentity,
         trust: Arc<RwLock<TrustStore>>,
         sessions: Arc<SessionManager>,
+        settings: SettingsHandle,
     ) -> Result<SignalingServerHandle, NetError> {
         let listener = TcpListener::bind(bind).await.map_err(NetError::UdpIo)?;
         let bind_addr = listener.local_addr().map_err(NetError::UdpIo)?;
@@ -69,6 +71,7 @@ impl SignalingServer {
         let p_clone = pending.clone();
         let c_clone = connections.clone();
         let t_clone = trust.clone();
+        let s_clone = settings;
         let id_clone = identity.clone();
         let _sessions = sessions;
 
@@ -86,6 +89,7 @@ impl SignalingServer {
                 let p_inner = p_clone.clone();
                 let c_inner = c_clone.clone();
                 let t_inner = t_clone.clone();
+                let s_inner = s_clone.clone();
                 let id_inner = id_clone.clone();
                 tokio::spawn(async move {
                     let first = match tokio::time::timeout(
@@ -159,16 +163,20 @@ impl SignalingServer {
                                 .await;
                             return;
                         }
-                        let _ = handle
-                            .tx
-                            .send(SignalingMessage::HelloAck {
-                                accepted: true,
-                                reason: None,
-                            })
-                            .await;
-                        c_inner.write().await.insert(peer_uuid, handle);
-                        let _ = id_inner;
-                        return;
+                        let auto_accept = s_inner.read().await.auto_accept_trusted;
+                        if auto_accept {
+                            let _ = handle
+                                .tx
+                                .send(SignalingMessage::HelloAck {
+                                    accepted: true,
+                                    reason: None,
+                                })
+                                .await;
+                            c_inner.write().await.insert(peer_uuid, handle);
+                            let _ = id_inner;
+                            return;
+                        }
+                        // auto_accept_trusted is false — fall through to pending queue
                     }
 
                     p_inner
@@ -246,10 +254,23 @@ pub fn local_capabilities() -> Capabilities {
 mod tests {
     use super::*;
     use crate::net::signaling::message::PROTOCOL_VERSION;
+    use crate::settings::Settings;
     use tempfile::tempdir;
     use tokio::net::TcpStream;
 
     async fn setup() -> (
+        SignalingServerHandle,
+        PeerIdentity,
+        Arc<RwLock<TrustStore>>,
+        Arc<SessionManager>,
+        tempfile::TempDir,
+    ) {
+        setup_with_settings(Settings::default()).await
+    }
+
+    async fn setup_with_settings(
+        settings: Settings,
+    ) -> (
         SignalingServerHandle,
         PeerIdentity,
         Arc<RwLock<TrustStore>>,
@@ -265,11 +286,13 @@ mod tests {
             TrustStore::load_or_create(&dir.path().join("trust.toml")).unwrap(),
         ));
         let sessions = SessionManager::new();
+        let settings_handle = Arc::new(RwLock::new(settings));
         let handle = SignalingServer::start(
             "127.0.0.1:0".parse().unwrap(),
             identity.clone(),
             trust.clone(),
             sessions.clone(),
+            settings_handle,
         )
         .await
         .unwrap();
@@ -382,5 +405,115 @@ mod tests {
         .await
         .unwrap();
         assert!(ack);
+    }
+
+    #[tokio::test]
+    async fn hello_from_trusted_peer_with_auto_accept_skips_pending_queue() {
+        let settings = Settings {
+            auto_accept_trusted: true,
+            ..Settings::default()
+        };
+        let (server, _identity, trust, _sessions, _dir) = setup_with_settings(settings).await;
+
+        let peer_id = Uuid::new_v4();
+        // Pre-register the peer as trusted
+        trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id,
+                peer_name: "trusted-client".into(),
+                auth_token: "tok-xyz".into(),
+            })
+            .unwrap();
+
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None);
+        let mut events = client.events.subscribe();
+
+        client
+            .tx
+            .send(SignalingMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                peer_id: peer_id.to_string(),
+                peer_name: "trusted-client".into(),
+                app_version: "0".into(),
+                capabilities: local_capabilities(),
+                auth_token: "tok-xyz".into(),
+            })
+            .await
+            .unwrap();
+
+        // Should receive HelloAck{accepted:true} directly — no manual accept step
+        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, .. })) =
+                    events.recv().await
+                {
+                    return accepted;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for HelloAck");
+        assert!(
+            ack,
+            "trusted peer with auto_accept_trusted=true must be auto-accepted"
+        );
+
+        // Pending queue must remain empty
+        assert!(
+            server.pending.list().await.is_empty(),
+            "trusted auto-accepted peer must not appear in pending queue"
+        );
+    }
+
+    #[tokio::test]
+    async fn hello_from_trusted_peer_without_auto_accept_goes_to_pending() {
+        // auto_accept_trusted defaults to false
+        let (server, _identity, trust, _sessions, _dir) = setup().await;
+
+        let peer_id = Uuid::new_v4();
+        trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id,
+                peer_name: "trusted-client".into(),
+                auth_token: "tok-xyz".into(),
+            })
+            .unwrap();
+
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None);
+
+        client
+            .tx
+            .send(SignalingMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                peer_id: peer_id.to_string(),
+                peer_name: "trusted-client".into(),
+                app_version: "0".into(),
+                capabilities: local_capabilities(),
+                auth_token: "tok-xyz".into(),
+            })
+            .await
+            .unwrap();
+
+        // With auto_accept_trusted=false, trusted peer should land in pending
+        let mut queued = false;
+        for _ in 0..50 {
+            if !server.pending.list().await.is_empty() {
+                queued = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            queued,
+            "trusted peer with auto_accept_trusted=false must still appear in pending queue"
+        );
+        let pending = server.pending.list().await;
+        assert_eq!(pending[0].peer_id, peer_id);
     }
 }

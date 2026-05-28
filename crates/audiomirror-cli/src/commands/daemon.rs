@@ -11,6 +11,7 @@ use audiomirror_core::net::stream_runtime::{
     dispatch_device_events, open_stream_as_sink, StreamRegistry,
 };
 use audiomirror_core::net::trust::{trust_store_path, TrustStore};
+use audiomirror_core::settings::{settings_path, Settings};
 use audiomirror_core::{PeerIdentity, SessionManager, StreamRoute};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -40,12 +41,19 @@ pub(crate) async fn run(
     let trust = Arc::new(RwLock::new(TrustStore::load_or_create(
         &trust_store_path()?
     )?));
+    let settings = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
     let sessions = SessionManager::new();
     let stream_registry = StreamRegistry::new();
 
     let bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse()?;
-    let server =
-        SignalingServer::start(bind, identity.clone(), trust.clone(), sessions.clone()).await?;
+    let server = SignalingServer::start(
+        bind,
+        identity.clone(),
+        trust.clone(),
+        sessions.clone(),
+        settings,
+    )
+    .await?;
 
     let watcher = device_watcher::start(Duration::from_secs(5));
     let dispatcher_rx = watcher.subscribe();

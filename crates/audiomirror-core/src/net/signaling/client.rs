@@ -96,6 +96,7 @@ mod tests {
     use crate::net::manager::SessionManager;
     use crate::net::signaling::server::{accept_pending, SignalingServer};
     use crate::net::trust::TrustedPeer;
+    use crate::settings::Settings;
     use tempfile::tempdir;
 
     fn make_identity(name: &str) -> PeerIdentity {
@@ -113,11 +114,13 @@ mod tests {
             TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
         ));
         let sessions = SessionManager::new();
+        let settings = Arc::new(RwLock::new(Settings::default()));
         let server = SignalingServer::start(
             "127.0.0.1:0".parse().unwrap(),
             server_identity,
             server_trust.clone(),
             sessions,
+            settings,
         )
         .await
         .unwrap();
@@ -175,11 +178,17 @@ mod tests {
             TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
         ));
         let sessions = SessionManager::new();
+        // auto_accept_trusted must be true for known+verified peers to be accepted immediately
+        let settings = Arc::new(RwLock::new(Settings {
+            auto_accept_trusted: true,
+            ..Settings::default()
+        }));
         let server = SignalingServer::start(
             "127.0.0.1:0".parse().unwrap(),
             server_identity,
             server_trust.clone(),
             sessions,
+            settings,
         )
         .await
         .unwrap();

@@ -339,15 +339,18 @@ mod tests {
     ) -> audiomirror_core::net::signaling::server::SignalingServerHandle {
         use audiomirror_core::net::signaling::server::SignalingServer;
         use audiomirror_core::net::trust::TrustStore;
+        use audiomirror_core::settings::Settings;
         use tokio::sync::RwLock;
 
         let path = std::env::temp_dir().join(format!("trust-{}.toml", Uuid::new_v4()));
         let trust = Arc::new(RwLock::new(TrustStore::load_or_create(&path).unwrap()));
+        let settings = Arc::new(RwLock::new(Settings::default()));
         SignalingServer::start(
             "127.0.0.1:0".parse().unwrap(),
             identity.clone(),
             trust,
             sessions,
+            settings,
         )
         .await
         .unwrap()

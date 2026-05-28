@@ -4,6 +4,7 @@ use audiomirror_core::net::signaling::server::{
     accept_pending, local_capabilities, SignalingServer,
 };
 use audiomirror_core::net::trust::TrustStore;
+use audiomirror_core::settings::Settings;
 use audiomirror_core::PeerIdentity;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,11 +28,13 @@ async fn two_local_daemons_full_handshake_and_session() {
         TrustStore::load_or_create(&dir.path().join("alice-trust.toml")).unwrap(),
     ));
     let a_sessions = SessionManager::new();
+    let a_settings = Arc::new(RwLock::new(Settings::default()));
     let a_server = SignalingServer::start(
         "127.0.0.1:0".parse().unwrap(),
         a_identity.clone(),
         a_trust.clone(),
         a_sessions.clone(),
+        a_settings,
     )
     .await
     .unwrap();
@@ -41,11 +44,13 @@ async fn two_local_daemons_full_handshake_and_session() {
         TrustStore::load_or_create(&dir.path().join("bob-trust.toml")).unwrap(),
     ));
     let b_sessions = SessionManager::new();
+    let b_settings = Arc::new(RwLock::new(Settings::default()));
     let _b_server = SignalingServer::start(
         "127.0.0.1:0".parse().unwrap(),
         b_identity.clone(),
         b_trust.clone(),
         b_sessions.clone(),
+        b_settings,
     )
     .await
     .unwrap();

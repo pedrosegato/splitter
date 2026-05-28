@@ -67,7 +67,7 @@ jobs:
           vcpkg install opus:x64-windows
           echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
         shell: pwsh
-      - run: cargo test --workspace --all-targets --no-fail-fast
+      - run: cargo test --workspace --all-features --all-targets --no-fail-fast
 
   build:
     runs-on: ${{ matrix.os }}

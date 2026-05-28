@@ -215,4 +215,17 @@ mod tests {
         let res = CaptureHandle::start_loopback(prod);
         assert!(matches!(res, Err(AudioError::LoopbackUnsupported)));
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn start_loopback_returns_handle_or_missing_monitor_on_linux() {
+        let (prod, _cons) = AudioRing::new(48_000);
+        let res = CaptureHandle::start_loopback(prod);
+        match res {
+            Ok(_) => {}
+            Err(AudioError::DeviceNotFound(_)) => {}
+            Err(AudioError::BuildStream { .. }) => {}
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
 }

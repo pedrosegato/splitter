@@ -1,7 +1,9 @@
+pub mod client;
 pub mod connection;
 pub mod message;
 pub mod server;
 
+pub use client::{connect_to_peer, ConnectOutcome};
 pub use connection::{
     spawn_peer_connection, PeerConnectionHandle, PeerEvent, REMOTE_PEER_HEARTBEAT_TIMEOUT,
 };

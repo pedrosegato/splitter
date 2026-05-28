@@ -64,6 +64,16 @@ impl TrustStore {
         self.trusted.contains_key(peer_id)
     }
 
+    pub fn token_for(&self, peer_id: Option<Uuid>) -> Option<String> {
+        peer_id
+            .and_then(|id| self.trusted.get(&id))
+            .map(|p| p.auth_token.clone())
+    }
+
+    pub fn first_peer_id(&self) -> Option<Uuid> {
+        self.trusted.keys().next().copied()
+    }
+
     fn flush(&self) -> Result<(), NetError> {
         let serializable: HashMap<String, TrustedPeer> = self
             .trusted

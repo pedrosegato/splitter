@@ -26,6 +26,8 @@ toml = { workspace = true }
 base64 = { workspace = true }
 rand = { workspace = true }
 gethostname = { workspace = true }
+tracing-appender = { workspace = true }
+prometheus = { workspace = true }
 futures = "0.3"
 crossbeam-queue = "0.3"
 

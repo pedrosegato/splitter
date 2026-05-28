@@ -35,6 +35,8 @@ toml = "0.8"
 base64 = "0.22"
 rand = "0.8"
 gethostname = "0.5"
+tracing-appender = "0.2"
+prometheus = { version = "0.13", default-features = false, features = ["process"] }
 
 [profile.release]
 opt-level = 3

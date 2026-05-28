@@ -2,6 +2,7 @@ pub mod audio;
 pub mod config;
 pub mod error;
 pub mod net;
+pub mod observability;
 pub mod settings;
 
 pub use error::CoreError;
@@ -14,6 +15,7 @@ pub use net::stream_runtime::{
     StreamStatsSnapshot,
 };
 pub use net::trust::{TrustStore, TrustedPeer};
+pub use observability::logs::{current_log_path, log_dir, LogsGuard};
 pub use settings::{settings_path, FecMode, JitterMode, LogLevel, Settings, SettingsHandle};
 
 #[cfg(target_os = "macos")]

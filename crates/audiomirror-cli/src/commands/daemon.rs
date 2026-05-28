@@ -1,6 +1,5 @@
 use super::stream_repl;
 use audiomirror_core::audio::devices::{list_devices, DeviceKind};
-use audiomirror_core::config::identity_path;
 use audiomirror_core::net::device_watcher;
 use audiomirror_core::net::discovery::{Discovery, DiscoveryEvent};
 use audiomirror_core::net::signaling::{
@@ -10,12 +9,13 @@ use audiomirror_core::net::signaling::{
 use audiomirror_core::net::stream_runtime::{
     dispatch_device_events, open_stream_as_sink, StreamRegistry,
 };
-use audiomirror_core::net::trust::{trust_store_path, TrustStore};
+use audiomirror_core::net::trust::TrustStore;
 use audiomirror_core::observability::metrics::MetricsRegistry;
 use audiomirror_core::settings::{settings_path, Settings};
 use audiomirror_core::{log_dir, PeerIdentity, SessionManager, StreamRoute};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -33,6 +33,7 @@ fn pick_default_output_device_id() -> Option<String> {
 pub(crate) async fn run(
     signaling_port: u16,
     peer_name_override: Option<String>,
+    identity_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     // ── Step 1: load settings (defaults if missing) ───────────────────────────
     let settings_handle = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
@@ -42,14 +43,20 @@ pub(crate) async fn run(
     let _logs_guard = audiomirror_core::observability::logs::init(log_level, &log_dir()?)?;
 
     // ── Step 3: load PeerIdentity + TrustStore ────────────────────────────────
-    let id_path = identity_path()?;
+    let base_dir = identity_dir.unwrap_or_else(|| {
+        dirs::config_dir()
+            .expect("no config_dir on this platform")
+            .join("AudioMirror")
+    });
+    std::fs::create_dir_all(&base_dir)?;
+    let id_path = base_dir.join("identity.toml");
+    let trust_path = base_dir.join("trusted_peers.toml");
+
     let mut identity = PeerIdentity::load_or_create(&id_path)?;
     if let Some(name) = peer_name_override {
         identity.peer_name = name;
     }
-    let trust = Arc::new(RwLock::new(TrustStore::load_or_create(
-        &trust_store_path()?
-    )?));
+    let trust = Arc::new(RwLock::new(TrustStore::load_or_create(&trust_path)?));
 
     // ── Step 4: construct SessionManager + StreamRegistry ────────────────────
     let sessions = SessionManager::new();

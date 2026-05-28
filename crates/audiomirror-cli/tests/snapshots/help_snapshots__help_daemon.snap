@@ -15,5 +15,8 @@ Options:
       --peer-name <PEER_NAME>
           
 
+      --identity-dir <IDENTITY_DIR>
+          
+
   -h, --help
           Print help (see a summary with '-h')

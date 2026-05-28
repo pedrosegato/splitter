@@ -78,4 +78,15 @@ mod tests {
         assert!(raw.contains("peer_id"));
         assert!(raw.contains("peer_name"));
     }
+
+    #[test]
+    fn different_paths_produce_different_peer_ids() {
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        let path_a = dir_a.path().join("identity.toml");
+        let path_b = dir_b.path().join("identity.toml");
+        let id_a = PeerIdentity::load_or_create(&path_a).expect("create a");
+        let id_b = PeerIdentity::load_or_create(&path_b).expect("create b");
+        assert_ne!(id_a.peer_id, id_b.peer_id);
+    }
 }

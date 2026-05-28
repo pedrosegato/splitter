@@ -173,6 +173,8 @@ enum Cmd {
         signaling_port: u16,
         #[arg(long)]
         peer_name: Option<String>,
+        #[arg(long)]
+        identity_dir: Option<std::path::PathBuf>,
     },
 
     /// Open or manage peer-to-peer audio streams (requires a running daemon).
@@ -297,7 +299,8 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Daemon {
             signaling_port,
             peer_name,
-        } => commands::daemon::run(signaling_port, peer_name).await,
+            identity_dir,
+        } => commands::daemon::run(signaling_port, peer_name, identity_dir).await,
         Cmd::Logs { action } => match action {
             LogsAction::Path => commands::logs::run_path().await,
             LogsAction::Tail => commands::logs::run_tail().await,

@@ -5,7 +5,7 @@ use crate::error::AudioError;
 use crate::FRAME_SAMPLES;
 use crate::SAMPLE_RATE;
 use screencapturekit::{
-    cm::CMSampleBuffer,
+    cm::{CMSampleBuffer, CMTime},
     error::SCError,
     shareable_content::SCShareableContent,
     stream::{
@@ -168,11 +168,18 @@ impl MacosLoopbackHandle {
             .with_excluding_windows(&[])
             .build();
 
+        // Low-latency tuning per SCK BENCHMARKS.md: minimal video overhead (2x2 @ 1fps)
+        // since SCK always co-delivers video frames; queue_depth=3 cuts buffer-induced lag.
+        let one_fps = CMTime::new(1, 1);
         let config = SCStreamConfiguration::new()
             .with_captures_audio(true)
             .with_sample_rate(SAMPLE_RATE as i32)
-            .with_channel_count(2i32)
-            .with_excludes_current_process_audio(true);
+            .with_channel_count(1i32)
+            .with_excludes_current_process_audio(true)
+            .with_width(2)
+            .with_height(2)
+            .with_minimum_frame_interval(&one_fps)
+            .with_queue_depth(3);
 
         let handler = AudioHandler {
             producer: Arc::new(Mutex::new(producer)),

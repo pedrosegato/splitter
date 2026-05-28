@@ -1,3 +1,4 @@
+pub mod device_watcher;
 pub mod discovery;
 pub mod identity;
 pub mod manager;

@@ -2,6 +2,7 @@ pub mod device_watcher;
 pub mod discovery;
 pub mod fec;
 pub mod identity;
+pub mod jitter;
 pub mod manager;
 pub mod packet;
 pub mod session;

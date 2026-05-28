@@ -48,7 +48,7 @@ pub(crate) async fn run(
     simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
     let dest: SocketAddr = SocketAddr::from_str(addr)?;
-    let (producer, mut consumer) = AudioRing::new(5_760);
+    let (producer, mut consumer) = AudioRing::new(7_680);
     let _capture: CaptureGuard = match source {
         Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, producer)?),
         Source::System => {

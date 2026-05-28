@@ -20,7 +20,7 @@ pub(crate) async fn run_with_settings(
     let sock = make_udp_socket(bind_addr)?;
     tracing::info!("receiving on {bind_addr}, playing to {output}");
 
-    let (mut producer, consumer) = AudioRing::new(5_760);
+    let (mut producer, consumer) = AudioRing::new(7_680);
     let _playback = PlaybackHandle::start(output, consumer)?;
 
     let mut decoder = OpusDecoder::new()?;

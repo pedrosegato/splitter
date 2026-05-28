@@ -1,14 +1,44 @@
-use audiomirror_core::net::signaling::{CodecParams, Endpoint, SignalingMessage, StreamAction};
+use audiomirror_core::net::signaling::{
+    CodecParams, Endpoint, PeerConnectionHandle, SignalingMessage, StreamAction,
+};
 use audiomirror_core::net::stream::StreamRoute;
 use audiomirror_core::net::stream_runtime::{
     open_stream_as_source, SourceKind, StreamControlSignal,
 };
 use audiomirror_core::{PeerIdentity, SessionManager, StreamRegistry};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tokio::time::interval;
 use uuid::Uuid;
+
+type OutgoingConns = Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>;
+
+async fn find_conn(
+    server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
+    peer_id: Uuid,
+) -> Option<(
+    tokio::sync::mpsc::Sender<SignalingMessage>,
+    std::net::SocketAddr,
+    tokio::sync::broadcast::Sender<audiomirror_core::net::signaling::PeerEvent>,
+)> {
+    {
+        let g = server.connections.read().await;
+        if let Some(c) = g.get(&peer_id) {
+            return Some((c.tx.clone(), c.remote_addr, c.events.clone()));
+        }
+    }
+    {
+        let g = outgoing.read().await;
+        if let Some(c) = g.get(&peer_id) {
+            return Some((c.tx.clone(), c.remote_addr, c.events.clone()));
+        }
+    }
+    None
+}
 
 pub(crate) async fn handle(
     parts: &[&str],
@@ -16,18 +46,19 @@ pub(crate) async fn handle(
     sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
 ) -> anyhow::Result<()> {
     let (verb, rest) = parts.split_first().ok_or_else(|| {
         anyhow::anyhow!("usage: stream <open|close|volume|mute|pause|resume|stats>")
     })?;
     match *verb {
-        "open" => stream_open(rest, identity, sessions, registry, server).await,
-        "close" => stream_close(rest, sessions, registry, server).await,
-        "volume" => stream_volume(rest, sessions, registry, server).await,
-        "mute" => stream_set_mute(rest, true, sessions, registry, server).await,
-        "unmute" => stream_set_mute(rest, false, sessions, registry, server).await,
-        "pause" => stream_set_paused(rest, true, sessions, registry, server).await,
-        "resume" => stream_set_paused(rest, false, sessions, registry, server).await,
+        "open" => stream_open(rest, identity, sessions, registry, server, outgoing).await,
+        "close" => stream_close(rest, sessions, registry, server, outgoing).await,
+        "volume" => stream_volume(rest, sessions, registry, server, outgoing).await,
+        "mute" => stream_set_mute(rest, true, sessions, registry).await,
+        "unmute" => stream_set_mute(rest, false, sessions, registry).await,
+        "pause" => stream_set_paused(rest, true, sessions, registry, server, outgoing).await,
+        "resume" => stream_set_paused(rest, false, sessions, registry, server, outgoing).await,
         "stats" => stream_stats(rest, registry).await,
         other => Err(anyhow::anyhow!("unknown stream verb: {other}")),
     }
@@ -43,12 +74,38 @@ fn parse_session_stream(rest: &[&str]) -> anyhow::Result<(Uuid, u8)> {
     Ok((Uuid::parse_str(sid_str)?, stream_str.parse::<u8>()?))
 }
 
+async fn wait_for_stream_open_ack(
+    events: &tokio::sync::broadcast::Sender<audiomirror_core::net::signaling::PeerEvent>,
+    stream_id: u8,
+    timeout: Duration,
+) -> anyhow::Result<u16> {
+    use audiomirror_core::net::signaling::PeerEvent;
+    let mut rx = events.subscribe();
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("timed out waiting for stream_open_ack");
+        }
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Ok(PeerEvent::Message(SignalingMessage::StreamOpenAck {
+                stream_id: id,
+                accepted: true,
+                udp_port: Some(port),
+            }))) if id == stream_id => return Ok(port),
+            Ok(Ok(_)) => continue,
+            _ => anyhow::bail!("timed out waiting for stream_open_ack"),
+        }
+    }
+}
+
 async fn stream_open(
     rest: &[&str],
     identity: &PeerIdentity,
     sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
 ) -> anyhow::Result<()> {
     let mut from_dev: Option<String> = None;
     let mut to_spec: Option<String> = None;
@@ -87,9 +144,8 @@ async fn stream_open(
         .ok_or_else(|| anyhow::anyhow!("session {session_id} not found"))?;
     let remote_peer_id = session.remote_peer_id;
 
-    let conns = server.connections.read().await;
-    let conn = conns
-        .get(&remote_peer_id)
+    let (conn_tx, conn_remote_addr, conn_events) = find_conn(server, outgoing, remote_peer_id)
+        .await
         .ok_or_else(|| anyhow::anyhow!("no live signaling connection to remote peer"))?;
 
     let stream_id: u8 = sessions
@@ -100,7 +156,7 @@ async fn stream_open(
         .map(|s| s.streams.len() as u8)
         .unwrap_or(0);
 
-    conn.tx
+    conn_tx
         .send(SignalingMessage::StreamOpen {
             session_id: session_id.to_string(),
             stream_id,
@@ -122,10 +178,9 @@ async fn stream_open(
         .await
         .ok();
 
-    let ack_port = conn
-        .wait_for_stream_open_ack(stream_id, Duration::from_secs(5))
-        .await?;
-    let remote_ip = conn.remote_addr.ip();
+    let ack_port =
+        wait_for_stream_open_ack(&conn_events, stream_id, Duration::from_secs(5)).await?;
+    let remote_ip = conn_remote_addr.ip();
     let remote: SocketAddr = SocketAddr::new(remote_ip, ack_port);
 
     let route = StreamRoute {
@@ -167,6 +222,7 @@ async fn stream_close(
     sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
 ) -> anyhow::Result<()> {
     let (sid, stream_id) = parse_session_stream(rest)?;
     let snap = sessions.snapshot().await;
@@ -174,16 +230,14 @@ async fn stream_close(
 
     registry.close(&sid, stream_id).await?;
     if let Some(remote) = remote {
-        let conns = server.connections.read().await;
-        if let Some(conn) = conns.get(&remote) {
-            conn.tx
-                .send(SignalingMessage::StreamControl {
-                    stream_id,
-                    action: StreamAction::Close,
-                    volume: None,
-                })
-                .await
-                .ok();
+        if let Some((tx, _, _)) = find_conn(server, outgoing, remote).await {
+            tx.send(SignalingMessage::StreamControl {
+                stream_id,
+                action: StreamAction::Close,
+                volume: None,
+            })
+            .await
+            .ok();
         }
     }
     tracing::info!("closed stream {stream_id} on session {sid}");
@@ -195,6 +249,7 @@ async fn stream_volume(
     sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
 ) -> anyhow::Result<()> {
     let (sid, stream_id) = parse_session_stream(rest)?;
     let raw = rest
@@ -207,16 +262,14 @@ async fn stream_volume(
         .await?;
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
-        let conns = server.connections.read().await;
-        if let Some(conn) = conns.get(&s.remote_peer_id) {
-            conn.tx
-                .send(SignalingMessage::StreamControl {
-                    stream_id,
-                    action: StreamAction::SetVolume,
-                    volume: Some(gain),
-                })
-                .await
-                .ok();
+        if let Some((tx, _, _)) = find_conn(server, outgoing, s.remote_peer_id).await {
+            tx.send(SignalingMessage::StreamControl {
+                stream_id,
+                action: StreamAction::SetVolume,
+                volume: Some(gain),
+            })
+            .await
+            .ok();
         }
     }
     Ok(())
@@ -227,7 +280,6 @@ async fn stream_set_mute(
     muted: bool,
     _sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
-    _server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
 ) -> anyhow::Result<()> {
     let (sid, stream_id) = parse_session_stream(rest)?;
     registry
@@ -242,6 +294,7 @@ async fn stream_set_paused(
     sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
 ) -> anyhow::Result<()> {
     let (sid, stream_id) = parse_session_stream(rest)?;
     let signal = if paused {
@@ -257,16 +310,14 @@ async fn stream_set_paused(
     };
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
-        let conns = server.connections.read().await;
-        if let Some(conn) = conns.get(&s.remote_peer_id) {
-            conn.tx
-                .send(SignalingMessage::StreamControl {
-                    stream_id,
-                    action,
-                    volume: None,
-                })
-                .await
-                .ok();
+        if let Some((tx, _, _)) = find_conn(server, outgoing, s.remote_peer_id).await {
+            tx.send(SignalingMessage::StreamControl {
+                stream_id,
+                action,
+                volume: None,
+            })
+            .await
+            .ok();
         }
     }
     Ok(())
@@ -366,8 +417,9 @@ mod tests {
         let registry = StreamRegistry::new();
         let server = make_test_server(&identity, sessions.clone()).await;
 
+        let outgoing = Arc::new(RwLock::new(std::collections::HashMap::new()));
         let parts: Vec<&str> = vec!["bogus"];
-        let err = handle(&parts, &identity, &sessions, &registry, &server)
+        let err = handle(&parts, &identity, &sessions, &registry, &server, &outgoing)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("unknown stream verb: bogus"));
@@ -383,7 +435,8 @@ mod tests {
         let registry = StreamRegistry::new();
         let server = make_test_server(&identity, sessions.clone()).await;
 
-        let err = handle(&[], &identity, &sessions, &registry, &server)
+        let outgoing = Arc::new(RwLock::new(std::collections::HashMap::new()));
+        let err = handle(&[], &identity, &sessions, &registry, &server, &outgoing)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("usage: stream"));

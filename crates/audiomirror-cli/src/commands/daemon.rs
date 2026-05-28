@@ -4,7 +4,7 @@ use audiomirror_core::net::device_watcher;
 use audiomirror_core::net::discovery::{Discovery, DiscoveryEvent};
 use audiomirror_core::net::signaling::{
     connect_to_peer, server::accept_pending, server::SignalingServer, CodecParams, Endpoint,
-    PeerEvent, SignalingMessage, StreamAction,
+    PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
 };
 use audiomirror_core::net::stream_runtime::{
     dispatch_device_events, open_stream_as_sink, StreamRegistry,
@@ -67,6 +67,8 @@ pub(crate) async fn run(
         settings_handle.clone(),
     )
     .await?;
+
+    let outgoing_connections: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>> = Arc::default();
 
     let watcher = device_watcher::start(Duration::from_secs(5));
     let dispatcher_rx = watcher.subscribe();
@@ -165,7 +167,7 @@ pub(crate) async fn run(
                         if cmd.is_empty() { continue; }
                         if let Err(e) = handle_line(
                             &cmd, &identity, &trust, &sessions,
-                            &stream_registry, &server, &discovered,
+                            &stream_registry, &server, &discovered, &outgoing_connections,
                         ).await {
                             tracing::error!("command failed: {e}");
                         }
@@ -199,7 +201,7 @@ pub(crate) async fn run(
                         if cmd.is_empty() { continue; }
                         if let Err(e) = handle_line(
                             &cmd, &identity, &trust, &sessions,
-                            &stream_registry, &server, &discovered,
+                            &stream_registry, &server, &discovered, &outgoing_connections,
                         ).await {
                             tracing::error!("command failed: {e}");
                         }
@@ -224,7 +226,13 @@ pub(crate) async fn run(
         };
 
         tracing::info!("shutdown triggered: {shutdown_reason}");
-        graceful_shutdown(&sessions, &stream_registry, Some(&server)).await;
+        graceful_shutdown(
+            &sessions,
+            &stream_registry,
+            Some(&server),
+            &outgoing_connections,
+        )
+        .await;
         discovery.shutdown();
         // Drop server last: closes the TCP accept loop and all peer connections.
         drop(server);
@@ -244,17 +252,22 @@ async fn graceful_shutdown(
     sessions: &Arc<SessionManager>,
     stream_registry: &Arc<StreamRegistry>,
     server: Option<&audiomirror_core::net::signaling::server::SignalingServerHandle>,
+    outgoing: &Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
 ) {
     let session_snap = sessions.snapshot().await;
 
     // 1. Notify peers: send StreamControl{Close} for every active stream.
+    let outgoing_guard = outgoing.read().await;
     if let Some(srv) = server {
         let conns = srv.connections.read().await;
         for sess in &session_snap {
-            if let Some(conn) = conns.get(&sess.remote_peer_id) {
+            let tx = conns
+                .get(&sess.remote_peer_id)
+                .map(|c| &c.tx)
+                .or_else(|| outgoing_guard.get(&sess.remote_peer_id).map(|c| &c.tx));
+            if let Some(tx) = tx {
                 for stream in &sess.streams {
-                    let _ = conn
-                        .tx
+                    let _ = tx
                         .send(SignalingMessage::StreamControl {
                             stream_id: stream.id,
                             action: StreamAction::Close,
@@ -265,6 +278,7 @@ async fn graceful_shutdown(
             }
         }
     }
+    drop(outgoing_guard);
 
     // 2. Close all local StreamRuntime pump tasks via the public registry API.
     let summaries = stream_registry.list().await;
@@ -283,6 +297,7 @@ async fn graceful_shutdown(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_line(
     line: &str,
     identity: &PeerIdentity,
@@ -291,6 +306,7 @@ async fn handle_line(
     stream_registry: &Arc<StreamRegistry>,
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
     discovered: &Arc<RwLock<HashMap<String, audiomirror_core::net::discovery::DiscoveredPeer>>>,
+    outgoing_connections: &Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
 ) -> anyhow::Result<()> {
     let tokens = split_repl_line(line);
     let token_refs: Vec<&str> = tokens.iter().map(|s| s.as_str()).collect();
@@ -373,6 +389,31 @@ async fn handle_line(
                     outcome.reason
                 );
             }
+            if let Some(peer_uuid) = outcome.remote_peer_id {
+                spawn_stream_open_acceptor(
+                    outcome.handle.tx.clone(),
+                    outcome.handle.events.subscribe(),
+                    stream_registry.clone(),
+                );
+                let mut events_rx = outcome.handle.events.subscribe();
+                outgoing_connections
+                    .write()
+                    .await
+                    .insert(peer_uuid, outcome.handle);
+                let map = outgoing_connections.clone();
+                tokio::spawn(async move {
+                    loop {
+                        match events_rx.recv().await {
+                            Ok(PeerEvent::Disconnected { .. }) | Err(_) => {
+                                map.write().await.remove(&peer_uuid);
+                                tracing::info!("outgoing connection to {peer_uuid} removed");
+                                break;
+                            }
+                            Ok(_) => {}
+                        }
+                    }
+                });
+            }
         }
         "open" => {
             let key = parts
@@ -389,16 +430,22 @@ async fn handle_line(
             let session_id = sessions.open_outgoing(identity.peer_id, remote_uuid).await;
             sessions.accept(&session_id).await?;
             tracing::info!("opened session {session_id} with {}", target.peer_name);
-            let conns = server.connections.read().await;
-            if let Some(handle) = conns.get(&remote_uuid) {
-                handle
-                    .tx
-                    .send(SignalingMessage::SessionRequest {
-                        session_id: session_id.to_string(),
-                        requested_by: identity.peer_id.to_string(),
-                    })
-                    .await
-                    .ok();
+            let conn_tx = {
+                let inbound = server.connections.read().await;
+                if let Some(h) = inbound.get(&remote_uuid) {
+                    Some(h.tx.clone())
+                } else {
+                    let outbound = outgoing_connections.read().await;
+                    outbound.get(&remote_uuid).map(|h| h.tx.clone())
+                }
+            };
+            if let Some(tx) = conn_tx {
+                tx.send(SignalingMessage::SessionRequest {
+                    session_id: session_id.to_string(),
+                    requested_by: identity.peer_id.to_string(),
+                })
+                .await
+                .ok();
             }
         }
         "sessions" => {
@@ -443,6 +490,7 @@ async fn handle_line(
                 sessions,
                 stream_registry,
                 server,
+                outgoing_connections,
             )
             .await?;
         }
@@ -629,6 +677,7 @@ mod tests {
     async fn graceful_shutdown_on_empty_state_does_not_panic() {
         let sessions = audiomirror_core::SessionManager::new();
         let registry = audiomirror_core::StreamRegistry::new();
-        graceful_shutdown(&sessions, &registry, None).await;
+        let outgoing = Arc::new(RwLock::new(HashMap::new()));
+        graceful_shutdown(&sessions, &registry, None, &outgoing).await;
     }
 }

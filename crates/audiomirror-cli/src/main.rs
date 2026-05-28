@@ -163,10 +163,21 @@ enum Cmd {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let logs_dir = audiomirror_core::log_dir()?;
-    let _logs_guard =
-        audiomirror_core::observability::logs::init(audiomirror_core::LogLevel::Info, &logs_dir)?;
     let cli = Cli::parse();
+
+    // The daemon subcommand initialises logging itself (using the persisted
+    // log_level from settings).  Every other subcommand gets a sensible default
+    // at Info so tracing macros work without extra setup.
+    let _logs_guard = if !matches!(cli.cmd, Cmd::Daemon { .. }) {
+        let logs_dir = audiomirror_core::log_dir()?;
+        Some(audiomirror_core::observability::logs::init(
+            audiomirror_core::LogLevel::Info,
+            &logs_dir,
+        )?)
+    } else {
+        None
+    };
+
     match cli.cmd {
         Cmd::Devices => commands::devices::run(),
         Cmd::Send {

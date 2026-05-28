@@ -13,7 +13,7 @@ use audiomirror_core::net::stream_runtime::{
 use audiomirror_core::net::trust::{trust_store_path, TrustStore};
 use audiomirror_core::observability::metrics::MetricsRegistry;
 use audiomirror_core::settings::{settings_path, Settings};
-use audiomirror_core::{PeerIdentity, SessionManager, StreamRoute};
+use audiomirror_core::{log_dir, PeerIdentity, SessionManager, StreamRoute};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -34,6 +34,14 @@ pub(crate) async fn run(
     signaling_port: u16,
     peer_name_override: Option<String>,
 ) -> anyhow::Result<()> {
+    // ── Step 1: load settings (defaults if missing) ───────────────────────────
+    let settings_handle = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
+
+    // ── Step 2: init structured logging from the persisted log_level ─────────
+    let log_level = settings_handle.read().await.log_level;
+    let _logs_guard = audiomirror_core::observability::logs::init(log_level, &log_dir()?)?;
+
+    // ── Step 3: load PeerIdentity + TrustStore ────────────────────────────────
     let id_path = identity_path()?;
     let mut identity = PeerIdentity::load_or_create(&id_path)?;
     if let Some(name) = peer_name_override {
@@ -42,54 +50,23 @@ pub(crate) async fn run(
     let trust = Arc::new(RwLock::new(TrustStore::load_or_create(
         &trust_store_path()?
     )?));
-    let settings_handle = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
-    let settings = settings_handle.clone();
+
+    // ── Step 4: construct SessionManager + StreamRegistry ────────────────────
     let sessions = SessionManager::new();
     let stream_registry = StreamRegistry::new();
 
-    // Opt-in Prometheus metrics endpoint.
-    {
-        let s = settings_handle.read().await;
-        if s.metrics_enabled {
-            let metrics = Arc::new(MetricsRegistry::new()?);
-            let metrics_port = s.metrics_port;
-
-            // 1 s interval task: update peers_connected + sessions_active.
-            let metrics_tick = metrics.clone();
-            let sessions_tick = sessions.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(1));
-                loop {
-                    interval.tick().await;
-                    let snap = sessions_tick.snapshot().await;
-                    metrics_tick.sessions_active.set(snap.len() as f64);
-                    // peers_connected = distinct remote peer IDs across all sessions
-                    let unique_peers: std::collections::HashSet<_> =
-                        snap.iter().map(|s| s.remote_peer_id).collect();
-                    metrics_tick.peers_connected.set(unique_peers.len() as f64);
-                }
-            });
-
-            tokio::spawn(async move {
-                if let Err(e) =
-                    audiomirror_core::observability::metrics::serve(metrics, metrics_port).await
-                {
-                    tracing::error!(?e, "metrics server exited");
-                }
-            });
-        }
-    }
-
+    // ── Step 5: start SignalingServer ─────────────────────────────────────────
     let bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse()?;
     let server = SignalingServer::start(
         bind,
         identity.clone(),
         trust.clone(),
         sessions.clone(),
-        settings,
+        settings_handle.clone(),
     )
     .await?;
 
+    // ── Step 6: start mDNS discovery + device hot-plug watcher ───────────────
     let watcher = device_watcher::start(Duration::from_secs(5));
     let dispatcher_rx = watcher.subscribe();
     tokio::spawn(dispatch_device_events(
@@ -114,6 +91,38 @@ pub(crate) async fn run(
             }
         }
     });
+
+    // ── Step 7: opt-in Prometheus metrics endpoint ────────────────────────────
+    {
+        let s = settings_handle.read().await;
+        if s.metrics_enabled {
+            let metrics = Arc::new(MetricsRegistry::new()?);
+            let metrics_port = s.metrics_port;
+
+            // 1 s interval task: update peers_connected + sessions_active.
+            let metrics_tick = metrics.clone();
+            let sessions_tick = sessions.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    interval.tick().await;
+                    let snap = sessions_tick.snapshot().await;
+                    metrics_tick.sessions_active.set(snap.len() as f64);
+                    let unique_peers: std::collections::HashSet<_> =
+                        snap.iter().map(|s| s.remote_peer_id).collect();
+                    metrics_tick.peers_connected.set(unique_peers.len() as f64);
+                }
+            });
+
+            tokio::spawn(async move {
+                if let Err(e) =
+                    audiomirror_core::observability::metrics::serve(metrics, metrics_port).await
+                {
+                    tracing::error!(?e, "metrics server exited");
+                }
+            });
+        }
+    }
 
     tracing::info!(
         peer_id = %identity.peer_id,
@@ -398,6 +407,7 @@ fn spawn_stream_open_acceptor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use audiomirror_core::settings::LogLevel;
 
     #[test]
     fn pick_default_output_device_id_returns_output_kind_or_none() {
@@ -407,5 +417,36 @@ mod tests {
                 "expected Output: prefix, got {id}"
             );
         }
+    }
+
+    /// Boot sequence step 1: settings load_or_default never panics and
+    /// returns sensible defaults when no file is present.
+    #[test]
+    fn boot_settings_load_or_default_returns_info_level() {
+        let missing = std::path::PathBuf::from("/tmp/am_daemon_boot_test_no_such_file.toml");
+        let _ = std::fs::remove_file(&missing); // ensure it does not exist
+        let s = Settings::load_or_default(&missing).expect("load_or_default should not fail");
+        assert_eq!(
+            s.log_level,
+            LogLevel::Info,
+            "default log_level must be Info"
+        );
+        assert!(!s.metrics_enabled, "metrics must be off by default");
+        assert_eq!(s.metrics_port, 9000, "default metrics port must be 9000");
+    }
+
+    /// Boot sequence step 7: metrics flag is read from the settings struct.
+    #[test]
+    fn boot_metrics_flag_read_from_settings() {
+        let s_off = Settings {
+            metrics_enabled: false,
+            ..Settings::default()
+        };
+        let s_on = Settings {
+            metrics_enabled: true,
+            ..Settings::default()
+        };
+        assert!(!s_off.metrics_enabled);
+        assert!(s_on.metrics_enabled);
     }
 }

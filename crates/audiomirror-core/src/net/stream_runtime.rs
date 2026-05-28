@@ -553,7 +553,7 @@ mod sink_pump_tests {
 
     #[tokio::test]
     async fn sink_pump_decodes_into_playback_ring() {
-        let (prod, mut cons) = AudioRing::new(FRAME_SAMPLES * 8);
+        let (prod, cons) = AudioRing::new(FRAME_SAMPLES * 8);
         let stats = Arc::new(StreamStats::default());
 
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -714,6 +714,51 @@ mod source_pump_tests {
 use crate::audio::ring::AudioRing;
 use crate::net::stream::StreamRoute;
 
+pub async fn open_stream_as_sink_inproc(
+    registry: Arc<StreamRegistry>,
+    session_id: SessionId,
+    stream_id: StreamId,
+    route: StreamRoute,
+) -> Result<u16, NetError> {
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("bind sink udp: {e}"),
+        })?;
+    let port = socket
+        .local_addr()
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("query sink udp local_addr: {e}"),
+        })?
+        .port();
+
+    let (producer, _consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+
+    let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
+    let stats = Arc::new(StreamStats::default());
+    let stats_clone = stats.clone();
+
+    let join = tokio::spawn(spawn_sink_pump_inner(
+        session_id,
+        stream_id,
+        socket,
+        producer,
+        control_rx,
+        stats_clone,
+    ));
+
+    let rt = StreamRuntime {
+        session_id,
+        stream_id,
+        stats,
+        control_tx,
+        bound_device_id: Some(route.sink.device_id.clone()),
+        join,
+    };
+    registry.register(rt).await?;
+    Ok(port)
+}
+
 pub async fn open_stream_as_source_inproc(
     registry: Arc<StreamRegistry>,
     session_id: SessionId,
@@ -762,6 +807,44 @@ pub async fn open_stream_as_source_inproc(
         join,
     };
     registry.register(rt).await
+}
+
+#[cfg(test)]
+mod open_sink_tests {
+    use super::*;
+    use crate::net::signaling::{CodecParams, Endpoint};
+    use crate::net::stream::StreamRoute;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn open_stream_as_sink_returns_bound_port_and_registers() {
+        let registry = StreamRegistry::new();
+        let session_id = Uuid::new_v4();
+        let route = StreamRoute {
+            source: Endpoint {
+                peer_id: "a".into(),
+                device_id: "ignored".into(),
+            },
+            sink: Endpoint {
+                peer_id: "b".into(),
+                device_id: "headphones".into(),
+            },
+            codec: CodecParams {
+                name: "opus".into(),
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            volume: 1.0,
+        };
+
+        let port = open_stream_as_sink_inproc(registry.clone(), session_id, 0, route)
+            .await
+            .expect("open sink");
+        assert!(port > 0);
+        let listed = registry.list().await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].stream_id, 0);
+    }
 }
 
 #[cfg(test)]

@@ -738,6 +738,18 @@ fn spawn_stream_open_acceptor(
                                 }
                             }
                         }
+                        if matches!(action, StreamAction::Close) {
+                            let session_ids: Vec<Uuid> = sessions
+                                .snapshot()
+                                .await
+                                .into_iter()
+                                .filter(|s| s.remote_peer_id == peer_id)
+                                .map(|s| s.id)
+                                .collect();
+                            for sid in session_ids {
+                                let _ = registry.close(&sid, stream_id).await;
+                            }
+                        }
                     }
                     _ => {}
                 },

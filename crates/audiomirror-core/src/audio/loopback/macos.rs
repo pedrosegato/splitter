@@ -22,6 +22,13 @@ pub struct MacosLoopbackHandle {
     frame_notify: Arc<Notify>,
 }
 
+impl std::fmt::Debug for MacosLoopbackHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MacosLoopbackHandle")
+            .finish_non_exhaustive()
+    }
+}
+
 impl Drop for MacosLoopbackHandle {
     fn drop(&mut self) {
         if let Err(e) = self.stream.stop_capture() {

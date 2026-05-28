@@ -27,6 +27,20 @@ pub enum StreamControlSignal {
 }
 
 #[derive(Debug)]
+pub enum DeviceGuard {
+    None,
+    Capture(crate::audio::capture::CaptureHandle),
+    #[cfg(target_os = "macos")]
+    MacosLoopback(crate::audio::loopback::MacosLoopbackHandle),
+    Playback(crate::audio::playback::PlaybackHandle),
+}
+
+// cpal::Stream is !Send on CoreAudio, but DeviceGuard is only dropped (never called across
+// threads), and cpal's internal Arc-based reference counting makes cross-thread drop safe.
+unsafe impl Send for DeviceGuard {}
+unsafe impl Sync for DeviceGuard {}
+
+#[derive(Debug)]
 pub struct StreamRuntime {
     pub session_id: SessionId,
     pub stream_id: StreamId,
@@ -34,6 +48,7 @@ pub struct StreamRuntime {
     pub control_tx: mpsc::Sender<StreamControlSignal>,
     pub bound_device_id: Option<String>,
     pub join: JoinHandle<()>,
+    pub device_guard: DeviceGuard,
 }
 
 impl StreamRuntime {
@@ -254,6 +269,7 @@ mod registry_tests {
             control_tx: tx,
             bound_device_id: Some("dev-a".into()),
             join,
+            device_guard: DeviceGuard::None,
         }
     }
 
@@ -754,6 +770,7 @@ pub async fn open_stream_as_sink_inproc(
         control_tx,
         bound_device_id: Some(route.sink.device_id.clone()),
         join,
+        device_guard: DeviceGuard::None,
     };
     registry.register(rt).await?;
     Ok(port)
@@ -805,8 +822,146 @@ pub async fn open_stream_as_source_inproc(
         control_tx,
         bound_device_id: Some(route.source.device_id.clone()),
         join,
+        device_guard: DeviceGuard::None,
     };
     registry.register(rt).await
+}
+
+#[derive(Debug, Clone)]
+pub enum SourceKind {
+    Mic(String),
+    System,
+}
+
+pub async fn open_stream_as_source(
+    registry: Arc<StreamRegistry>,
+    session_id: SessionId,
+    stream_id: StreamId,
+    route: StreamRoute,
+    remote: SocketAddr,
+    source_kind: SourceKind,
+) -> Result<(), NetError> {
+    let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+
+    let (device_guard, frame_ready) =
+        match source_kind {
+            SourceKind::Mic(device_id) => {
+                let cap = crate::audio::capture::CaptureHandle::start_by_id(&device_id, producer)
+                    .map_err(|e| NetError::SignalingProtocol {
+                    reason: format!("capture start_by_id failed: {e}"),
+                })?;
+                let notify = cap.frame_ready();
+                (DeviceGuard::Capture(cap), notify)
+            }
+            SourceKind::System => {
+                #[cfg(target_os = "macos")]
+                {
+                    let cap = crate::audio::loopback::MacosLoopbackHandle::start(producer)
+                        .map_err(|e| NetError::SignalingProtocol {
+                            reason: format!("macos loopback start failed: {e}"),
+                        })?;
+                    (DeviceGuard::MacosLoopback(cap), Arc::new(Notify::new()))
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let cap = crate::audio::capture::CaptureHandle::start_loopback(producer)
+                        .map_err(|e| NetError::SignalingProtocol {
+                            reason: format!("loopback start failed: {e}"),
+                        })?;
+                    let notify = cap.frame_ready();
+                    (DeviceGuard::Capture(cap), notify)
+                }
+            }
+        };
+
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("bind source udp: {e}"),
+        })?;
+    socket
+        .connect(remote)
+        .await
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("connect source udp: {e}"),
+        })?;
+
+    let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
+    let stats = Arc::new(StreamStats::default());
+    let stats_clone = stats.clone();
+    let join = tokio::spawn(spawn_source_pump_inner(
+        session_id,
+        stream_id,
+        consumer,
+        frame_ready,
+        socket,
+        control_rx,
+        stats_clone,
+        route.codec.bitrate,
+    ));
+
+    registry
+        .register(StreamRuntime {
+            session_id,
+            stream_id,
+            stats,
+            control_tx,
+            bound_device_id: Some(route.source.device_id.clone()),
+            join,
+            device_guard,
+        })
+        .await
+}
+
+pub async fn open_stream_as_sink(
+    registry: Arc<StreamRegistry>,
+    session_id: SessionId,
+    stream_id: StreamId,
+    _route: StreamRoute,
+    output_device_id: String,
+) -> Result<u16, NetError> {
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("bind sink udp: {e}"),
+        })?;
+    let port = socket
+        .local_addr()
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("local_addr: {e}"),
+        })?
+        .port();
+
+    let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 8);
+    let playback = crate::audio::playback::PlaybackHandle::start_by_id(&output_device_id, consumer)
+        .map_err(|e| NetError::SignalingProtocol {
+            reason: format!("playback start_by_id failed: {e}"),
+        })?;
+
+    let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
+    let stats = Arc::new(StreamStats::default());
+    let stats_clone = stats.clone();
+    let join = tokio::spawn(spawn_sink_pump_inner(
+        session_id,
+        stream_id,
+        socket,
+        producer,
+        control_rx,
+        stats_clone,
+    ));
+
+    registry
+        .register(StreamRuntime {
+            session_id,
+            stream_id,
+            stats,
+            control_tx,
+            bound_device_id: Some(output_device_id.clone()),
+            join,
+            device_guard: DeviceGuard::Playback(playback),
+        })
+        .await?;
+    Ok(port)
 }
 
 #[cfg(test)]

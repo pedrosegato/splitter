@@ -33,7 +33,7 @@ mod phase3_tests {
     use super::*;
     use crate::net::session::SessionId;
     use crate::net::stream_runtime::{
-        StreamControlSignal, StreamRegistry, StreamRuntime, StreamStats,
+        DeviceGuard, StreamControlSignal, StreamRegistry, StreamRuntime, StreamStats,
     };
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -50,6 +50,7 @@ mod phase3_tests {
             control_tx: tx,
             bound_device_id: None,
             join,
+            device_guard: DeviceGuard::None,
         }
     }
 

@@ -1,8 +1,11 @@
+use super::stream_repl;
 use audiomirror_core::config::identity_path;
+use audiomirror_core::net::device_watcher;
 use audiomirror_core::net::discovery::{Discovery, DiscoveryEvent};
 use audiomirror_core::net::signaling::{
     connect_to_peer, server::accept_pending, server::SignalingServer, SignalingMessage,
 };
+use audiomirror_core::net::stream_runtime::{dispatch_device_events, StreamRegistry};
 use audiomirror_core::net::trust::{trust_store_path, TrustStore};
 use audiomirror_core::{PeerIdentity, SessionManager};
 use std::collections::HashMap;
@@ -26,10 +29,18 @@ pub(crate) async fn run(
         &trust_store_path()?
     )?));
     let sessions = SessionManager::new();
+    let stream_registry = StreamRegistry::new();
 
     let bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse()?;
     let server =
         SignalingServer::start(bind, identity.clone(), trust.clone(), sessions.clone()).await?;
+
+    let watcher = device_watcher::start(Duration::from_secs(5));
+    let dispatcher_rx = watcher.subscribe();
+    tokio::spawn(dispatch_device_events(
+        stream_registry.clone(),
+        dispatcher_rx,
+    ));
 
     let mut discovery = Discovery::start(&identity, signaling_port)?;
     let discovered: Arc<RwLock<HashMap<String, audiomirror_core::net::discovery::DiscoveredPeer>>> =
@@ -63,7 +74,16 @@ pub(crate) async fn run(
         if cmd.is_empty() {
             continue;
         }
-        if let Err(e) = handle_line(&cmd, &identity, &trust, &sessions, &server, &discovered).await
+        if let Err(e) = handle_line(
+            &cmd,
+            &identity,
+            &trust,
+            &sessions,
+            &stream_registry,
+            &server,
+            &discovered,
+        )
+        .await
         {
             tracing::error!("command failed: {e}");
         }
@@ -79,6 +99,7 @@ async fn handle_line(
     identity: &PeerIdentity,
     trust: &Arc<RwLock<TrustStore>>,
     sessions: &Arc<SessionManager>,
+    stream_registry: &Arc<StreamRegistry>,
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
     discovered: &Arc<RwLock<HashMap<String, audiomirror_core::net::discovery::DiscoveredPeer>>>,
 ) -> anyhow::Result<()> {
@@ -217,6 +238,16 @@ async fn handle_line(
         }
         "quit" => {
             tracing::info!("shutting down");
+        }
+        "stream" => {
+            stream_repl::handle(
+                parts.collect::<Vec<_>>().as_slice(),
+                identity,
+                sessions,
+                stream_registry,
+                server,
+            )
+            .await?;
         }
         other => {
             tracing::warn!("unknown command: {other}");

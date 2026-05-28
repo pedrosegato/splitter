@@ -25,6 +25,7 @@ pub struct PeerConnectionHandle {
     pub tx: mpsc::Sender<SignalingMessage>,
     pub events: broadcast::Sender<PeerEvent>,
     pub peer_addr: std::net::SocketAddr,
+    pub remote_addr: std::net::SocketAddr,
 }
 
 pub fn spawn_peer_connection(
@@ -160,8 +161,43 @@ pub fn spawn_peer_connection(
 
     PeerConnectionHandle {
         tx: msg_tx,
-        events: event_tx,
+        events: event_tx.clone(),
         peer_addr,
+        remote_addr: peer_addr,
+    }
+}
+
+impl PeerConnectionHandle {
+    pub async fn wait_for_stream_open_ack(
+        &self,
+        stream_id: u8,
+        timeout: Duration,
+    ) -> Result<u16, crate::error::NetError> {
+        let mut rx = self.events.subscribe();
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(crate::error::NetError::Timeout {
+                    what: "stream_open_ack".into(),
+                    millis: timeout.as_millis() as u64,
+                });
+            }
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Ok(PeerEvent::Message(SignalingMessage::StreamOpenAck {
+                    stream_id: id,
+                    accepted: true,
+                    udp_port: Some(port),
+                }))) if id == stream_id => return Ok(port),
+                Ok(Ok(_)) => continue,
+                Ok(Err(_)) | Err(_) => {
+                    return Err(crate::error::NetError::Timeout {
+                        what: "stream_open_ack".into(),
+                        millis: timeout.as_millis() as u64,
+                    })
+                }
+            }
+        }
     }
 }
 

@@ -11,7 +11,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::interval;
 use uuid::Uuid;
 
 type OutgoingConns = Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>;

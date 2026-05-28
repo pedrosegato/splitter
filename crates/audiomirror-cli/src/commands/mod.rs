@@ -1,3 +1,4 @@
+pub(crate) mod daemon;
 pub(crate) mod devices;
 pub(crate) mod discover;
 pub(crate) mod loop_cmd;

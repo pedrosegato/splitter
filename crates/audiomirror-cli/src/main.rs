@@ -56,6 +56,13 @@ enum Cmd {
         #[arg(long, default_value_t = 7_000)]
         signaling_port: u16,
     },
+
+    Daemon {
+        #[arg(long, default_value_t = 7_000)]
+        signaling_port: u16,
+        #[arg(long)]
+        peer_name: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -84,5 +91,9 @@ async fn main() -> anyhow::Result<()> {
             duration_secs,
             signaling_port,
         } => commands::discover::run(duration_secs, signaling_port).await,
+        Cmd::Daemon {
+            signaling_port,
+            peer_name,
+        } => commands::daemon::run(signaling_port, peer_name).await,
     }
 }

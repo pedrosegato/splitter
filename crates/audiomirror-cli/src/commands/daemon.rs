@@ -11,6 +11,7 @@ use audiomirror_core::net::stream_runtime::{
     dispatch_device_events, open_stream_as_sink, StreamRegistry,
 };
 use audiomirror_core::net::trust::{trust_store_path, TrustStore};
+use audiomirror_core::observability::metrics::MetricsRegistry;
 use audiomirror_core::settings::{settings_path, Settings};
 use audiomirror_core::{PeerIdentity, SessionManager, StreamRoute};
 use std::collections::HashMap;
@@ -41,9 +42,43 @@ pub(crate) async fn run(
     let trust = Arc::new(RwLock::new(TrustStore::load_or_create(
         &trust_store_path()?
     )?));
-    let settings = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
+    let settings_handle = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
+    let settings = settings_handle.clone();
     let sessions = SessionManager::new();
     let stream_registry = StreamRegistry::new();
+
+    // Opt-in Prometheus metrics endpoint.
+    {
+        let s = settings_handle.read().await;
+        if s.metrics_enabled {
+            let metrics = Arc::new(MetricsRegistry::new()?);
+            let metrics_port = s.metrics_port;
+
+            // 1 s interval task: update peers_connected + sessions_active.
+            let metrics_tick = metrics.clone();
+            let sessions_tick = sessions.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    interval.tick().await;
+                    let snap = sessions_tick.snapshot().await;
+                    metrics_tick.sessions_active.set(snap.len() as f64);
+                    // peers_connected = distinct remote peer IDs across all sessions
+                    let unique_peers: std::collections::HashSet<_> =
+                        snap.iter().map(|s| s.remote_peer_id).collect();
+                    metrics_tick.peers_connected.set(unique_peers.len() as f64);
+                }
+            });
+
+            tokio::spawn(async move {
+                if let Err(e) =
+                    audiomirror_core::observability::metrics::serve(metrics, metrics_port).await
+                {
+                    tracing::error!(?e, "metrics server exited");
+                }
+            });
+        }
+    }
 
     let bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse()?;
     let server = SignalingServer::start(

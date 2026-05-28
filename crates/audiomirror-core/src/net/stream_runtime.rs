@@ -1,5 +1,36 @@
+use crate::net::session::SessionId;
+use crate::net::stream::StreamId;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StreamControlSignal {
+    SetVolume(f32),
+    SetMuted(bool),
+    Pause,
+    Resume,
+    Close,
+}
+
+#[derive(Debug)]
+pub struct StreamRuntime {
+    pub session_id: SessionId,
+    pub stream_id: StreamId,
+    pub stats: Arc<StreamStats>,
+    pub control_tx: mpsc::Sender<StreamControlSignal>,
+    pub bound_device_id: Option<String>,
+    pub join: JoinHandle<()>,
+}
+
+impl StreamRuntime {
+    pub async fn abort(self) {
+        let _ = self.control_tx.send(StreamControlSignal::Close).await;
+        self.join.abort();
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct StreamStats {
@@ -50,6 +81,29 @@ impl StreamStats {
             bitrate_kbps_sent,
             bitrate_kbps_received,
         }
+    }
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn control_signal_volume_round_trips_through_channel() {
+        let (tx, mut rx) = mpsc::channel::<StreamControlSignal>(4);
+        tx.send(StreamControlSignal::SetVolume(0.5)).await.unwrap();
+        match rx.recv().await {
+            Some(StreamControlSignal::SetVolume(v)) => assert!((v - 0.5).abs() < 1e-6),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn control_signal_close_round_trips() {
+        let (tx, mut rx) = mpsc::channel::<StreamControlSignal>(4);
+        tx.send(StreamControlSignal::Close).await.unwrap();
+        assert!(matches!(rx.recv().await, Some(StreamControlSignal::Close)));
     }
 }
 

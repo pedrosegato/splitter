@@ -35,8 +35,29 @@ pub enum DeviceGuard {
     Playback(crate::audio::playback::PlaybackHandle),
 }
 
-// cpal::Stream is !Send on CoreAudio, but DeviceGuard is only dropped (never called across
-// threads), and cpal's internal Arc-based reference counting makes cross-thread drop safe.
+// SAFETY: cpal::Stream is !Send on CoreAudio (and the Windows WASAPI host) because its
+// internal callback state is pinned to the creating thread by the OS audio scheduler.
+// However DeviceGuard is never *accessed* (no methods called) on any thread other than
+// the one that creates the StreamRuntime.  The only cross-thread operation is Drop:
+//
+//   - DeviceGuard is stored in StreamRuntime, which is inserted into StreamRegistry at
+//     construction time (stream_runtime.rs:154 `registry.register(rt)`) and removed by
+//     StreamRegistry::close (stream_runtime.rs:201-211) or StreamRuntime::abort
+//     (stream_runtime.rs:55-58), both of which call `rt.join.abort()` and then let `rt`
+//     drop on the tokio executor thread pool — potentially a different thread than the
+//     audio thread that called CaptureHandle::from_device or PlaybackHandle::start_by_id.
+//
+//   - All methods on the wrapped cpal::Stream (play/pause) are only called inside
+//     CaptureHandle::from_device and PlaybackHandle::start_by_id, both of which run on
+//     the thread that calls the constructor, before the DeviceGuard is moved into
+//     StreamRuntime.  After that point the inner Stream is never touched — only dropped.
+//
+//   - cpal wraps the platform stream in an Arc<Mutex<StreamInner>> on all non-CoreAudio
+//     hosts, and CoreAudio's Stream::drop sends a "stop" message to the audio thread
+//     over a channel, making cross-thread drop safe per cpal's own internal design.
+//
+// If a future refactor ever needs to call stream.pause()/play() from a different thread,
+// this unsafe block must be revisited and replaced with Arc<Mutex<DeviceGuard>>.
 unsafe impl Send for DeviceGuard {}
 unsafe impl Sync for DeviceGuard {}
 

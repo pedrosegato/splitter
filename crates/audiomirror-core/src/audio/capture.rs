@@ -35,14 +35,7 @@ impl CaptureHandle {
     pub fn start_loopback(producer: RingProducer) -> Result<Self, AudioError> {
         #[cfg(target_os = "windows")]
         {
-            let host =
-                cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| AudioError::BuildStream {
-                    source: Box::new(e),
-                })?;
-            let device = host
-                .default_output_device()
-                .ok_or(AudioError::NoDefaultDevice)?;
-            return Self::from_device(device, producer, Arc::new(Notify::new()));
+            return Self::start_loopback_wasapi(producer);
         }
         #[cfg(target_os = "linux")]
         {
@@ -61,6 +54,169 @@ impl CaptureHandle {
             let _ = producer;
             Err(AudioError::LoopbackUnsupported)
         }
+    }
+
+    // WHY: WASAPI loopback capture requires using the *output* device as the capture
+    // source, but build_input_stream must be called with a SampleFormat that the WASAPI
+    // driver will actually accept.  The previous approach called default_input_config()
+    // and fell back to default_output_config(), which worked on Pedro's machine (F32
+    // shared-mode output) but silently breaks on systems whose output is configured for
+    // I32 or I24 — cpal would then try to build a stream with the wrong format and
+    // return a BuildStream error.
+    //
+    // This dedicated path:
+    //   1. Gets the default WASAPI output device.
+    //   2. Iterates supported_output_configs() to find a format that build_input_stream
+    //      can accept (F32 preferred, then I16/U16 for compatibility).
+    //   3. Falls back to F32 if no supported range is found, letting the driver perform
+    //      automatic format conversion (shared-mode WASAPI always supports F32).
+    #[cfg(target_os = "windows")]
+    fn start_loopback_wasapi(producer: RingProducer) -> Result<Self, AudioError> {
+        use cpal::traits::DeviceTrait;
+
+        let host =
+            cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| AudioError::BuildStream {
+                source: Box::new(e),
+            })?;
+        let device = host
+            .default_output_device()
+            .ok_or(AudioError::NoDefaultDevice)?;
+
+        // Preferred formats in order: F32 (lossless), I16 (common), U16.
+        let preferred = [
+            cpal::SampleFormat::F32,
+            cpal::SampleFormat::I16,
+            cpal::SampleFormat::U16,
+        ];
+
+        let supported_cfg = device
+            .supported_output_configs()
+            .map_err(|e| AudioError::BuildStream {
+                source: Box::new(e),
+            })?
+            .filter_map(|r| {
+                let fmt = r.sample_format();
+                if preferred.contains(&fmt) {
+                    Some(r.with_max_sample_rate())
+                } else {
+                    None
+                }
+            })
+            .min_by_key(|c| {
+                // Lower index = higher preference.
+                preferred
+                    .iter()
+                    .position(|&f| f == c.sample_format())
+                    .unwrap_or(usize::MAX)
+            });
+
+        // Fall back to F32 at 48 kHz stereo — WASAPI shared-mode always supports this
+        // via its built-in resampler/converter.
+        let config = supported_cfg.unwrap_or_else(|| {
+            cpal::SupportedStreamConfigRange::new(
+                2,
+                cpal::SampleRate(48_000),
+                cpal::SampleRate(48_000),
+                cpal::SupportedBufferSize::Range {
+                    min: 128,
+                    max: 4096,
+                },
+                cpal::SampleFormat::F32,
+            )
+            .with_max_sample_rate()
+        });
+
+        Self::from_device_with_config(device, config, producer, Arc::new(Notify::new()))
+    }
+
+    // Variant of from_device that accepts a pre-selected SupportedStreamConfig instead
+    // of calling default_input_config().  Used by start_loopback_wasapi.
+    #[cfg(target_os = "windows")]
+    fn from_device_with_config(
+        device: cpal::Device,
+        supported: cpal::SupportedStreamConfig,
+        producer: RingProducer,
+        frame_notify: Arc<Notify>,
+    ) -> Result<Self, AudioError> {
+        use cpal::traits::DeviceTrait;
+
+        let channels = supported.channels();
+        let sample_rate = supported.sample_rate().0;
+        let sample_format = supported.sample_format();
+        let config: cpal::StreamConfig = supported.into();
+
+        let producer = Arc::new(std::sync::Mutex::new(producer));
+        let notify = frame_notify.clone();
+        let err_fn = |e| tracing::error!("cpal loopback stream error: {e}");
+
+        let stream = match sample_format {
+            cpal::SampleFormat::F32 => {
+                let prod = producer.clone();
+                let n = notify.clone();
+                let mut router = SampleRouter::new(sample_rate, channels)?;
+                device
+                    .build_input_stream(
+                        &config,
+                        move |samples: &[f32], _| {
+                            router.push_f32(samples, &prod, &n);
+                        },
+                        err_fn,
+                        None,
+                    )
+                    .map_err(|e| AudioError::BuildStream {
+                        source: Box::new(e),
+                    })?
+            }
+            cpal::SampleFormat::I16 => {
+                let prod = producer.clone();
+                let n = notify.clone();
+                let mut router = SampleRouter::new(sample_rate, channels)?;
+                device
+                    .build_input_stream(
+                        &config,
+                        move |samples: &[i16], _| {
+                            router.push_i16(samples, &prod, &n);
+                        },
+                        err_fn,
+                        None,
+                    )
+                    .map_err(|e| AudioError::BuildStream {
+                        source: Box::new(e),
+                    })?
+            }
+            cpal::SampleFormat::U16 => {
+                let prod = producer.clone();
+                let n = notify.clone();
+                let mut router = SampleRouter::new(sample_rate, channels)?;
+                device
+                    .build_input_stream(
+                        &config,
+                        move |samples: &[u16], _| {
+                            router.push_u16(samples, &prod, &n);
+                        },
+                        err_fn,
+                        None,
+                    )
+                    .map_err(|e| AudioError::BuildStream {
+                        source: Box::new(e),
+                    })?
+            }
+            other => {
+                return Err(AudioError::BuildStream {
+                    source: Box::new(std::io::Error::other(format!(
+                        "unsupported loopback format: {other:?}"
+                    ))),
+                });
+            }
+        };
+
+        stream.play().map_err(|e| AudioError::PlayStream {
+            source: Box::new(e),
+        })?;
+        Ok(Self {
+            _stream: stream,
+            frame_notify,
+        })
     }
 
     pub fn from_device(

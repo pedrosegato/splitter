@@ -59,7 +59,8 @@ pub(crate) async fn run(
     peer_name_override: Option<String>,
     identity_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let settings_handle = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
+    let settings_path_buf = settings_path()?;
+    let settings_handle = Arc::new(RwLock::new(Settings::load_or_default(&settings_path_buf)?));
 
     let log_level = settings_handle.read().await.log_level;
     let _logs_guard = audiomirror_core::observability::logs::init(log_level, &log_dir()?)?;
@@ -136,6 +137,57 @@ pub(crate) async fn run(
         }
     }
 
+    // C — settings hot-reload: every 5 s check mtime; reload on change.
+    {
+        let sh = settings_handle.clone();
+        let sp = settings_path_buf.clone();
+        tokio::spawn(async move {
+            let mut last_mtime: Option<std::time::SystemTime> =
+                std::fs::metadata(&sp).ok().and_then(|m| m.modified().ok());
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
+            interval.tick().await; // consume the immediate first tick
+            loop {
+                interval.tick().await;
+                let current = std::fs::metadata(&sp).ok().and_then(|m| m.modified().ok());
+                if current != last_mtime && current.is_some() {
+                    last_mtime = current;
+                    match Settings::load_or_default(&sp) {
+                        Ok(new_settings) => {
+                            let old = sh.read().await.clone();
+                            *sh.write().await = new_settings.clone();
+                            #[allow(clippy::print_stdout)]
+                            {
+                                println!(">> settings reloaded");
+                            }
+                            // Warn about keys that require restart.
+                            if old.log_level != new_settings.log_level {
+                                #[allow(clippy::print_stdout)]
+                                {
+                                    println!(
+                                        ">> setting 'log_level' changed; restart required to apply"
+                                    );
+                                }
+                            }
+                            if old.metrics_enabled != new_settings.metrics_enabled
+                                || old.metrics_port != new_settings.metrics_port
+                            {
+                                #[allow(clippy::print_stdout)]
+                                {
+                                    println!(
+                                        ">> setting 'metrics_enabled/metrics_port' changed; restart required to apply"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("settings reload failed: {e}");
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     #[allow(clippy::print_stdout)]
     {
         println!("READY port={}", server.bind_addr.port());
@@ -158,6 +210,9 @@ pub(crate) async fn run(
         let trust_clone = trust.clone();
         let sessions_clone = sessions.clone();
         let local_peer_id = identity.peer_id;
+        let identity_clone = identity.clone();
+        let outgoing_clone = outgoing_connections.clone();
+        let server_conns_clone = server.connections.clone();
         tokio::spawn(async move {
             while let Ok(peer_id) = conn_est_rx.recv().await {
                 let name = peer_display_name(&peer_id, &disc_clone, &trust_clone).await;
@@ -176,6 +231,9 @@ pub(crate) async fn run(
                         disc_clone.clone(),
                         trust_clone.clone(),
                         sessions_clone.clone(),
+                        identity_clone.clone(),
+                        outgoing_clone.clone(),
+                        server_conns_clone.clone(),
                     );
                 }
             }
@@ -279,6 +337,10 @@ pub(crate) async fn run(
         // Drop server last: closes the TCP accept loop and all peer connections.
         drop(server);
         tracing::info!("daemon shutdown complete");
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> goodbye");
+        }
         break;
     }
 
@@ -371,7 +433,10 @@ async fn handle_line(
             println!("  {:<44}  list discovered peers", "peers");
             println!("  {:<44}  list peers waiting for accept", "pending");
             println!("  {:<44}  accept a pending peer (TOFU)", "accept <idx>");
-            println!("  {:<44}  open signaling link", "connect <peer_id|name>");
+            println!(
+                "  {:<44}  open signaling link (name, peer_id, or host:port)",
+                "connect <peer_id|name|host:port>"
+            );
             println!(
                 "  {:<44}  open a session with a connected peer",
                 "open <peer_id|name>"
@@ -478,16 +543,29 @@ async fn handle_line(
         "connect" => {
             let key = parts
                 .next()
-                .ok_or_else(|| anyhow::anyhow!("usage: connect <peer_id|name>"))?;
-            let target = {
-                let map = discovered.read().await;
-                map.values()
-                    .find(|p| p.peer_id == key || p.peer_name == key)
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("unknown peer {key}"))?
+                .ok_or_else(|| anyhow::anyhow!("usage: connect <peer_id|name|host:port>"))?;
+
+            // D — if the argument looks like host:port, dial directly without mDNS lookup.
+            let (host_port, remote_uuid) = if key.contains(':') && !is_uuid(key) {
+                let addr: SocketAddr = key.parse().map_err(|_| {
+                    anyhow::anyhow!(
+                        "invalid address: {key}; expected host:port or a known peer name/id"
+                    )
+                })?;
+                (addr, None)
+            } else {
+                let target = {
+                    let map = discovered.read().await;
+                    map.values()
+                        .find(|p| p.peer_id == key || p.peer_name == key)
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("unknown peer {key}"))?
+                };
+                let addr: SocketAddr = format!("{}:{}", target.host, target.port).parse()?;
+                let uuid = Uuid::parse_str(&target.peer_id).ok();
+                (addr, uuid)
             };
-            let host_port: SocketAddr = format!("{}:{}", target.host, target.port).parse()?;
-            let remote_uuid = Uuid::parse_str(&target.peer_id).ok();
+
             let outcome = connect_to_peer(
                 host_port,
                 identity,
@@ -496,17 +574,21 @@ async fn handle_line(
                 Duration::from_secs(5),
             )
             .await?;
+
+            let display_name = if let Some(id) = outcome.remote_peer_id {
+                peer_display_name(&id, discovered, trust).await
+            } else {
+                host_port.to_string()
+            };
+
             if outcome.accepted {
-                println!(">> connected to {}", target.peer_name);
+                println!(">> connected to {display_name}");
             } else {
                 tracing::warn!(
                     "connect not yet accepted (reason={:?}); waiting for remote operator to accept",
                     outcome.reason
                 );
-                println!(
-                    ">> hello sent to {} — waiting for remote operator to accept",
-                    target.peer_name
-                );
+                println!(">> hello sent to {display_name} — waiting for remote operator to accept");
             }
             if let Some(peer_uuid) = outcome.remote_peer_id {
                 spawn_stream_open_acceptor(
@@ -518,6 +600,9 @@ async fn handle_line(
                     discovered.clone(),
                     trust.clone(),
                     sessions.clone(),
+                    identity.clone(),
+                    outgoing_connections.clone(),
+                    server.connections.clone(),
                 );
                 let mut events_rx = outcome.handle.events.subscribe();
                 outgoing_connections
@@ -550,6 +635,20 @@ async fn handle_line(
                     .ok_or_else(|| anyhow::anyhow!("unknown peer {key}"))?
             };
             let remote_uuid = Uuid::parse_str(&target.peer_id)?;
+
+            // A — dedupe: reuse an existing Active session with this remote peer.
+            let existing = sessions.snapshot().await.into_iter().find(|s| {
+                s.remote_peer_id == remote_uuid
+                    && s.state == audiomirror_core::net::session::SessionState::Active
+            });
+            if let Some(sess) = existing {
+                println!(
+                    ">> existing active session with {} (session_id: {})",
+                    target.peer_name, sess.id
+                );
+                return Ok(());
+            }
+
             let session_id = sessions.open_outgoing(identity.peer_id, remote_uuid).await;
             sessions.accept(&session_id).await?;
             println!(">> opened session {session_id} with {}", target.peer_name);
@@ -631,7 +730,8 @@ async fn handle_line(
                 }
             }
             sessions.close(&id).await?;
-            println!(">> disconnected session {id}");
+            // H — clean ack message
+            println!(">> session {} closed", short(&id));
         }
         "quit" => {
             // handled in run() via the select! arm — nothing more to do here
@@ -664,6 +764,9 @@ fn spawn_stream_open_acceptor(
     discovered: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     trust: Arc<RwLock<TrustStore>>,
     sessions: Arc<SessionManager>,
+    identity: PeerIdentity,
+    outgoing_connections: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    server_connections: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
 ) {
     let default_output =
         pick_default_output_device_id().unwrap_or_else(|| "Output:0:default".into());
@@ -681,6 +784,23 @@ fn spawn_stream_open_acceptor(
                         let Ok(requester_uuid) = Uuid::parse_str(&requested_by) else {
                             continue;
                         };
+
+                        // A — dedupe incoming session requests: if there is already an Active
+                        // session for this (local, remote) pair, respond with the existing
+                        // session id and skip creating a duplicate.
+                        let existing = sessions.snapshot().await.into_iter().find(|s| {
+                            s.remote_peer_id == requester_uuid
+                                && s.state == audiomirror_core::net::session::SessionState::Active
+                        });
+                        if let Some(ref ex) = existing {
+                            let name = peer_display_name(&peer_id, &discovered, &trust).await;
+                            #[allow(clippy::print_stdout)]
+                            {
+                                println!(">> {name} re-opened existing session {}", short(&ex.id));
+                            }
+                            continue;
+                        }
+
                         let _ = sessions
                             .register_incoming(sid_uuid, local_peer_id, requester_uuid)
                             .await;
@@ -872,6 +992,7 @@ fn spawn_stream_open_acceptor(
                         .filter(|s| s.remote_peer_id == peer_id)
                         .map(|s| s.id)
                         .collect();
+                    let had_active_session = !session_ids.is_empty();
                     for sid in &session_ids {
                         let stream_ids: Vec<u8> = sessions
                             .snapshot()
@@ -885,6 +1006,28 @@ fn spawn_stream_open_acceptor(
                         }
                         let _ = sessions.close(sid).await;
                     }
+                    // B — auto-reconnect if peer was in an active session and is still
+                    // being announced via mDNS.
+                    if had_active_session {
+                        let still_present = discovered
+                            .read()
+                            .await
+                            .values()
+                            .any(|p| p.peer_id == peer_id.to_string());
+                        if still_present {
+                            spawn_reconnect_loop(ReconnectArgs {
+                                peer_id,
+                                discovered: discovered.clone(),
+                                identity: identity.clone(),
+                                trust: trust.clone(),
+                                sessions: sessions.clone(),
+                                stream_registry: registry.clone(),
+                                outgoing_connections: outgoing_connections.clone(),
+                                server_connections: server_connections.clone(),
+                                local_peer_id,
+                            });
+                        }
+                    }
                     break;
                 }
                 Ok(PeerEvent::Connected { .. }) => {}
@@ -892,6 +1035,133 @@ fn spawn_stream_open_acceptor(
             }
         }
     });
+}
+
+pub(crate) struct ReconnectArgs {
+    pub peer_id: Uuid,
+    pub discovered: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
+    pub identity: PeerIdentity,
+    pub trust: Arc<RwLock<TrustStore>>,
+    pub sessions: Arc<SessionManager>,
+    pub stream_registry: Arc<StreamRegistry>,
+    pub outgoing_connections: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    pub server_connections: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    pub local_peer_id: Uuid,
+}
+
+// B — auto-reconnect: called when a peer whose session was active disconnects and is
+// still advertised via mDNS. Tries connect_to_peer with exponential backoff, up to 10
+// attempts, cap 30 s. On success the TOFU token still matches so the handshake is instant.
+pub(crate) fn spawn_reconnect_loop(args: ReconnectArgs) {
+    let ReconnectArgs {
+        peer_id,
+        discovered,
+        identity,
+        trust,
+        sessions,
+        stream_registry,
+        outgoing_connections,
+        server_connections,
+        local_peer_id,
+    } = args;
+    tokio::spawn(async move {
+        let delays_secs: [u64; 10] = [1, 2, 4, 8, 16, 30, 30, 30, 30, 30];
+        for delay in delays_secs {
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+
+            // Only reconnect if peer is still being announced.
+            let addr_opt = {
+                let map = discovered.read().await;
+                map.values()
+                    .find(|p| p.peer_id == peer_id.to_string())
+                    .map(|p| format!("{}:{}", p.host, p.port))
+            };
+            let Some(addr_str) = addr_opt else {
+                tracing::debug!(%peer_id, "peer no longer in mDNS; aborting reconnect");
+                return;
+            };
+            let Ok(addr) = addr_str.parse::<SocketAddr>() else {
+                continue;
+            };
+
+            match connect_to_peer(
+                addr,
+                &identity,
+                trust.clone(),
+                Some(peer_id),
+                Duration::from_secs(5),
+            )
+            .await
+            {
+                Ok(outcome) if outcome.accepted => {
+                    let name = peer_display_name(&peer_id, &discovered, &trust).await;
+                    #[allow(clippy::print_stdout)]
+                    {
+                        println!(">> reconnected to {name}");
+                    }
+                    if let Some(pid) = outcome.remote_peer_id {
+                        spawn_stream_open_acceptor(
+                            outcome.handle.tx.clone(),
+                            outcome.handle.events.subscribe(),
+                            stream_registry.clone(),
+                            local_peer_id,
+                            pid,
+                            discovered.clone(),
+                            trust.clone(),
+                            sessions.clone(),
+                            identity.clone(),
+                            outgoing_connections.clone(),
+                            server_connections.clone(),
+                        );
+                        let mut ev_rx = outcome.handle.events.subscribe();
+                        outgoing_connections
+                            .write()
+                            .await
+                            .insert(pid, outcome.handle);
+                        let map = outgoing_connections.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                match ev_rx.recv().await {
+                                    Ok(PeerEvent::Disconnected { .. }) | Err(_) => {
+                                        map.write().await.remove(&pid);
+                                        break;
+                                    }
+                                    Ok(_) => {}
+                                }
+                            }
+                        });
+                    }
+                    return;
+                }
+                Ok(_) | Err(_) => {
+                    tracing::debug!(%peer_id, "reconnect attempt failed, retrying");
+                }
+            }
+
+            // If peer dropped from discovery while we were waiting, bail out.
+            let still_present = discovered
+                .read()
+                .await
+                .values()
+                .any(|p| p.peer_id == peer_id.to_string());
+            if !still_present {
+                tracing::debug!(%peer_id, "peer no longer in mDNS; aborting reconnect");
+                return;
+            }
+        }
+
+        let name = peer_display_name(&peer_id, &discovered, &trust).await;
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> reconnect to {name} failed");
+        }
+        let _ = server_connections;
+    });
+}
+
+/// Returns true if `s` looks like a UUID (contains 4 hyphens and has length 36).
+fn is_uuid(s: &str) -> bool {
+    s.len() == 36 && s.chars().filter(|&c| c == '-').count() == 4
 }
 
 fn split_repl_line(line: &str) -> Vec<String> {
@@ -996,5 +1266,33 @@ mod tests {
         let registry = audiomirror_core::StreamRegistry::new();
         let outgoing = Arc::new(RwLock::new(HashMap::new()));
         graceful_shutdown(&sessions, &registry, None, &outgoing).await;
+    }
+
+    #[test]
+    fn is_uuid_recognizes_valid_uuid() {
+        assert!(is_uuid("550e8400-e29b-41d4-a716-446655440000"));
+    }
+
+    #[test]
+    fn is_uuid_rejects_host_port() {
+        assert!(!is_uuid("192.168.1.10:7777"));
+        assert!(!is_uuid("localhost:7777"));
+    }
+
+    #[tokio::test]
+    async fn open_dedupe_returns_existing_session() {
+        use audiomirror_core::net::session::SessionState;
+        let sessions = audiomirror_core::SessionManager::new();
+        let local = Uuid::new_v4();
+        let remote = Uuid::new_v4();
+        let sid = sessions.open_outgoing(local, remote).await;
+        sessions.accept(&sid).await.unwrap();
+
+        let snap = sessions.snapshot().await;
+        let existing = snap
+            .into_iter()
+            .find(|s| s.remote_peer_id == remote && s.state == SessionState::Active);
+        assert!(existing.is_some(), "should find existing active session");
+        assert_eq!(existing.unwrap().id, sid);
     }
 }

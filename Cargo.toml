@@ -41,6 +41,7 @@ prometheus = { version = "0.13", default-features = false, features = ["process"
 assert_cmd = "2"
 insta = { version = "1", features = ["yaml"] }
 tempfile = "3"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 
 [profile.release]
 opt-level = 3

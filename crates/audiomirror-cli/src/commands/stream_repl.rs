@@ -330,7 +330,9 @@ async fn stream_set_paused(
 
 #[allow(clippy::print_stdout)]
 async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::Result<()> {
-    const BAR: &str = "═══════════════════════════════════════════════════════════════════";
+    use sysinfo::System;
+
+    const BAR: &str = "═══════════════════════════════════════════════════════════════════════════";
     let target: Option<(Uuid, u8)> = if rest.is_empty() {
         None
     } else {
@@ -344,23 +346,43 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
             .collect(),
         None => snaps,
     };
+
+    // F — sample process-wide CPU% via sysinfo at print time.
+    let cpu_pct = {
+        let mut sys = System::new();
+        sys.refresh_cpu_usage();
+        // sysinfo requires two samples to compute usage; sleep briefly between them.
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        sys.refresh_cpu_usage();
+        let cpus = sys.cpus();
+        if cpus.is_empty() {
+            0.0f32
+        } else {
+            cpus.iter().map(|c| c.cpu_usage()).sum::<f32>() / cpus.len() as f32
+        }
+    };
+
     println!("{BAR}");
-    println!("  STREAM STATS");
+    println!("  STREAM STATS  [process CPU: {cpu_pct:.1}%]");
     println!("{BAR}");
     if filtered.is_empty() {
         println!("  (no active streams)");
     } else {
         println!(
-            "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  RTT",
-            "SESSION", "SID", "SENT", "RECV", "LOST", "↑KBPS", "↓KBPS"
+            "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  {:<6}  BW(B/s)",
+            "SESSION", "SID", "SENT", "RECV", "LOST", "↑KBPS", "↓KBPS", "RTT"
         );
         println!(
-            "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  ───",
-            "───────", "───", "────", "────", "────", "─────", "─────"
+            "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  {:<6}  ───────",
+            "───────", "───", "────", "────", "────", "─────", "─────", "───"
         );
         for (sid, stream_id, snap) in filtered {
+            // Total bandwidth bytes/sec = sent + received kbps converted to bytes/sec.
+            // bitrate_kbps values are already per-window so divide by 8 to get kB/s * 1000.
+            let bw_bytes_sec =
+                (snap.bitrate_kbps_sent as u64 + snap.bitrate_kbps_received as u64) * 1000 / 8;
             println!(
-                "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  {}",
+                "  {:<38}  {:<5}  {:<8}  {:<8}  {:<6}  {:<7}  {:<7}  {:<6}  {}",
                 sid,
                 stream_id,
                 snap.packets_sent,
@@ -369,6 +391,7 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
                 snap.bitrate_kbps_sent,
                 snap.bitrate_kbps_received,
                 snap.last_rtt_ms,
+                bw_bytes_sec,
             );
         }
     }

@@ -58,8 +58,6 @@ impl SCStreamOutputTrait for AudioHandler {
             return;
         };
 
-        // SCK with channel_count=2 emits interleaved single-buffer ABL: L,R,L,R,...
-        // Pass interleaved stereo samples directly to the ring; no downmix.
         let mut stereo_buf = [0f32; 4096];
         let mut stereo_len = 0usize;
 
@@ -79,10 +77,37 @@ impl SCStreamOutputTrait for AudioHandler {
             let samples: &[f32] =
                 unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), sample_count) };
 
-            let available = stereo_buf.len() - stereo_len;
-            let to_copy = samples.len().min(available);
-            stereo_buf[stereo_len..stereo_len + to_copy].copy_from_slice(&samples[..to_copy]);
-            stereo_len += to_copy;
+            match channels {
+                1 => {
+                    for &s in samples {
+                        if stereo_len + 2 > stereo_buf.len() {
+                            break;
+                        }
+                        stereo_buf[stereo_len] = s;
+                        stereo_buf[stereo_len + 1] = s;
+                        stereo_len += 2;
+                    }
+                }
+                2 => {
+                    let available = stereo_buf.len() - stereo_len;
+                    let to_copy = samples.len().min(available);
+                    stereo_buf[stereo_len..stereo_len + to_copy]
+                        .copy_from_slice(&samples[..to_copy]);
+                    stereo_len += to_copy;
+                }
+                n => {
+                    let frame_count = samples.len() / n;
+                    for frame_idx in 0..frame_count {
+                        if stereo_len + 2 > stereo_buf.len() {
+                            break;
+                        }
+                        let base = frame_idx * n;
+                        stereo_buf[stereo_len] = samples[base];
+                        stereo_buf[stereo_len + 1] = samples[base + 1];
+                        stereo_len += 2;
+                    }
+                }
+            }
         }
 
         if stereo_len == 0 {

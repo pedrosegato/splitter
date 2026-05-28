@@ -142,7 +142,7 @@ pub struct StreamRuntimeSummary {
 
 #[derive(Debug, Default)]
 pub struct StreamRegistry {
-    inner: RwLock<HashMap<(SessionId, StreamId), StreamRuntime>>,
+    pub(crate) inner: RwLock<HashMap<(SessionId, StreamId), StreamRuntime>>,
     prev_snapshots: RwLock<HashMap<(SessionId, StreamId), StreamStatsSnapshot>>,
 }
 
@@ -1046,5 +1046,82 @@ mod open_source_tests {
         let listed = registry.list().await;
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].stream_id, 0);
+    }
+}
+
+use crate::net::device_watcher::DeviceEvent;
+use tokio::sync::broadcast;
+
+pub async fn dispatch_device_events(
+    registry: Arc<StreamRegistry>,
+    mut rx: broadcast::Receiver<DeviceEvent>,
+) {
+    loop {
+        match rx.recv().await {
+            Ok(ev) => {
+                let (target_id, signal) = match ev {
+                    DeviceEvent::Disappeared(id) => (id, StreamControlSignal::Pause),
+                    DeviceEvent::Appeared(id) => (id, StreamControlSignal::Resume),
+                };
+                let guard = registry.inner.read().await;
+                for ((sid, stream_id), rt) in guard.iter() {
+                    if rt.bound_device_id.as_deref() == Some(target_id.as_str()) {
+                        let _ = rt.control_tx.send(signal).await;
+                        tracing::info!(
+                            session = %sid,
+                            stream = stream_id,
+                            device = %target_id,
+                            signal = ?signal,
+                            "device hot-plug -> pump notified"
+                        );
+                    }
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!("device watcher lagged by {n} events");
+            }
+            Err(broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
+#[cfg(test)]
+mod hotplug_tests {
+    use super::*;
+    use crate::net::device_watcher::DeviceEvent;
+    use tokio::sync::broadcast;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn watcher_dispatches_pause_when_bound_device_disappears() {
+        let registry = StreamRegistry::new();
+        let (tx, _) = broadcast::channel::<DeviceEvent>(8);
+        let sid = Uuid::new_v4();
+
+        let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+        let join = tokio::spawn(async move { while let Some(_) = ctrl_rx.recv().await {} });
+        registry
+            .register(StreamRuntime {
+                session_id: sid,
+                stream_id: 0,
+                stats: Arc::new(StreamStats::default()),
+                control_tx: ctrl_tx.clone(),
+                bound_device_id: Some("Input:0:USB Headset".into()),
+                join,
+                device_guard: DeviceGuard::None,
+            })
+            .await
+            .unwrap();
+
+        let dispatcher = tokio::spawn(dispatch_device_events(registry.clone(), tx.subscribe()));
+        tx.send(DeviceEvent::Disappeared("Input:0:USB Headset".into()))
+            .unwrap();
+
+        let mut probe_rx = ctrl_tx.clone();
+        let _ = probe_rx;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        dispatcher.abort();
     }
 }

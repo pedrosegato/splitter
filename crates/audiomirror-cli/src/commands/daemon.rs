@@ -178,7 +178,9 @@ async fn handle_line(
     server: &audiomirror_core::net::signaling::server::SignalingServerHandle,
     discovered: &Arc<RwLock<HashMap<String, audiomirror_core::net::discovery::DiscoveredPeer>>>,
 ) -> anyhow::Result<()> {
-    let mut parts = line.split_whitespace();
+    let tokens = split_repl_line(line);
+    let token_refs: Vec<&str> = tokens.iter().map(|s| s.as_str()).collect();
+    let mut parts = token_refs.iter().copied();
     let head = parts.next().unwrap_or("");
     match head {
         "help" => {
@@ -415,6 +417,35 @@ fn spawn_stream_open_acceptor(
     });
 }
 
+fn split_repl_line(line: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    let mut started = false;
+    for ch in line.chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+                started = true;
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                if started {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        out.push(cur);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,5 +490,29 @@ mod tests {
         };
         assert!(!s_off.metrics_enabled);
         assert!(s_on.metrics_enabled);
+    }
+
+    #[test]
+    fn split_repl_line_respects_double_quotes() {
+        let v = super::split_repl_line(
+            r#"stream open --from "BlackHole 2ch" --to bob:"Alto-falantes (MCHOSE V9 PRO)""#,
+        );
+        assert_eq!(
+            v,
+            vec![
+                "stream",
+                "open",
+                "--from",
+                "BlackHole 2ch",
+                "--to",
+                "bob:Alto-falantes (MCHOSE V9 PRO)",
+            ]
+        );
+    }
+
+    #[test]
+    fn split_repl_line_plain_words() {
+        let v = super::split_repl_line("connect bob");
+        assert_eq!(v, vec!["connect", "bob"]);
     }
 }

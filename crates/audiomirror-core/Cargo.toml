@@ -33,6 +33,7 @@ screencapturekit = "1.5"
 
 [dev-dependencies]
 proptest = "1"
+tempfile = "3"
 
 [lints]
 workspace = true

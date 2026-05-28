@@ -17,6 +17,7 @@ bytes = { workspace = true }
 socket2 = { workspace = true }
 uuid = { workspace = true }
 toml = { workspace = true }
+dirs = { workspace = true }
 
 [lints]
 workspace = true

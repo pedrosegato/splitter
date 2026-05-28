@@ -1,6 +1,16 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Subcommand, Debug)]
+enum AutostartAction {
+    /// Register the daemon as a login/startup item for the current user.
+    Enable,
+    /// Remove the daemon from login/startup items.
+    Disable,
+    /// Show whether the autostart artifact is present.
+    Status,
+}
+
+#[derive(Subcommand, Debug)]
 enum LogsAction {
     /// Print the path of the current log file.
     Path,
@@ -127,6 +137,12 @@ enum Cmd {
         #[command(subcommand)]
         action: SettingsAction,
     },
+
+    /// Manage autostart (login item / systemd user service / Windows Run key).
+    Autostart {
+        #[command(subcommand)]
+        action: AutostartAction,
+    },
 }
 
 #[tokio::main]
@@ -205,6 +221,11 @@ async fn main() -> anyhow::Result<()> {
             SettingsAction::Show => commands::settings::run_show(),
             SettingsAction::Get { key } => commands::settings::run_get(&key),
             SettingsAction::Set { key, value } => commands::settings::run_set(&key, &value),
+        },
+        Cmd::Autostart { action } => match action {
+            AutostartAction::Enable => commands::autostart::run_enable(),
+            AutostartAction::Disable => commands::autostart::run_disable(),
+            AutostartAction::Status => commands::autostart::run_status(),
         },
     }
 }

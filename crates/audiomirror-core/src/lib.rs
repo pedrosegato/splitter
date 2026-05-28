@@ -8,6 +8,10 @@ pub use net::identity::PeerIdentity;
 pub use net::manager::{SessionManager, SessionSnapshot, StreamSnapshot};
 pub use net::session::{Session, SessionId, SessionState};
 pub use net::stream::{Stream, StreamId, StreamRoute, StreamState};
+pub use net::stream_runtime::{
+    StreamControlSignal, StreamRegistry, StreamRuntime, StreamRuntimeSummary, StreamStats,
+    StreamStatsSnapshot,
+};
 pub use net::trust::{TrustStore, TrustedPeer};
 
 #[cfg(target_os = "macos")]

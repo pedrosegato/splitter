@@ -377,7 +377,7 @@ mod tests {
 }
 
 #[allow(dead_code, clippy::too_many_arguments)]
-pub(crate) async fn spawn_source_pump_inner(
+pub async fn spawn_source_pump_inner(
     _session_id: SessionId,
     stream_id: StreamId,
     mut consumer: RingConsumer,
@@ -454,7 +454,7 @@ pub(crate) async fn spawn_source_pump_inner(
 }
 
 #[allow(dead_code)]
-pub(crate) async fn spawn_sink_pump_inner(
+pub async fn spawn_sink_pump_inner(
     _session_id: SessionId,
     stream_id: StreamId,
     socket: UdpSocket,

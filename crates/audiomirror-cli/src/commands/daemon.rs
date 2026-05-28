@@ -1,13 +1,17 @@
 use super::stream_repl;
+use audiomirror_core::audio::devices::{list_devices, DeviceKind};
 use audiomirror_core::config::identity_path;
 use audiomirror_core::net::device_watcher;
 use audiomirror_core::net::discovery::{Discovery, DiscoveryEvent};
 use audiomirror_core::net::signaling::{
-    connect_to_peer, server::accept_pending, server::SignalingServer, SignalingMessage,
+    connect_to_peer, server::accept_pending, server::SignalingServer, CodecParams, Endpoint,
+    PeerEvent, SignalingMessage,
 };
-use audiomirror_core::net::stream_runtime::{dispatch_device_events, StreamRegistry};
+use audiomirror_core::net::stream_runtime::{
+    dispatch_device_events, open_stream_as_sink, StreamRegistry,
+};
 use audiomirror_core::net::trust::{trust_store_path, TrustStore};
-use audiomirror_core::{PeerIdentity, SessionManager};
+use audiomirror_core::{PeerIdentity, SessionManager, StreamRoute};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,6 +19,14 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+fn pick_default_output_device_id() -> Option<String> {
+    list_devices()
+        .ok()?
+        .into_iter()
+        .find(|d| d.kind == DeviceKind::Output)
+        .map(|d| d.id)
+}
 
 pub(crate) async fn run(
     signaling_port: u16,
@@ -146,6 +158,14 @@ async fn handle_line(
             let (peer_id, _token) =
                 accept_pending(&server.pending, trust, &server.connections, idx).await?;
             tracing::info!("accepted pending #{idx} → peer {peer_id}");
+            let conns = server.connections.read().await;
+            if let Some(conn) = conns.get(&peer_id) {
+                spawn_stream_open_acceptor(
+                    conn.tx.clone(),
+                    conn.events.subscribe(),
+                    stream_registry.clone(),
+                );
+            }
         }
         "connect" => {
             let key = parts
@@ -254,4 +274,96 @@ async fn handle_line(
         }
     }
     Ok(())
+}
+
+fn spawn_stream_open_acceptor(
+    conn_tx: tokio::sync::mpsc::Sender<SignalingMessage>,
+    mut events: tokio::sync::broadcast::Receiver<PeerEvent>,
+    registry: Arc<StreamRegistry>,
+) {
+    let default_output =
+        pick_default_output_device_id().unwrap_or_else(|| "Output:0:default".into());
+    tokio::spawn(async move {
+        while let Ok(PeerEvent::Message(msg)) = events.recv().await {
+            if let SignalingMessage::StreamOpen {
+                session_id,
+                stream_id,
+                source,
+                sink,
+                codec,
+                ..
+            } = msg
+            {
+                let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+                    continue;
+                };
+                let route = StreamRoute {
+                    source: Endpoint {
+                        peer_id: source.peer_id.clone(),
+                        device_id: source.device_id.clone(),
+                    },
+                    sink: Endpoint {
+                        peer_id: sink.peer_id.clone(),
+                        device_id: sink.device_id.clone(),
+                    },
+                    codec: CodecParams {
+                        name: codec.name.clone(),
+                        bitrate: codec.bitrate,
+                        frame_ms: codec.frame_ms,
+                    },
+                    volume: 1.0,
+                };
+                let chosen_output = if sink.device_id == "default" {
+                    default_output.clone()
+                } else {
+                    sink.device_id.clone()
+                };
+                match open_stream_as_sink(
+                    registry.clone(),
+                    sid_uuid,
+                    stream_id,
+                    route,
+                    chosen_output,
+                )
+                .await
+                {
+                    Ok(port) => {
+                        let _ = conn_tx
+                            .send(SignalingMessage::StreamOpenAck {
+                                stream_id,
+                                accepted: true,
+                                udp_port: Some(port),
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::warn!("stream_open accept failed: {e}");
+                        let _ = conn_tx
+                            .send(SignalingMessage::StreamOpenAck {
+                                stream_id,
+                                accepted: false,
+                                udp_port: None,
+                            })
+                            .await;
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pick_default_output_device_id_returns_output_kind_or_none() {
+        match pick_default_output_device_id() {
+            Some(id) => assert!(
+                id.starts_with("Output:"),
+                "expected Output: prefix, got {id}"
+            ),
+            None => {}
+        }
+    }
 }

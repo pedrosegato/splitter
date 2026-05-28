@@ -93,7 +93,8 @@ mod tests {
     /// Compile-time check: run_with_settings must accept (output, bind, JitterMode, u32).
     #[allow(dead_code)]
     fn _assert_signature_compiles() {
-        let _ = run_with_settings("out", "0.0.0.0:0", JitterMode::Auto, 100);
+        let _fut = run_with_settings("out", "0.0.0.0:0", JitterMode::Auto, 100);
+        drop(_fut);
     }
 
     #[tokio::test]

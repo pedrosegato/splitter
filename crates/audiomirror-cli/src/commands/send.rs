@@ -144,6 +144,18 @@ fn make_udp_socket(bind: SocketAddr) -> anyhow::Result<UdpSocket> {
     Ok(UdpSocket::from_std(std_sock)?)
 }
 
+#[allow(dead_code)]
+type RunSignature =
+    fn(
+        &str,
+        &str,
+        u8,
+        i32,
+        crate::Source,
+        crate::SendFecMode,
+        u8,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,20 +169,7 @@ mod tests {
     fn run_signature_accepts_fec_args() {
         // Compile-time check: run() must accept (fec_mode, simulated_loss_pct).
         // If the signature changes this test fails to compile.
-        fn _check(
-            _f: fn(
-                &str,
-                &str,
-                u8,
-                i32,
-                crate::Source,
-                crate::SendFecMode,
-                u8,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>,
-            >,
-        ) {
-        }
+        fn _check(_f: RunSignature) {}
         let _ = run; // ensure `run` is in scope — actual signature check at compile time
     }
 }

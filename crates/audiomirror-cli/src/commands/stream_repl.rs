@@ -329,33 +329,36 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
     } else {
         Some(parse_session_stream(rest)?)
     };
-    let mut tick = interval(Duration::from_secs(1));
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => return Ok(()),
-            _ = tick.tick() => {
-                let snaps = registry.snapshot_stats(1_000).await;
-                let filtered: Vec<_> = match target {
-                    Some(t) => snaps.into_iter().filter(|(sid, st, _)| (*sid, *st) == t).collect(),
-                    None => snaps,
-                };
-                if filtered.is_empty() {
-                    tracing::info!("(no active streams)");
-                    continue;
-                }
-                tracing::info!("{:<38} sid  sent     recv     lost   kbps↑  kbps↓  rtt(ms)", "session");
-                for (sid, stream_id, snap) in filtered {
-                    tracing::info!(
-                        "{:<38} {:>3}  {:>7}  {:>7}  {:>5}  {:>5}  {:>5}  {:>6}",
-                        sid, stream_id,
-                        snap.packets_sent, snap.packets_received, snap.packets_lost,
-                        snap.bitrate_kbps_sent, snap.bitrate_kbps_received,
-                        snap.last_rtt_ms,
-                    );
-                }
-            }
-        }
+    let snaps = registry.snapshot_stats(1_000).await;
+    let filtered: Vec<_> = match target {
+        Some(t) => snaps
+            .into_iter()
+            .filter(|(sid, st, _)| (*sid, *st) == t)
+            .collect(),
+        None => snaps,
+    };
+    if filtered.is_empty() {
+        tracing::info!("(no active streams)");
+        return Ok(());
     }
+    tracing::info!(
+        "{:<38} sid  sent     recv     lost   kbps↑  kbps↓  rtt(ms)",
+        "session"
+    );
+    for (sid, stream_id, snap) in filtered {
+        tracing::info!(
+            "{:<38} {:>3}  {:>7}  {:>7}  {:>5}  {:>5}  {:>5}  {:>6}",
+            sid,
+            stream_id,
+            snap.packets_sent,
+            snap.packets_received,
+            snap.packets_lost,
+            snap.bitrate_kbps_sent,
+            snap.bitrate_kbps_received,
+            snap.last_rtt_ms,
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

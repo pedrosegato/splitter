@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/audiomirror-core",
-    "crates/audiomirror-cli",
-    "crates/audiomirror-integration-tests",
+    "crates/splitter-core",
+    "crates/splitter-cli",
+    "crates/splitter-integration-tests",
 ]
 
 [workspace.package]

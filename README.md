@@ -1,4 +1,4 @@
-# AudioMirror
+# Splitter
 
 Lightweight LAN audio mirror — stream desktop or microphone audio between two
 machines over UDP with Opus encoding, adaptive jitter buffer, and TOFU peer
@@ -76,7 +76,7 @@ Multi-Output Device.
 
 List available device indices:
 ```sh
-audiomirror-cli devices
+splitter-cli devices
 ```
 
 Pass the BlackHole index as `--from in:<idx>` in `stream open`.
@@ -89,7 +89,7 @@ WASAPI loopback is selected automatically — no extra software needed. The
 ### Linux
 
 Any PulseAudio or PipeWire `.monitor` source is available automatically. List
-sources with `audiomirror-cli devices` and pass the `.monitor` source index to
+sources with `splitter-cli devices` and pass the `.monitor` source index to
 `--from`.
 
 ---
@@ -98,7 +98,7 @@ sources with `audiomirror-cli devices` and pass the `.monitor` source index to
 
 Start the daemon:
 ```sh
-audiomirror-cli daemon [--signaling-port 7000] [--peer-name "Studio Mac"] [--identity-dir <path>]
+splitter-cli daemon [--signaling-port 7000] [--peer-name "Studio Mac"] [--identity-dir <path>]
 ```
 
 After `READY port=<N>`, the daemon accepts line commands on stdin:
@@ -133,21 +133,21 @@ settings keys, and exit codes.
 
 Quick examples:
 ```sh
-audiomirror-cli settings show
-audiomirror-cli settings set fec_mode always
-audiomirror-cli settings set jitter_mode min
-audiomirror-cli settings set log_level debug
+splitter-cli settings show
+splitter-cli settings set fec_mode always
+splitter-cli settings set jitter_mode min
+splitter-cli settings set log_level debug
 
-audiomirror-cli autostart enable     # launchd / systemd / Windows Run
-audiomirror-cli logs tail            # follow the log
-audiomirror-cli metrics enable       # then curl http://localhost:9000/metrics
+splitter-cli autostart enable     # launchd / systemd / Windows Run
+splitter-cli logs tail            # follow the log
+splitter-cli metrics enable       # then curl http://localhost:9000/metrics
 ```
 
 ---
 
 ## How it works
 
-AudioMirror is a two-process peer-to-peer system. Each machine runs a daemon
+Splitter is a two-process peer-to-peer system. Each machine runs a daemon
 that handles signaling (TCP), discovery (mDNS), and audio transport (UDP).
 Audio is captured in 20 ms stereo frames at 48 kHz, encoded with Opus at
 64 kbps, and transmitted over UDP to the remote peer, which decodes and plays
@@ -192,6 +192,6 @@ cargo build --workspace --release
 
 ```sh
 # Individual subcommands (development)
-cargo run -p audiomirror-cli -- devices
-cargo run -p audiomirror-cli -- daemon --signaling-port 7000
+cargo run -p splitter-cli -- devices
+cargo run -p splitter-cli -- daemon --signaling-port 7000
 ```

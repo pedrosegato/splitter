@@ -128,6 +128,11 @@ impl Discovery {
     pub fn fullname(&self) -> &str {
         &self.fullname
     }
+
+    pub fn shutdown(&mut self) {
+        let _ = self.daemon.unregister(&self.fullname);
+        let _ = self.daemon.shutdown();
+    }
 }
 
 impl Drop for Discovery {
@@ -153,6 +158,13 @@ mod tests {
     async fn start_registers_without_panicking() {
         let identity = id("test-peer");
         let _disc = Discovery::start(&identity, 0).expect("start");
+    }
+
+    #[test]
+    fn shutdown_is_callable_and_does_not_panic() {
+        let id = id("shutdown-test");
+        let mut disc = Discovery::start(&id, 0).expect("start");
+        disc.shutdown();
     }
 
     #[allow(clippy::print_stderr)]

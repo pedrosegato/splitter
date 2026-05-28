@@ -4,7 +4,7 @@ use audiomirror_core::net::device_watcher;
 use audiomirror_core::net::discovery::{Discovery, DiscoveryEvent};
 use audiomirror_core::net::signaling::{
     connect_to_peer, server::accept_pending, server::SignalingServer, CodecParams, Endpoint,
-    PeerEvent, SignalingMessage,
+    PeerEvent, SignalingMessage, StreamAction,
 };
 use audiomirror_core::net::stream_runtime::{
     dispatch_device_events, open_stream_as_sink, StreamRegistry,
@@ -35,14 +35,11 @@ pub(crate) async fn run(
     peer_name_override: Option<String>,
     identity_dir: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    // ── Step 1: load settings (defaults if missing) ───────────────────────────
     let settings_handle = Arc::new(RwLock::new(Settings::load_or_default(&settings_path()?)?));
 
-    // ── Step 2: init structured logging from the persisted log_level ─────────
     let log_level = settings_handle.read().await.log_level;
     let _logs_guard = audiomirror_core::observability::logs::init(log_level, &log_dir()?)?;
 
-    // ── Step 3: load PeerIdentity + TrustStore ────────────────────────────────
     let base_dir = identity_dir.unwrap_or_else(|| {
         dirs::config_dir()
             .expect("no config_dir on this platform")
@@ -58,11 +55,9 @@ pub(crate) async fn run(
     }
     let trust = Arc::new(RwLock::new(TrustStore::load_or_create(&trust_path)?));
 
-    // ── Step 4: construct SessionManager + StreamRegistry ────────────────────
     let sessions = SessionManager::new();
     let stream_registry = StreamRegistry::new();
 
-    // ── Step 5: start SignalingServer ─────────────────────────────────────────
     let bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse()?;
     let server = SignalingServer::start(
         bind,
@@ -73,7 +68,6 @@ pub(crate) async fn run(
     )
     .await?;
 
-    // ── Step 6: start mDNS discovery + device hot-plug watcher ───────────────
     let watcher = device_watcher::start(Duration::from_secs(5));
     let dispatcher_rx = watcher.subscribe();
     tokio::spawn(dispatch_device_events(
@@ -81,32 +75,17 @@ pub(crate) async fn run(
         dispatcher_rx,
     ));
 
+    // Keep Discovery in scope so graceful_shutdown can call .shutdown() on it.
     let mut discovery = Discovery::start(&identity, signaling_port)?;
     let discovered: Arc<RwLock<HashMap<String, audiomirror_core::net::discovery::DiscoveredPeer>>> =
         Arc::default();
-    let discovered_clone = discovered.clone();
-    tokio::spawn(async move {
-        loop {
-            match discovery.next_event().await {
-                Some(DiscoveryEvent::Found(p)) => {
-                    discovered_clone.write().await.insert(p.peer_id.clone(), p);
-                }
-                Some(DiscoveryEvent::Removed(name)) => {
-                    tracing::info!("peer removed: {name}");
-                }
-                None => break,
-            }
-        }
-    });
 
-    // ── Step 7: opt-in Prometheus metrics endpoint ────────────────────────────
     {
         let s = settings_handle.read().await;
         if s.metrics_enabled {
             let metrics = Arc::new(MetricsRegistry::new()?);
             let metrics_port = s.metrics_port;
 
-            // 1 s interval task: update peers_connected + sessions_active.
             let metrics_tick = metrics.clone();
             let sessions_tick = sessions.clone();
             tokio::spawn(async move {
@@ -144,29 +123,143 @@ pub(crate) async fn run(
 
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
-    while let Ok(Some(line)) = reader.next_line().await {
-        let cmd = line.trim().to_string();
-        if cmd.is_empty() {
-            continue;
-        }
-        if let Err(e) = handle_line(
-            &cmd,
-            &identity,
-            &trust,
-            &sessions,
-            &stream_registry,
-            &server,
-            &discovered,
-        )
-        .await
-        {
-            tracing::error!("command failed: {e}");
-        }
-        if cmd == "quit" {
-            break;
+
+    // Install OS signal handlers before entering the REPL loop.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
+    #[cfg(unix)]
+    let mut sigterm = {
+        use tokio::signal::unix::{signal, SignalKind};
+        signal(SignalKind::terminate()).expect("SIGTERM handler")
+    };
+
+    loop {
+        #[cfg(unix)]
+        let shutdown_reason: &str = tokio::select! {
+            line_res = reader.next_line() => {
+                match line_res {
+                    Ok(Some(line)) => {
+                        let cmd = line.trim().to_string();
+                        if cmd.is_empty() { continue; }
+                        if let Err(e) = handle_line(
+                            &cmd, &identity, &trust, &sessions,
+                            &stream_registry, &server, &discovered,
+                        ).await {
+                            tracing::error!("command failed: {e}");
+                        }
+                        if cmd == "quit" { "quit" } else { continue; }
+                    }
+                    _ => "stdin closed",
+                }
+            }
+            _ = &mut ctrl_c => "SIGINT",
+            _ = sigterm.recv() => "SIGTERM",
+            disc_ev = discovery.next_event() => {
+                match disc_ev {
+                    Some(DiscoveryEvent::Found(p)) => {
+                        discovered.write().await.insert(p.peer_id.clone(), p);
+                    }
+                    Some(DiscoveryEvent::Removed(name)) => {
+                        tracing::info!("peer removed: {name}");
+                    }
+                    None => {}
+                }
+                continue;
+            }
+        };
+
+        #[cfg(not(unix))]
+        let shutdown_reason: &str = tokio::select! {
+            line_res = reader.next_line() => {
+                match line_res {
+                    Ok(Some(line)) => {
+                        let cmd = line.trim().to_string();
+                        if cmd.is_empty() { continue; }
+                        if let Err(e) = handle_line(
+                            &cmd, &identity, &trust, &sessions,
+                            &stream_registry, &server, &discovered,
+                        ).await {
+                            tracing::error!("command failed: {e}");
+                        }
+                        if cmd == "quit" { "quit" } else { continue; }
+                    }
+                    _ => "stdin closed",
+                }
+            }
+            _ = &mut ctrl_c => "SIGINT",
+            disc_ev = discovery.next_event() => {
+                match disc_ev {
+                    Some(DiscoveryEvent::Found(p)) => {
+                        discovered.write().await.insert(p.peer_id.clone(), p);
+                    }
+                    Some(DiscoveryEvent::Removed(name)) => {
+                        tracing::info!("peer removed: {name}");
+                    }
+                    None => {}
+                }
+                continue;
+            }
+        };
+
+        tracing::info!("shutdown triggered: {shutdown_reason}");
+        graceful_shutdown(&sessions, &stream_registry, Some(&server)).await;
+        discovery.shutdown();
+        // Drop server last: closes the TCP accept loop and all peer connections.
+        drop(server);
+        tracing::info!("daemon shutdown complete");
+        break;
+    }
+
+    Ok(())
+}
+
+// Ordered teardown sequence (non-obvious ordering rationale):
+// 1. Send StreamControl{Close} to peers first so the remote side tears down cleanly.
+// 2. Then close local stream runtimes (which also sends Close + aborts the pump task).
+// 3. Sleep 150 ms: gives TCP framing time to flush the Close messages.
+// 4. Close SessionManager entries (bookkeeping only at this point).
+async fn graceful_shutdown(
+    sessions: &Arc<SessionManager>,
+    stream_registry: &Arc<StreamRegistry>,
+    server: Option<&audiomirror_core::net::signaling::server::SignalingServerHandle>,
+) {
+    let session_snap = sessions.snapshot().await;
+
+    // 1. Notify peers: send StreamControl{Close} for every active stream.
+    if let Some(srv) = server {
+        let conns = srv.connections.read().await;
+        for sess in &session_snap {
+            if let Some(conn) = conns.get(&sess.remote_peer_id) {
+                for stream in &sess.streams {
+                    let _ = conn
+                        .tx
+                        .send(SignalingMessage::StreamControl {
+                            stream_id: stream.id,
+                            action: StreamAction::Close,
+                            volume: None,
+                        })
+                        .await;
+                }
+            }
         }
     }
-    Ok(())
+
+    // 2. Close all local StreamRuntime pump tasks via the public registry API.
+    let summaries = stream_registry.list().await;
+    for summary in summaries {
+        let _ = stream_registry
+            .close(&summary.session_id, summary.stream_id)
+            .await;
+    }
+
+    // 3. Drain window: give in-flight TCP/UDP packets time to leave the kernel buffers.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // 4. Close sessions in the SessionManager.
+    for sess in &session_snap {
+        let _ = sessions.close(&sess.id).await;
+    }
 }
 
 async fn handle_line(
@@ -322,7 +415,7 @@ async fn handle_line(
             tracing::info!("closed session {id}");
         }
         "quit" => {
-            tracing::info!("shutting down");
+            // handled in run() via the select! arm — nothing more to do here
         }
         "stream" => {
             stream_repl::handle(
@@ -461,12 +554,10 @@ mod tests {
         }
     }
 
-    /// Boot sequence step 1: settings load_or_default never panics and
-    /// returns sensible defaults when no file is present.
     #[test]
     fn boot_settings_load_or_default_returns_info_level() {
         let missing = std::path::PathBuf::from("/tmp/am_daemon_boot_test_no_such_file.toml");
-        let _ = std::fs::remove_file(&missing); // ensure it does not exist
+        let _ = std::fs::remove_file(&missing);
         let s = Settings::load_or_default(&missing).expect("load_or_default should not fail");
         assert_eq!(
             s.log_level,
@@ -477,7 +568,6 @@ mod tests {
         assert_eq!(s.metrics_port, 9000, "default metrics port must be 9000");
     }
 
-    /// Boot sequence step 7: metrics flag is read from the settings struct.
     #[test]
     fn boot_metrics_flag_read_from_settings() {
         let s_off = Settings {
@@ -514,5 +604,12 @@ mod tests {
     fn split_repl_line_plain_words() {
         let v = super::split_repl_line("connect bob");
         assert_eq!(v, vec!["connect", "bob"]);
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_on_empty_state_does_not_panic() {
+        let sessions = audiomirror_core::SessionManager::new();
+        let registry = audiomirror_core::StreamRegistry::new();
+        graceful_shutdown(&sessions, &registry, None).await;
     }
 }

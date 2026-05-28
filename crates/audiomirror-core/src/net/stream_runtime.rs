@@ -194,6 +194,18 @@ impl StreamRegistry {
         }
     }
 
+    pub async fn get_stats(
+        &self,
+        session_id: &SessionId,
+        stream_id: StreamId,
+    ) -> Option<Arc<StreamStats>> {
+        self.inner
+            .read()
+            .await
+            .get(&(*session_id, stream_id))
+            .map(|rt| rt.stats.clone())
+    }
+
     pub async fn snapshot_stats(
         &self,
         window_ms: u32,

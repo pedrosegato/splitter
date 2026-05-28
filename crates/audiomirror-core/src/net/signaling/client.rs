@@ -33,7 +33,7 @@ pub async fn connect_to_peer(
             millis: handshake_timeout.as_millis() as u64,
         })?
         .map_err(NetError::UdpIo)?;
-    let handle = spawn_peer_connection(stream);
+    let handle = spawn_peer_connection(stream, None);
     let mut events = handle.events.subscribe();
 
     let resolved_token = trust

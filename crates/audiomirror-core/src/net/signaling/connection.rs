@@ -1,6 +1,10 @@
 use crate::error::NetError;
+use crate::net::signaling::heartbeat::build_heartbeat;
 use crate::net::signaling::message::SignalingMessage;
+use crate::net::stream_runtime::StreamRegistry;
 use futures::{SinkExt, StreamExt};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc};
@@ -23,7 +27,10 @@ pub struct PeerConnectionHandle {
     pub peer_addr: std::net::SocketAddr,
 }
 
-pub fn spawn_peer_connection(stream: TcpStream) -> PeerConnectionHandle {
+pub fn spawn_peer_connection(
+    stream: TcpStream,
+    registry: Option<Arc<StreamRegistry>>,
+) -> PeerConnectionHandle {
     let peer_addr = stream.peer_addr().expect("peer_addr");
     let (msg_tx, mut msg_rx) = mpsc::channel::<SignalingMessage>(64);
     let (event_tx, _) = broadcast::channel::<PeerEvent>(64);
@@ -70,6 +77,26 @@ pub fn spawn_peer_connection(stream: TcpStream) -> PeerConnectionHandle {
                         Some(Ok(buf)) => match SignalingMessage::decode_from_slice(&buf) {
                             Ok(msg) => {
                                 last_heard = tokio::time::Instant::now();
+                                if let (
+                                    SignalingMessage::Heartbeat { timestamp_ms: remote_ts, .. },
+                                    Some(reg),
+                                ) = (&msg, &registry) {
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as u64)
+                                        .unwrap_or(0);
+                                    let snaps = reg.snapshot_stats(0).await;
+                                    for (sid, stream_id, _) in &snaps {
+                                        if let Some(rt) = reg.get_stats(sid, *stream_id).await {
+                                            let echo_ms = rt.last_heartbeat_echo_ms.load(Ordering::Relaxed);
+                                            if echo_ms > 0 && now_ms >= echo_ms {
+                                                let rtt = (now_ms - echo_ms) as u32;
+                                                rt.last_rtt_ms.store(rtt, Ordering::Relaxed);
+                                            }
+                                            rt.last_heartbeat_echo_ms.store(*remote_ts, Ordering::Relaxed);
+                                        }
+                                    }
+                                }
                                 let _ = event_tx_task.send(PeerEvent::Message(msg));
                             }
                             Err(e) => {
@@ -98,9 +125,12 @@ pub fn spawn_peer_connection(stream: TcpStream) -> PeerConnectionHandle {
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
-                    let hb = SignalingMessage::Heartbeat {
-                        timestamp_ms: now_ms,
-                        streams_stats: Vec::new(),
+                    let hb = match &registry {
+                        Some(reg) => build_heartbeat(reg, 1_000, now_ms).await,
+                        None => SignalingMessage::Heartbeat {
+                            timestamp_ms: now_ms,
+                            streams_stats: Vec::new(),
+                        },
                     };
                     match hb.encode_to_bytes() {
                         Ok(bytes) => {
@@ -162,7 +192,10 @@ pub async fn _wire_for_tests() -> (PeerConnectionHandle, PeerConnectionHandle) {
     });
     let client = TcpStream::connect(addr).await.unwrap();
     let server = server_fut.await.unwrap();
-    (spawn_peer_connection(server), spawn_peer_connection(client))
+    (
+        spawn_peer_connection(server, None),
+        spawn_peer_connection(client, None),
+    )
 }
 
 #[cfg(test)]
@@ -241,7 +274,7 @@ mod tests {
         });
         let _client = TcpStream::connect(addr).await.unwrap();
         let server = server_fut.await.unwrap();
-        let handle = spawn_peer_connection(server);
+        let handle = spawn_peer_connection(server, None);
         let mut events = handle.events.subscribe();
         let saw_disconnect = tokio::time::timeout(
             REMOTE_PEER_HEARTBEAT_TIMEOUT + Duration::from_secs(2),

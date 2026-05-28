@@ -62,3 +62,18 @@ cargo run -p audiomirror-cli -- discover --duration-secs 5
 ```
 
 **Trust model (MVP):** TOFU. The first time a peer connects, its HELLO sits in `pending` until the local operator accepts. After acceptance, the auth token is persisted in `trusted_peers.toml`; reconnects are silent if the token still matches.
+
+## Modular routing (Phase 3)
+
+Within a daemon REPL, after `open <peer>` has produced a session:
+
+| Command | Effect |
+| --- | --- |
+| `stream open --session <session_id> --from <local-device-id-or "system"> --to <peer>:<remote-device-id-or "default"> [--bitrate N]` | Initiator opens a UDP stream. The other side replies with the bound sink port and the source pump starts. |
+| `stream close <session_id>:<stream_id>` | Tear down a stream end-to-end (sends StreamControl close). |
+| `stream volume <session_id>:<stream_id> <0-100>` | Set linear gain on the local pump and tell the peer. |
+| `stream mute <session_id>:<stream_id>` / `stream unmute …` | Zero gain (packets keep flowing so loss stats remain accurate). |
+| `stream pause <session_id>:<stream_id>` / `stream resume …` | Suspend the pump and signal the peer. |
+| `stream stats [<session_id>:<stream_id>]` | Tabular live view of packets sent/recv/lost, kbps, RTT. Refreshes every 1s, exits on Ctrl-C. |
+
+Auto-pause: if a bound device disappears (USB unplug, headset off), the relevant pump pauses and signals the peer. When the device returns, the pump resumes automatically.

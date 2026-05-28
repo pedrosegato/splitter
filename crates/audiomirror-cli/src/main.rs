@@ -8,6 +8,13 @@ pub(crate) enum Source {
     System,
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum SendFecMode {
+    Auto,
+    Always,
+    Never,
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "audiomirror-cli", version, about = "AudioMirror Phase 1 CLI")]
 struct Cli {
@@ -30,6 +37,10 @@ enum Cmd {
         bitrate: i32,
         #[arg(long, value_enum, default_value_t = Source::Mic)]
         source: Source,
+        #[arg(long, value_enum, default_value_t = SendFecMode::Auto)]
+        fec_mode: SendFecMode,
+        #[arg(long, default_value_t = 0)]
+        simulated_loss_pct: u8,
     },
 
     Recv {
@@ -48,6 +59,10 @@ enum Cmd {
         bitrate: i32,
         #[arg(long, value_enum, default_value_t = Source::Mic)]
         source: Source,
+        #[arg(long, value_enum, default_value_t = SendFecMode::Auto)]
+        fec_mode: SendFecMode,
+        #[arg(long, default_value_t = 0)]
+        simulated_loss_pct: u8,
     },
 
     Discover {
@@ -79,14 +94,39 @@ async fn main() -> anyhow::Result<()> {
             stream_id,
             bitrate,
             source,
-        } => commands::send::run(&input, &addr, stream_id, bitrate, source).await,
+            fec_mode,
+            simulated_loss_pct,
+        } => {
+            commands::send::run(
+                &input,
+                &addr,
+                stream_id,
+                bitrate,
+                source,
+                fec_mode,
+                simulated_loss_pct,
+            )
+            .await
+        }
         Cmd::Recv { output, bind } => commands::recv::run(&output, &bind).await,
         Cmd::Loop {
             input,
             output,
             bitrate,
             source,
-        } => commands::loop_cmd::run(&input, &output, bitrate, source).await,
+            fec_mode,
+            simulated_loss_pct,
+        } => {
+            commands::loop_cmd::run(
+                &input,
+                &output,
+                bitrate,
+                source,
+                fec_mode,
+                simulated_loss_pct,
+            )
+            .await
+        }
         Cmd::Discover {
             duration_secs,
             signaling_port,

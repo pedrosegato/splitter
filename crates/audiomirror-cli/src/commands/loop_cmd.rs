@@ -38,6 +38,8 @@ pub(crate) async fn run(
     output: &str,
     bitrate: i32,
     source: Source,
+    fec_mode: crate::SendFecMode,
+    simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
     let (cap_prod, mut cap_cons) = AudioRing::new(9_600);
     let (play_prod, play_cons) = AudioRing::new(9_600);
@@ -59,16 +61,20 @@ pub(crate) async fn run(
 
     let _playback = PlaybackHandle::start(output, play_cons)?;
     tracing::info!(
-        "loopback running: source={source:?} input={input} output={output} @ {bitrate}bps"
+        "loopback running: source={source:?} input={input} output={output} @ {bitrate}bps fec_mode={fec_mode:?} simulated_loss_pct={simulated_loss_pct}"
     );
 
     let frame_notify = _capture.frame_ready();
+
+    let core_fec_mode = map_fec_mode(fec_mode);
+    let mut fec = audiomirror_core::net::fec::FecController::new(core_fec_mode, 1, 0, 10);
 
     let mut enc = OpusEncoder::new(bitrate)?;
     let mut dec = OpusDecoder::new()?;
     let mut payload = BytesMut::with_capacity(400);
     let mut frame = vec![0.0f32; FRAME_SAMPLES];
     let mut out_frame = vec![0.0f32; FRAME_SAMPLES];
+    let mut frame_count: u32 = 0;
 
     loop {
         tokio::select! {
@@ -79,12 +85,37 @@ pub(crate) async fn run(
         }
         while cap_cons.occupied() >= FRAME_SAMPLES {
             cap_cons.pop_slice(&mut frame);
+
+            // Every 100 frames: inject simulated loss samples and re-evaluate FEC.
+            frame_count = frame_count.wrapping_add(1);
+            if frame_count.is_multiple_of(100) {
+                let now = std::time::Instant::now();
+                let lost = simulated_loss_pct as usize;
+                let ok = 100usize.saturating_sub(lost);
+                for _ in 0..lost {
+                    fec.record(now, true);
+                }
+                for _ in 0..ok {
+                    fec.record(now, false);
+                }
+                let setting = fec.evaluate(now);
+                enc.set_fec(setting.enable, setting.packet_loss_perc)?;
+            }
+
             enc.encode(&frame, &mut payload)?;
             dec.decode(Some(&payload), &mut out_frame)?;
             if let Ok(mut p) = play_prod.lock() {
                 let _ = p.push_slice(&out_frame);
             }
         }
+    }
+}
+
+fn map_fec_mode(m: crate::SendFecMode) -> audiomirror_core::FecMode {
+    match m {
+        crate::SendFecMode::Auto => audiomirror_core::FecMode::Auto,
+        crate::SendFecMode::Always => audiomirror_core::FecMode::Always,
+        crate::SendFecMode::Never => audiomirror_core::FecMode::Never,
     }
 }
 

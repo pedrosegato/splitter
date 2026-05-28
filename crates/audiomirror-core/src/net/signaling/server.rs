@@ -493,8 +493,11 @@ mod tests {
 
     #[tokio::test]
     async fn hello_from_trusted_peer_without_auto_accept_goes_to_pending() {
-        // auto_accept_trusted defaults to false
-        let (server, _identity, trust, _sessions, _dir) = setup().await;
+        let off = Settings {
+            auto_accept_trusted: false,
+            ..Settings::default()
+        };
+        let (server, _identity, trust, _sessions, _dir) = setup_with_settings(off).await;
 
         let peer_id = Uuid::new_v4();
         trust

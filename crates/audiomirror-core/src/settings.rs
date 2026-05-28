@@ -52,7 +52,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            auto_accept_trusted: false,
+            auto_accept_trusted: true,
             auto_start_with_system: false,
             default_bitrate: 64_000,
             fec_mode: FecMode::Auto,

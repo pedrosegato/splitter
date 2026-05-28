@@ -2,9 +2,21 @@
 source: crates/audiomirror-cli/tests/help_snapshots.rs
 expression: output
 ---
-Capture audio from a local device and send it over UDP as Opus packets.
+Capture audio from a local input device, encode with Opus, and
+transmit UDP packets to the specified address. Runs until interrupted (Ctrl-C).
 
-Example: audiomirror-cli send --input <device-id> --addr 192.168.1.50:5004
+Use --source system to capture desktop/loopback audio instead of a microphone:
+macOS  — route system output through BlackHole 2ch, then pass BlackHole as --input
+Windows — WASAPI loopback is selected automatically when --source system is set
+Linux   — pass a .monitor PulseAudio/PipeWire source as --input
+
+Examples:
+# Send microphone to a remote host
+audiomirror-cli send --input "Built-in Microphone" --addr 192.168.1.50:5004
+
+# Send system audio with FEC always on
+audiomirror-cli send --input "BlackHole 2ch" --addr 10.0.0.2:5004 \
+--source system --fec-mode always --bitrate 96000
 
 Usage: audiomirror-cli send [OPTIONS] --input <INPUT> --addr <ADDR>
 

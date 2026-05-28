@@ -2,9 +2,17 @@
 source: crates/audiomirror-cli/tests/help_snapshots.rs
 expression: output
 ---
-List available audio input and output devices
+Enumerate all audio input and output devices available on the host
+and print them to stdout with their index and display name.
+
+Use the reported indices or names as arguments to --input / --output / --from / --to
+in other subcommands.
+
+Example:
+audiomirror-cli devices
 
 Usage: audiomirror-cli devices
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')

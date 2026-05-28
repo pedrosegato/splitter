@@ -1,7 +1,7 @@
 # AudioMirror CLI Reference
 
-Command reference for `audiomirror-cli`. All subcommands exit with **0** on success
-and **non-zero** on error unless noted otherwise.
+Command reference for `audiomirror-cli`. All subcommands exit with **0** on
+success and **non-zero** on error unless noted otherwise.
 
 ---
 
@@ -13,8 +13,8 @@ and **non-zero** on error unless noted otherwise.
 - [loop](#loop)
 - [discover](#discover)
 - [daemon](#daemon)
-  - [Daemon REPL protocol](#daemon-repl-protocol)
-- [stream open](#stream-open)
+  - [Daemon REPL](#daemon-repl)
+- [stream](#stream)
 - [stats](#stats)
 - [logs](#logs)
 - [settings](#settings)
@@ -29,8 +29,9 @@ and **non-zero** on error unless noted otherwise.
 
 **Description:**
 Enumerate all audio input and output devices available on the host and print
-them to stdout. Useful for obtaining the device ID strings required by `send`,
-`recv`, `loop`, and `stream open`.
+them to stdout with their index and display name. Use the reported indices as
+the `<idx>` argument to `--input`, `--output`, `--from`, and `--to` in other
+subcommands.
 
 **Flags:** none
 
@@ -57,8 +58,12 @@ audiomirror-cli devices
 
 **Description:**
 Capture audio from a local input device, encode it with Opus, and transmit UDP
-packets to the specified address. Runs until interrupted (Ctrl-C). Use
-`--source system` to capture system/loopback audio instead of a microphone.
+packets to the specified address. Runs until interrupted (Ctrl-C).
+
+Use `--source system` to capture desktop/loopback audio:
+- macOS: route system output through BlackHole 2ch, pass it as `--input`
+- Windows: WASAPI loopback is selected automatically
+- Linux: pass a `.monitor` PulseAudio/PipeWire source as `--input`
 
 **Flags:**
 
@@ -75,11 +80,11 @@ packets to the specified address. Runs until interrupted (Ctrl-C). Use
 **Example:**
 
 ```sh
-# Send mic to a remote host
-audiomirror-cli send --input "Input:0:Built-in Microphone" --addr 192.168.1.50:5004
+# Send microphone to a remote host
+audiomirror-cli send --input "Built-in Microphone" --addr 192.168.1.50:5004
 
-# Send system audio with FEC always on
-audiomirror-cli send --input "Input:0:Built-in Microphone" --addr 10.0.0.2:5004 \
+# Send system audio (BlackHole) with FEC always on
+audiomirror-cli send --input "BlackHole 2ch" --addr 10.0.0.2:5004 \
     --source system --fec-mode always --bitrate 96000
 ```
 
@@ -115,7 +120,10 @@ configurable jitter buffer for packet reordering and FEC-assisted concealment.
 **Example:**
 
 ```sh
-audiomirror-cli recv --output "Output:0:Built-in Speakers" --bind 0.0.0.0:5004
+audiomirror-cli recv --output "Built-in Speakers" --bind 0.0.0.0:5004
+
+# Minimum latency mode
+audiomirror-cli recv --output "Headphones" --bind 0.0.0.0:5004 --jitter-mode min
 ```
 
 **Exit codes:**
@@ -135,8 +143,11 @@ audiomirror-cli recv --output "Output:0:Built-in Speakers" --bind 0.0.0.0:5004
 
 **Description:**
 Single-process loopback test: capture from an input device, encode with Opus,
-immediately decode, and play back on an output device. No network involvement.
+immediately decode, and play back on an output device. No network involved.
 Useful for verifying audio pipeline integrity and measuring codec latency.
+
+Note: `--source system` works on Windows (WASAPI loopback) and Linux
+(`.monitor` sources). On macOS, use BlackHole 2ch as `--input` instead.
 
 **Flags:**
 
@@ -153,8 +164,11 @@ Useful for verifying audio pipeline integrity and measuring codec latency.
 
 ```sh
 audiomirror-cli loop \
-    --input "Input:0:Built-in Microphone" \
-    --output "Output:0:Built-in Speakers"
+    --input "Built-in Microphone" \
+    --output "Built-in Speakers"
+
+# Windows system audio loopback test
+audiomirror-cli loop --input ignored --output "Speakers" --source system
 ```
 
 **Exit codes:**
@@ -205,119 +219,133 @@ audiomirror-cli discover --duration-secs 10
 
 ## daemon
 
-**Synopsis:** `audiomirror-cli daemon [--signaling-port <port>] [--peer-name <name>]`
+**Synopsis:**
+
+```sh
+audiomirror-cli daemon \
+    [--signaling-port <port>] \
+    [--peer-name <name>] \
+    [--identity-dir <path>]
+```
 
 **Description:**
-Start the AudioMirror background daemon. The daemon binds a TCP signaling server,
-registers an mDNS service record, starts a device hot-plug watcher, and
-optionally enables a Prometheus metrics endpoint. After startup it prints the
-machine-readable banner:
+Start the AudioMirror background daemon. The daemon binds a TCP signaling
+server, registers an mDNS service record, starts a device hot-plug watcher, and
+optionally enables a Prometheus metrics endpoint. After startup it prints:
 
 ```
 READY port=<N>
 ```
 
-where `<N>` is the actual TCP port (which may differ from `--signaling-port` if
-the OS reassigned it). After that line the daemon reads REPL commands from stdin.
-See [Daemon REPL protocol](#daemon-repl-protocol).
+where `<N>` is the actual TCP port (may differ from `--signaling-port` if the
+OS reassigned it). After that line the daemon reads REPL commands from stdin.
 
-The daemon loads and respects the persisted settings from the platform config
-directory (see `settings show`). Logging is initialised from the persisted
-`log_level` setting.
+Identity files are read from / written to `--identity-dir` (default:
+`~/.audiomirror/<generated-uuid>/`). Separating identity directories allows
+running two daemon instances on the same machine for testing.
 
 **Flags:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--signaling-port` | u16 | `7000` | TCP port for the signaling server |
+| `--signaling-port` | u16 | `7000` | TCP port for the signaling server (`0` = OS-assigned) |
 | `--peer-name` | string | *(from identity file)* | Override the peer name advertised via mDNS |
+| `--identity-dir` | path | `~/.audiomirror/<id>/` | Directory for identity, trust store, and settings |
 
 **Example:**
 
 ```sh
 audiomirror-cli daemon
 audiomirror-cli daemon --signaling-port 5100 --peer-name "Studio Mac"
+audiomirror-cli daemon --signaling-port 0 --identity-dir /tmp/alice-test
 ```
 
 **Exit codes:**
 
 | Code | Meaning |
 |------|---------|
-| 0    | Clean shutdown (`quit` REPL command or EOF on stdin) |
+| 0    | Clean shutdown (`quit` REPL command or stdin EOF) |
 | 1    | Port bind error, settings load error, or identity file error |
 
-**See also:** [stream open](#stream-open), [discover](#discover), [settings](#settings)
+**See also:** [Daemon REPL](#daemon-repl), [stream](#stream), [discover](#discover), [settings](#settings)
 
 ---
 
-## Daemon REPL protocol
+## Daemon REPL
 
 Once the daemon has printed `READY port=<N>` it reads line-delimited commands
-from stdin. Each command produces structured log output (not plain stdout).
-Automation should parse the `READY` line to obtain the port, then write commands
-over a pipe.
+from stdin. Automation scripts should wait for the `READY` line, then write
+commands over the pipe.
 
-### Commands
+### Peer and session management
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
-| `help` | — | Print the list of available commands to the trace log |
+| `help` | — | Print the list of available commands |
 | `peers` | — | List mDNS-discovered peers (index, name, peer-id, host:port, version) |
-| `pending` | — | List peers whose `Hello` has been received but not yet accepted or rejected |
-| `accept <n>` | n: usize | Accept pending peer at index `<n>` from the `pending` list; adds to TrustStore |
-| `connect <peer_id\|name>` | peer_id or peer_name | Initiate an outbound signaling connection to a discovered peer |
+| `pending` | — | List peers whose Hello has been received but not yet accepted |
+| `accept <n>` | n: usize | Accept pending peer at index `<n>`; adds to TrustStore |
+| `connect <peer_id\|name\|host:port>` | — | Open an outbound TCP signaling connection |
+| `open <peer_id\|name>` | — | Open a new Session with a connected peer |
 | `sessions` | — | List all sessions with state, remote peer ID, and per-stream status |
-| `open <peer_id\|name>` | peer_id or peer_name | Open a new session with a connected peer and send `SessionRequest` |
-| `disconnect <session_id>` | UUID | Close the session with the given UUID |
-| `stream open --from <dev> --to <peer>:<dev> --session <uuid> [--bitrate <bps>]` | see flags | Open an audio stream within an existing session |
-| `stream close <session_id>:<stream_id>` | UUID:u8 | Close a specific stream within a session |
-| `stream volume <session_id>:<stream_id> <0-100>` | UUID:u8, percent | Set playback volume on a stream (0 = silent, 100 = full) |
-| `stream mute <session_id>:<stream_id>` | UUID:u8 | Mute a stream |
-| `stream unmute <session_id>:<stream_id>` | UUID:u8 | Unmute a stream |
-| `stream pause <session_id>:<stream_id>` | UUID:u8 | Pause a stream |
-| `stream resume <session_id>:<stream_id>` | UUID:u8 | Resume a paused stream |
-| `stream stats [<session_id>:<stream_id>]` | optional UUID:u8 | Print per-stream statistics once per second; Ctrl-C to stop |
-| `quit` | — | Shut down the daemon cleanly |
+| `disconnect <session_id>` | UUID | Close the session and all its streams |
+| `quit` | — | Graceful shutdown |
 
-### Startup line
+### Stream management
 
-```
-READY port=<N>
-```
+All `stream` sub-verbs accept `<session_id>:<stream_id>` as `UUID:u8`.
 
-This is the first line written to stdout after the daemon is fully initialised
-(signaling server bound, mDNS registered). `<N>` is a decimal integer. Supervisor
-scripts must wait for this line before issuing REPL commands.
+| Command | Arguments | Description |
+|---------|-----------|-------------|
+| `stream open` | `--from <dev> --to <peer>:<dev> --session <UUID> [--bitrate N]` | Open an audio stream; device syntax: `in:<idx>` / `<peer>:out:<idx>` |
+| `stream close <s:id>` | UUID:u8 | Tear down a stream end-to-end |
+| `stream volume <s:id> <0-100>` | UUID:u8, percent | Set linear gain (0 = silent, 100 = full) |
+| `stream mute <s:id>` | UUID:u8 | Mute a stream (packets keep flowing) |
+| `stream unmute <s:id>` | UUID:u8 | Unmute a stream |
+| `stream pause <s:id>` | UUID:u8 | Suspend the pump and signal the peer |
+| `stream resume <s:id>` | UUID:u8 | Resume a paused stream |
+| `stream stats [<s:id>]` | optional UUID:u8 | Live per-stream statistics table; Ctrl-C to stop |
+
+### Settings, logs, and ops (from within the REPL)
+
+| Command | Description |
+|---------|-------------|
+| `settings show` | Print all settings as TOML |
+| `settings get <key>` | Print a single settings value |
+| `settings set <key> <value>` | Update a settings key (hot-reloaded within 5 s) |
+| `logs path` | Print the current log file path |
+| `logs tail` | Follow the log file (200 ms poll; Ctrl-C to stop) |
+| `autostart enable / disable / status` | Manage system autostart |
+| `metrics enable / disable / status` | Manage Prometheus endpoint |
 
 ---
 
-## stream open
+## stream
 
-**Synopsis:** `audiomirror-cli stream open --from <device-id> --to <peer-id>:<device-id> [flags]`
+**Synopsis:** `audiomirror-cli stream open --from <dev> --to <peer>:<dev> [--session <UUID>] [--bitrate N]`
 
 **Description:**
-Open a peer-to-peer audio stream within an existing session. Requires a running
-daemon (`audiomirror-cli daemon`). The source peer captures from `--from` and
-sends Opus-encoded audio over UDP to the sink peer's `--to` device. The `--session`
-flag identifies which active session to use (obtain a session UUID from the daemon
-REPL `sessions` command).
+This subcommand is normally invoked from the daemon's interactive REPL rather
+than as a standalone CLI call. It opens or manages peer-to-peer audio streams
+within a running session.
 
-**Flags:**
+**Flags (stream open):**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--from` | string | *(required)* | Source device ID on the local peer |
-| `--to` | string | *(required)* | `<peer-id>:<device-id>` identifying the remote sink |
-| `--session` | UUID string | *(required)* | Session UUID (from `sessions` REPL command) |
+| `--from` | string | *(required)* | Source device; syntax: `in:<index>` |
+| `--to` | string | *(required)* | Remote sink; syntax: `<peer-name>:out:<index>` |
+| `--session` | UUID string | *(optional)* | Session UUID (from `sessions` REPL command) |
 | `--bitrate` | i32 | `64000` | Opus target bitrate in bits/s |
 
 **Example:**
 
 ```sh
 # Inside the daemon REPL
-stream open --from "Input:0:Built-in Microphone" \
-    --to "a1b2c3d4-...:default" \
-    --session "e5f6a7b8-..."
+stream open --from in:0 --to bob:out:1 --session e5f6a7b8-...
+
+# Higher bitrate for music
+stream open --from in:0 --to bob:out:1 --session e5f6a7b8-... --bitrate 96000
 ```
 
 **Exit codes:**
@@ -327,7 +355,7 @@ stream open --from "Input:0:Built-in Microphone" \
 | 0    | Stream active |
 | 1    | No running daemon, session not found, or signaling timeout |
 
-**See also:** [daemon](#daemon), [Daemon REPL protocol](#daemon-repl-protocol)
+**See also:** [daemon](#daemon), [Daemon REPL](#daemon-repl)
 
 ---
 
@@ -336,9 +364,12 @@ stream open --from "Input:0:Built-in Microphone" \
 **Synopsis:** `audiomirror-cli stats [--stream-id <id>]`
 
 **Description:**
-Display real-time statistics for all active streams managed by the running daemon.
-Refreshes once per second. Press Ctrl-C to exit. If `--stream-id` is given, only
-that stream is shown. Requires a running daemon.
+Display real-time statistics for all active streams managed by the running
+daemon. Refreshes once per second. Press Ctrl-C to exit. Requires a running
+daemon.
+
+Columns: session, stream, packets sent / received / lost, kbps sent / received,
+RTT ms, total bandwidth.
 
 **Flags:**
 
@@ -360,7 +391,7 @@ audiomirror-cli stats --stream-id 1
 | 0    | User pressed Ctrl-C |
 | 1    | No running daemon |
 
-**See also:** [daemon](#daemon), [stream open](#stream-open)
+**See also:** [daemon](#daemon), [stream](#stream)
 
 ---
 
@@ -370,7 +401,7 @@ audiomirror-cli stats --stream-id 1
 
 **Description:**
 Inspect the structured application log file written by the daemon and other
-subcommands.
+subcommands. Logs rotate daily with 7-day retention.
 
 ### Subcommands
 
@@ -401,8 +432,8 @@ audiomirror-cli logs tail
 
 **Description:**
 Read or write the persistent application settings stored as TOML in the platform
-config directory. Changes take effect on the next daemon start (or immediately
-for non-daemon subcommands).
+config directory. Changes take effect on the next daemon start (or within 5 s
+for a running daemon via the hot-reload poll).
 
 ### Subcommands
 
@@ -412,7 +443,7 @@ for non-daemon subcommands).
 | `get <key>` | key: string | Print the value of a single settings key |
 | `set <key> <value>` | key, value: strings | Set a settings key to a new value |
 
-### Known settings keys
+### Settings keys
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -420,9 +451,9 @@ for non-daemon subcommands).
 | `auto_start_with_system` | bool | `false` | Register the daemon as a login/startup item |
 | `default_bitrate` | i32 | `64000` | Default Opus bitrate in bits/s |
 | `fec_mode` | `auto\|always\|never` | `auto` | Forward-error-correction mode |
-| `fec_on_threshold_pct` | u8 | — | Loss percentage above which FEC is enabled (auto mode) |
-| `fec_off_threshold_pct` | u8 | — | Loss percentage below which FEC is disabled (auto mode) |
-| `fec_hysteresis_secs` | u32 | — | Seconds before switching FEC state (hysteresis) |
+| `fec_on_threshold_pct` | u8 | `1` | Loss % above which FEC is enabled (auto mode) |
+| `fec_off_threshold_pct` | u8 | `0` | Loss % below which FEC is disabled (auto mode) |
+| `fec_hysteresis_secs` | u32 | `10` | Seconds before switching FEC state |
 | `jitter_mode` | `auto\|min` | `auto` | Jitter buffer depth strategy |
 | `jitter_max_depth_ms` | u32 | `100` | Maximum jitter buffer depth in milliseconds |
 | `log_level` | `trace\|debug\|info\|warn\|error` | `info` | Minimum log level written to the log file |
@@ -435,6 +466,8 @@ for non-daemon subcommands).
 audiomirror-cli settings show
 audiomirror-cli settings get log_level
 audiomirror-cli settings set log_level debug
+audiomirror-cli settings set fec_mode always
+audiomirror-cli settings set auto_accept_trusted true
 ```
 
 **Exit codes:**
@@ -492,23 +525,24 @@ audiomirror-cli autostart disable
 
 **Description:**
 Manage the optional Prometheus `/metrics` HTTP endpoint. The endpoint is served
-by the running daemon; changes to the `metrics_enabled` flag require a daemon
-restart to take effect.
+by the running daemon; changes to `metrics_enabled` require a daemon restart to
+take effect.
 
 ### Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
-| `enable` | Set `metrics_enabled = true` in settings and print a reminder to restart the daemon |
-| `disable` | Set `metrics_enabled = false` in settings and print a reminder to restart the daemon |
+| `enable` | Set `metrics_enabled = true` in settings and print a restart reminder |
+| `disable` | Set `metrics_enabled = false` in settings and print a restart reminder |
 | `status` | Print `metrics_enabled`, the configured port, and whether the endpoint is currently reachable |
 
 **Example:**
 
 ```sh
 audiomirror-cli metrics enable
+audiomirror-cli daemon &
+curl http://localhost:9000/metrics
 audiomirror-cli metrics status
-# Expected output:
 # metrics_enabled: true  port: 9000  endpoint_live: true
 ```
 

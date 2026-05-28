@@ -2,9 +2,22 @@
 source: crates/audiomirror-cli/tests/help_snapshots.rs
 expression: output
 ---
-Capture from a local mic and play back on a local output device (loopback test).
+Single-process loopback test: capture from an input device, encode
+with Opus, immediately decode, and play back on an output device with no network hop.
 
-Example: audiomirror-cli loop --input <mic-id> --output <spk-id>
+Use this to verify the audio pipeline is working end-to-end, measure codec latency,
+and confirm device IDs before setting up a two-machine session.
+
+Note: --source system is available on Windows (WASAPI loopback) and Linux (.monitor
+sources). On macOS prefer BlackHole 2ch as --input instead.
+
+Examples:
+audiomirror-cli loop \
+--input "Built-in Microphone" \
+--output "Built-in Speakers"
+
+# Windows system audio loopback test
+audiomirror-cli loop --input ignored --output "Speakers" --source system
 
 Usage: audiomirror-cli loop [OPTIONS] --input <INPUT> --output <OUTPUT>
 

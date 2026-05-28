@@ -1,133 +1,197 @@
 # AudioMirror
 
-Lightweight LAN audio mirror between PCs.
+Lightweight LAN audio mirror — stream desktop or microphone audio between two
+machines over UDP with Opus encoding, adaptive jitter buffer, and TOFU peer
+trust. No cloud. No account. Sub-200 ms end-to-end latency on a typical LAN.
 
-## Build
+## Quick start (Mac to Windows)
 
-```
+**1. Build on both machines.**
+
+```sh
 cargo build --workspace --release
+# Or use the launcher scripts (no Rust toolchain needed after building once):
+#   scripts/run-daemon.sh
+#   scripts/run-daemon.bat
 ```
 
-## Try the CLI (Phase 1)
+**2. Start the daemon on each machine.**
 
-Subcommands land in Task 13 onward; the current scaffold only verifies the binary runs.
-
-```
-cargo run -p audiomirror-cli -- devices
-cargo run -p audiomirror-cli -- loop --input <id> --output <id>
-```
-
-## System audio (desktop mirror)
-
-AudioMirror can mirror your desktop audio (not just a microphone) between two computers.
-
-### macOS (BlackHole required)
-
-ScreenCaptureKit is too limited (mono only, no per-channel separation, extra latency). The reliable path is the [BlackHole](https://existential.audio/blackhole/) virtual audio driver.
-
-1. Install BlackHole 2ch: `brew install --cask blackhole-2ch`
-2. **System Settings → Sound → Output → BlackHole 2ch.** Everything the system plays now routes to BlackHole instead of your speakers/headset.
-3. Run with BlackHole as the input and your real device as the output:
-
-```
-cargo run -p audiomirror-cli -- loop --input "BlackHole 2ch" --output "<your headset or speaker name>"
+Mac:
+```sh
+scripts/run-daemon.sh alice
+# Prints: READY port=7000
 ```
 
-You can list available devices first with `cargo run -p audiomirror-cli -- devices`.
+Windows:
+```bat
+scripts\run-daemon.bat bob
+```
 
-If you want to keep hearing the desktop audio locally AND capture it, create a **Multi-Output Device** in `/Applications/Utilities/Audio MIDI Setup.app` containing BlackHole 2ch + your real output, then set the system Output to that Multi-Output. Do NOT also use that Multi-Output as the app's `--output` — it creates a feedback loop with BlackHole.
+**3. Connect and pair.**
 
-The legacy `--source system` flag still exists and uses ScreenCaptureKit; expect mono and worse latency.
+On Alice (Mac), type into the REPL:
+```
+connect 192.168.1.50:7000   # or: connect bob  (if mDNS resolves it)
+```
+
+On Bob (Windows), when the `>> pending: alice` notification appears:
+```
+accept 0
+```
+
+Alice then opens a session:
+```
+open bob
+```
+
+**4. Start a stream.**
+
+On Alice, after `open` prints a session UUID:
+```
+stream open --from in:0 --to bob:out:1 --session <UUID>
+```
+
+This captures Alice's BlackHole 2ch input (see macOS setup below) and plays it
+on Bob's default output device.
+
+---
+
+## Per-platform setup
+
+### macOS
+
+ScreenCaptureKit is mono-only with extra latency. Use
+[BlackHole 2ch](https://existential.audio/blackhole/) as a virtual loopback:
+
+```sh
+brew install --cask blackhole-2ch
+```
+
+In **System Settings → Sound → Output**, select **BlackHole 2ch**. Everything
+the system plays now routes through BlackHole. To hear it locally too, create a
+**Multi-Output Device** in `/Applications/Utilities/Audio MIDI Setup.app`
+combining BlackHole 2ch and your real output, then set System Output to that
+Multi-Output Device.
+
+List available device indices:
+```sh
+audiomirror-cli devices
+```
+
+Pass the BlackHole index as `--from in:<idx>` in `stream open`.
 
 ### Windows
 
-WASAPI loopback runs automatically:
-
-```
-cargo run -p audiomirror-cli -- loop --input ignored --output <output id> --source system
-```
+WASAPI loopback is selected automatically — no extra software needed. The
+`--source system` flag on `send` / `loop` enables it.
 
 ### Linux
 
-Any PulseAudio or PipeWire `.monitor` source is picked up automatically when you use `--source system`.
+Any PulseAudio or PipeWire `.monitor` source is available automatically. List
+sources with `audiomirror-cli devices` and pass the `.monitor` source index to
+`--from`.
 
-## P2P discovery and signaling (Phase 2)
+---
 
-Run the long-running daemon on each machine:
+## Daemon REPL command reference
+
+Start the daemon:
+```sh
+audiomirror-cli daemon [--signaling-port 7000] [--peer-name "Studio Mac"] [--identity-dir <path>]
+```
+
+After `READY port=<N>`, the daemon accepts line commands on stdin:
+
+| Command | Description |
+|---------|-------------|
+| `peers` | List mDNS-discovered peers (index, name, peer-id, host:port) |
+| `pending` | List peers whose Hello is awaiting trust acceptance |
+| `accept <n>` | Accept the pending peer at index `<n>` and persist the auth token |
+| `connect <name\|id\|host:port>` | Open a TCP signaling link to a peer |
+| `open <name\|id>` | Open a new Session with a connected peer |
+| `sessions` | List active sessions with state and per-stream status |
+| `stream open --from <dev> --to <peer>:<dev> --session <UUID> [--bitrate N]` | Start an audio stream |
+| `stream close <session>:<stream>` | Tear down a stream end-to-end |
+| `stream volume <session>:<stream> <0-100>` | Set playback gain |
+| `stream mute / unmute <session>:<stream>` | Mute/unmute (packets keep flowing) |
+| `stream pause / resume <session>:<stream>` | Pause/resume pump |
+| `stream stats [<session>:<stream>]` | Live statistics table (Ctrl-C to stop) |
+| `disconnect <session_id>` | Close a session and all its streams |
+| `settings show / get <key> / set <key> <value>` | Inspect or update settings |
+| `logs path / logs tail` | Print log path or follow log output |
+| `autostart enable / disable / status` | Manage system autostart |
+| `metrics enable / disable / status` | Manage Prometheus endpoint |
+| `quit` | Graceful shutdown |
+
+---
+
+## Settings & ops
+
+See [CLI-REFERENCE.md](CLI-REFERENCE.md) for the full flag reference, all
+settings keys, and exit codes.
+
+Quick examples:
+```sh
+audiomirror-cli settings show
+audiomirror-cli settings set fec_mode always
+audiomirror-cli settings set jitter_mode min
+audiomirror-cli settings set log_level debug
+
+audiomirror-cli autostart enable     # launchd / systemd / Windows Run
+audiomirror-cli logs tail            # follow the log
+audiomirror-cli metrics enable       # then curl http://localhost:9000/metrics
+```
+
+---
+
+## How it works
+
+AudioMirror is a two-process peer-to-peer system. Each machine runs a daemon
+that handles signaling (TCP), discovery (mDNS), and audio transport (UDP).
+Audio is captured in 20 ms stereo frames at 48 kHz, encoded with Opus at
+64 kbps, and transmitted over UDP to the remote peer, which decodes and plays
+the frames through an adaptive jitter buffer.
 
 ```
+Mac                  LAN                Windows
+─────                ───                ───────
+System audio
+  |
+BlackHole 2ch
+  |
+[capture]
+  |
+Opus encoder ── UDP ──> Opus decoder
+                              |
+                         [playback]
+                              |
+                         Audio output
+```
+
+Trust is established on first connection via TOFU: the receiver sees a `pending`
+entry, the operator runs `accept <n>`, and an auth token is persisted so future
+reconnects are automatic (with `auto_accept_trusted = true` in settings).
+
+---
+
+## Limitations
+
+- macOS ScreenCaptureKit capture is mono only; use BlackHole 2ch for full stereo.
+- Multi-peer sessions (more than two participants) are not yet supported (Phase 9).
+- The `loop` subcommand's `--source system` flag works on Windows (WASAPI) and
+  Linux (.monitor); on macOS use BlackHole 2ch as `--input` instead.
+
+---
+
+## Build
+
+```sh
+cargo build --workspace --release
+```
+
+```sh
+# Individual subcommands (development)
+cargo run -p audiomirror-cli -- devices
 cargo run -p audiomirror-cli -- daemon --signaling-port 7000
 ```
-
-On first launch a UUID identity is written to your OS config dir (`~/Library/Application Support/AudioMirror/identity.toml` on macOS). The daemon registers `_audiomirror._tcp.local.` on mDNS and listens on TCP for incoming signaling connections.
-
-Interactive stdin commands:
-
-| Command | Effect |
-| --- | --- |
-| `peers` | Print currently discovered peers (mDNS). |
-| `pending` | Print queued HELLO messages awaiting trust acceptance. |
-| `accept <idx>` | Promote a queued HELLO to trusted; generates and stores an auth token. |
-| `connect <peer_id\|name>` | Open a TCP signaling link to a peer found via `peers`. |
-| `open <peer_id\|name>` | Open a Session with an already-connected peer. |
-| `sessions` | List active sessions and their streams. |
-| `disconnect <session_id>` | Close a session and all its streams. |
-| `quit` | Shut the daemon down. |
-
-For a one-shot mDNS browse without persistent state:
-
-```
-cargo run -p audiomirror-cli -- discover --duration-secs 5
-```
-
-**Trust model (MVP):** TOFU. The first time a peer connects, its HELLO sits in `pending` until the local operator accepts. After acceptance, the auth token is persisted in `trusted_peers.toml`; reconnects are silent if the token still matches.
-
-## Modular routing (Phase 3)
-
-Within a daemon REPL, after `open <peer>` has produced a session:
-
-| Command | Effect |
-| --- | --- |
-| `stream open --session <session_id> --from <local-device-id-or "system"> --to <peer>:<remote-device-id-or "default"> [--bitrate N]` | Initiator opens a UDP stream. The other side replies with the bound sink port and the source pump starts. |
-| `stream close <session_id>:<stream_id>` | Tear down a stream end-to-end (sends StreamControl close). |
-| `stream volume <session_id>:<stream_id> <0-100>` | Set linear gain on the local pump and tell the peer. |
-| `stream mute <session_id>:<stream_id>` / `stream unmute …` | Zero gain (packets keep flowing so loss stats remain accurate). |
-| `stream pause <session_id>:<stream_id>` / `stream resume …` | Suspend the pump and signal the peer. |
-| `stream stats [<session_id>:<stream_id>]` | Tabular live view of packets sent/recv/lost, kbps, RTT. Refreshes every 1s, exits on Ctrl-C. |
-
-Auto-pause: if a bound device disappears (USB unplug, headset off), the relevant pump pauses and signals the peer. When the device returns, the pump resumes automatically.
-
-## Settings & ops (Phase 4)
-
-AudioMirror reads a single TOML at `~/Library/Application Support/AudioMirror/settings.toml` (macOS) / `~/.config/AudioMirror/settings.toml` (Linux) / `%APPDATA%\AudioMirror\settings.toml` (Windows).
-
-```bash
-audiomirror-cli settings show
-audiomirror-cli settings set fec_mode auto
-audiomirror-cli settings set jitter_mode fixed:40
-audiomirror-cli settings set metrics_enabled true
-```
-
-**Adaptive FEC** is on by default in `auto` mode: above 1% measured loss → inband FEC turns on; below 0.2% → off; 10s hysteresis. Force on/off with `settings set fec_mode always|never`.
-
-**Adaptive jitter buffer** in `auto` mode targets P99 arrival jitter; force a fixed depth with `settings set jitter_mode fixed:<ms>`; minimum with `min`.
-
-**Auto-start with system:**
-
-```bash
-audiomirror-cli autostart enable    # writes launchd / systemd / Windows Run entry
-audiomirror-cli autostart status
-audiomirror-cli autostart disable
-```
-
-**Structured logs:** rotated daily, 7-day retention. View live: `audiomirror-cli logs tail`. Path: `audiomirror-cli logs path`.
-
-**Prometheus metrics (opt-in):**
-
-```bash
-audiomirror-cli metrics enable
-audiomirror-cli daemon &
-curl http://localhost:9000/metrics
-```
-
-**Auto-accept trusted peers:** once a peer is TOFU-trusted, set `settings set auto_accept_trusted true` to skip the manual `accept <n>` step on reconnect.

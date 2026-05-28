@@ -13,10 +13,20 @@ path = "tests/end_to_end.rs"
 name = "net_degradation"
 path = "tests/net_degradation.rs"
 
+[[test]]
+name = "audio_rms_sustained"
+path = "tests/audio_rms_sustained.rs"
+
+[[test]]
+name = "soak"
+path = "tests/soak.rs"
+
 [dependencies]
 audiomirror-core = { path = "../audiomirror-core" }
 tokio = { workspace = true }
 bytes = { workspace = true }
+uuid = { workspace = true }
+sysinfo = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

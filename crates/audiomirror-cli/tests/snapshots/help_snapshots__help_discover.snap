@@ -2,9 +2,16 @@
 source: crates/audiomirror-cli/tests/help_snapshots.rs
 expression: output
 ---
-Discover AudioMirror peers on the local network via mDNS.
+Browse for AudioMirror peers on the local network via mDNS
+(_audiomirror._tcp.local.). Prints discovered peers with their peer ID, display name,
+address, and version, then exits after the scan window.
 
-Example: audiomirror-cli discover --duration-secs 5
+This is a one-shot query and does not require a running daemon. Use the `daemon` REPL
+`peers` command for continuous discovery with automatic reconnection.
+
+Examples:
+audiomirror-cli discover
+audiomirror-cli discover --duration-secs 10
 
 Usage: audiomirror-cli discover [OPTIONS]
 

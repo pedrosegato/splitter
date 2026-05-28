@@ -4,7 +4,7 @@ use audiomirror_core::net::packet::Packet;
 use audiomirror_core::net::stream_runtime::{
     spawn_sink_pump_inner, spawn_source_pump_inner, StreamControlSignal, StreamStats,
 };
-use audiomirror_core::FRAME_SAMPLES;
+use audiomirror_core::FRAME_STEREO_SAMPLES;
 use bytes::{Bytes, BytesMut};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -22,8 +22,8 @@ async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
     let send_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     send_socket.connect(sink_addr).await.unwrap();
 
-    let (cap_prod, cap_cons) = AudioRing::new(FRAME_SAMPLES * 32);
-    let (play_prod, play_cons) = AudioRing::new(FRAME_SAMPLES * 32);
+    let (cap_prod, cap_cons) = AudioRing::new(FRAME_STEREO_SAMPLES * 32);
+    let (play_prod, play_cons) = AudioRing::new(FRAME_STEREO_SAMPLES * 32);
 
     let frame_ready = Arc::new(Notify::new());
     let src_stats = Arc::new(StreamStats::default());
@@ -52,25 +52,25 @@ async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
     ));
 
     let mut cap_prod_mut = cap_prod;
-    let sine: Vec<f32> = (0..FRAME_SAMPLES)
-        .map(|i| (2.0 * std::f32::consts::PI * 440.0 * (i as f32) / 48_000.0).sin() * 0.5)
+    let sine: Vec<f32> = (0..FRAME_STEREO_SAMPLES)
+        .map(|i| (2.0 * std::f32::consts::PI * 440.0 * ((i / 2) as f32) / 48_000.0).sin() * 0.5)
         .collect();
 
     for _ in 0..10 {
         let pushed = cap_prod_mut.push_slice(&sine);
-        assert_eq!(pushed, FRAME_SAMPLES);
+        assert_eq!(pushed, FRAME_STEREO_SAMPLES);
         frame_ready.notify_one();
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
     }
 
     for _ in 0..50 {
-        if play_cons.occupied() >= FRAME_SAMPLES * 3 {
+        if play_cons.occupied() >= FRAME_STEREO_SAMPLES * 3 {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert!(
-        play_cons.occupied() >= FRAME_SAMPLES,
+        play_cons.occupied() >= FRAME_STEREO_SAMPLES,
         "sink ring should have received at least one decoded frame, got {} samples",
         play_cons.occupied()
     );
@@ -89,7 +89,7 @@ async fn volume_change_attenuates_decoded_signal() {
     let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let sink_addr = sink_socket.local_addr().unwrap();
 
-    let (play_prod, mut play_cons) = AudioRing::new(FRAME_SAMPLES * 16);
+    let (play_prod, mut play_cons) = AudioRing::new(FRAME_STEREO_SAMPLES * 16);
     let stats = Arc::new(StreamStats::default());
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
     let handle = tokio::spawn(spawn_sink_pump_inner(
@@ -102,8 +102,8 @@ async fn volume_change_attenuates_decoded_signal() {
     ));
 
     let mut enc = OpusEncoder::new(64_000).unwrap();
-    let sine: Vec<f32> = (0..FRAME_SAMPLES)
-        .map(|i| (2.0 * std::f32::consts::PI * 440.0 * (i as f32) / 48_000.0).sin() * 0.5)
+    let sine: Vec<f32> = (0..FRAME_STEREO_SAMPLES)
+        .map(|i| (2.0 * std::f32::consts::PI * 440.0 * ((i / 2) as f32) / 48_000.0).sin() * 0.5)
         .collect();
     let mut payload = BytesMut::with_capacity(400);
     enc.encode(&sine, &mut payload).unwrap();
@@ -125,9 +125,9 @@ async fn volume_change_attenuates_decoded_signal() {
     sender.send_to(&wire[..], sink_addr).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let mut out = vec![0.0f32; FRAME_SAMPLES];
+    let mut out = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let popped = play_cons.pop_slice(&mut out);
-    assert_eq!(popped, FRAME_SAMPLES);
+    assert_eq!(popped, FRAME_STEREO_SAMPLES);
     let energy: f32 = out.iter().map(|x| x * x).sum();
     assert!(
         energy < 0.01,

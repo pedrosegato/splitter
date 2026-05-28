@@ -15,6 +15,21 @@ pub(crate) enum SendFecMode {
     Never,
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum CliJitterMode {
+    Auto,
+    Min,
+}
+
+impl From<CliJitterMode> for audiomirror_core::JitterMode {
+    fn from(m: CliJitterMode) -> Self {
+        match m {
+            CliJitterMode::Auto => audiomirror_core::JitterMode::Auto,
+            CliJitterMode::Min => audiomirror_core::JitterMode::Min,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "audiomirror-cli", version, about = "AudioMirror Phase 1 CLI")]
 struct Cli {
@@ -48,6 +63,10 @@ enum Cmd {
         output: String,
         #[arg(long)]
         bind: String,
+        #[arg(long, value_enum, default_value_t = CliJitterMode::Auto)]
+        jitter_mode: CliJitterMode,
+        #[arg(long, default_value_t = 100)]
+        jitter_max_depth_ms: u32,
     },
 
     Loop {
@@ -108,7 +127,20 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
         }
-        Cmd::Recv { output, bind } => commands::recv::run(&output, &bind).await,
+        Cmd::Recv {
+            output,
+            bind,
+            jitter_mode,
+            jitter_max_depth_ms,
+        } => {
+            commands::recv::run_with_settings(
+                &output,
+                &bind,
+                jitter_mode.into(),
+                jitter_max_depth_ms,
+            )
+            .await
+        }
         Cmd::Loop {
             input,
             output,

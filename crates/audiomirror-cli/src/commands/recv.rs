@@ -1,6 +1,7 @@
 use audiomirror_core::audio::codec::OpusDecoder;
 use audiomirror_core::audio::playback::PlaybackHandle;
 use audiomirror_core::audio::ring::AudioRing;
+use audiomirror_core::net::jitter::{JitterBuffer, JitterOutput};
 use audiomirror_core::net::packet::Packet;
 use audiomirror_core::FRAME_SAMPLES;
 use bytes::Bytes;
@@ -9,7 +10,12 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio::net::UdpSocket;
 
-pub(crate) async fn run(output: &str, bind: &str) -> anyhow::Result<()> {
+pub(crate) async fn run_with_settings(
+    output: &str,
+    bind: &str,
+    jitter_mode: audiomirror_core::JitterMode,
+    jitter_max_depth_ms: u32,
+) -> anyhow::Result<()> {
     let bind_addr: SocketAddr = SocketAddr::from_str(bind)?;
     let sock = make_udp_socket(bind_addr)?;
     tracing::info!("receiving on {bind_addr}, playing to {output}");
@@ -21,8 +27,8 @@ pub(crate) async fn run(output: &str, bind: &str) -> anyhow::Result<()> {
     let mut decoder = OpusDecoder::new()?;
     let mut udp_buf = vec![0u8; 1500];
     let mut frame = vec![0.0f32; FRAME_SAMPLES];
-    let mut dropped_samples: u64 = 0;
-    let mut last_drop_log = std::time::Instant::now();
+    let mut jitter = JitterBuffer::new(jitter_mode, jitter_max_depth_ms);
+    let mut pending_fec_recover = false;
 
     loop {
         let n = sock.recv(&mut udp_buf).await?;
@@ -34,20 +40,39 @@ pub(crate) async fn run(output: &str, bind: &str) -> anyhow::Result<()> {
                 continue;
             }
         };
-        decoder.decode(Some(&pkt.payload), &mut frame)?;
-        if let Ok(mut p) = producer.lock() {
-            let pushed = p.push_slice(&frame);
-            if pushed < frame.len() {
-                dropped_samples += (frame.len() - pushed) as u64;
-                if last_drop_log.elapsed() >= std::time::Duration::from_secs(1) {
-                    tracing::warn!(
-                        "playback ring overrun: dropped {dropped_samples} samples in last interval"
-                    );
-                    dropped_samples = 0;
-                    last_drop_log = std::time::Instant::now();
+        let now = std::time::Instant::now();
+        jitter.push(pkt, now);
+
+        while let Some(out) = jitter.pop_ready(now) {
+            match out {
+                JitterOutput::Lost { seq } => {
+                    pending_fec_recover = true;
+                    tracing::debug!(seq, "jitter buffer declared lost");
+                }
+                JitterOutput::Packet(p) => {
+                    if pending_fec_recover {
+                        if decoder
+                            .decode_with_fec(Some(&p.payload), &mut frame, true)
+                            .is_ok()
+                        {
+                            push_frame_to_ring(&producer, &frame);
+                        }
+                        pending_fec_recover = false;
+                    }
+                    decoder.decode_with_fec(Some(&p.payload), &mut frame, false)?;
+                    push_frame_to_ring(&producer, &frame);
                 }
             }
         }
+    }
+}
+
+fn push_frame_to_ring(
+    producer: &std::sync::Arc<std::sync::Mutex<audiomirror_core::audio::ring::RingProducer>>,
+    frame: &[f32],
+) {
+    if let Ok(mut p) = producer.lock() {
+        let _ = p.push_slice(frame);
     }
 }
 
@@ -58,4 +83,22 @@ fn make_udp_socket(bind: SocketAddr) -> anyhow::Result<UdpSocket> {
     sock.set_nonblocking(true)?;
     let std_sock: std::net::UdpSocket = sock.into();
     Ok(UdpSocket::from_std(std_sock)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use audiomirror_core::JitterMode;
+
+    /// Compile-time check: run_with_settings must accept (output, bind, JitterMode, u32).
+    #[allow(dead_code)]
+    fn _assert_signature_compiles() {
+        let _ = run_with_settings("out", "0.0.0.0:0", JitterMode::Auto, 100);
+    }
+
+    #[tokio::test]
+    async fn recv_signature_accepts_jitter_args() {
+        // Verified at compile time by _assert_signature_compiles above.
+        let _ = JitterMode::Auto;
+    }
 }

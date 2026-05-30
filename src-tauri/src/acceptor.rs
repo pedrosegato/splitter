@@ -7,6 +7,7 @@ use splitter_core::net::signaling::{
 use splitter_core::net::stream::StreamRoute;
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
 use crate::core::AppCore;
+use crate::events::{IncomingSession, PeerDisconnected};
 
 fn pick_default_output_device_id() -> String {
     splitter_core::audio::devices::list_devices()
@@ -54,6 +55,10 @@ pub fn spawn_acceptor(
                             .register_incoming(sid_uuid, local_peer_id, requester_uuid)
                             .await;
                         let _ = core.sessions.accept(&sid_uuid).await;
+                        core.emit(IncomingSession {
+                            peer_id: requester_uuid.to_string(),
+                            peer_name: requester_uuid.to_string(),
+                        });
                         tracing::info!(peer = %peer_id, session = %sid_uuid, "opened session");
                     }
                     SignalingMessage::StreamOpen {
@@ -223,6 +228,10 @@ pub fn spawn_acceptor(
                 },
                 Ok(PeerEvent::Disconnected { reason }) => {
                     tracing::info!(peer = %peer_id, %reason, "peer disconnected");
+                    core.emit(PeerDisconnected {
+                        peer_id: peer_id.to_string(),
+                        reason: reason.clone(),
+                    });
                     let session_ids: Vec<Uuid> = core
                         .sessions
                         .snapshot()

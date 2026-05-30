@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, TrustStore};
@@ -9,6 +10,7 @@ use splitter_core::settings::SettingsHandle;
 use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
 use splitter_core::net::signaling::connection::PeerConnectionHandle;
 use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
+use crate::events::{PeersChanged, StatsTick, StreamStat};
 
 pub fn apply_discovery_event(map: &mut HashMap<String, DiscoveredPeer>, ev: DiscoveryEvent) {
     match ev {
@@ -30,6 +32,7 @@ pub struct AppCore {
     pub server: SignalingServerHandle,
     pub outgoing: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
     pub peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
+    pub app: OnceLock<tauri::AppHandle>,
 }
 
 impl AppCore {
@@ -56,7 +59,19 @@ impl AppCore {
             server,
             outgoing: Arc::new(RwLock::new(HashMap::new())),
             peers: Arc::new(RwLock::new(HashMap::new())),
+            app: OnceLock::new(),
         }))
+    }
+}
+
+impl AppCore {
+    pub fn emit<E>(&self, ev: E)
+    where
+        E: tauri_specta::Event + serde::Serialize + Clone,
+    {
+        if let Some(app) = self.app.get() {
+            let _ = ev.emit(app);
+        }
     }
 }
 
@@ -64,13 +79,41 @@ impl AppCore {
     pub fn spawn_discovery(self: &Arc<Self>, signaling_port: u16) -> Result<(), String> {
         let mut discovery = splitter_core::net::discovery::Discovery::start(&self.identity, signaling_port)
             .map_err(e2s)?;
-        let peers = self.peers.clone();
+        let core = self.clone();
         tokio::spawn(async move {
             while let Some(ev) = discovery.next_event().await {
-                apply_discovery_event(&mut *peers.write().await, ev);
+                apply_discovery_event(&mut *core.peers.write().await, ev);
+                let snapshot: Vec<DiscoveredPeer> =
+                    core.peers.read().await.values().cloned().collect();
+                core.emit(PeersChanged(snapshot));
             }
         });
         Ok(())
+    }
+}
+
+impl AppCore {
+    pub fn spawn_stats_emitter(self: &Arc<Self>) {
+        let core = self.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                ticker.tick().await;
+                let raw = core.stream_registry.snapshot_stats(1000).await;
+                let stats: Vec<StreamStat> = raw
+                    .into_iter()
+                    .map(|(session_id, stream_id, snap)| StreamStat {
+                        session_id: session_id.to_string(),
+                        stream_id,
+                        rtt_ms: snap.last_rtt_ms,
+                        loss_pct: loss_pct(snap.packets_received, snap.packets_lost),
+                        kbps_sent: snap.bitrate_kbps_sent,
+                        kbps_received: snap.bitrate_kbps_received,
+                    })
+                    .collect();
+                core.emit(StatsTick(stats));
+            }
+        });
     }
 }
 
@@ -96,6 +139,10 @@ impl AppCore {
             }
         });
     }
+}
+
+fn loss_pct(packets_received: u64, packets_lost: u64) -> f32 {
+    packets_lost as f32 / (packets_received + packets_lost).max(1) as f32 * 100.0
 }
 
 fn e2s<E: std::fmt::Display>(e: E) -> String {

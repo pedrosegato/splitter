@@ -5,6 +5,7 @@ import { WireLayer } from "./WireLayer";
 import { ChannelDock } from "./ChannelDock";
 import { ConnectModal } from "@/features/connect/ConnectModal";
 import { useWiring } from "./useWiring";
+import { useTrayHealth } from "./useTrayHealth";
 import { streamColor } from "./useWireGeometry";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useDevices } from "@/hooks/useDevices";
@@ -108,6 +109,8 @@ export function RoutingBoard() {
   const portColor = portColorFromStreams(streams);
 
   const { onPortActivate, hint } = useWiring();
+
+  useTrayHealth(snapshots);
 
   useEffect(() => {
     if (incoming) {

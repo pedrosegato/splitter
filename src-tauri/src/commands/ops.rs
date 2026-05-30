@@ -50,3 +50,16 @@ pub async fn disconnect_all(core: State<'_, Arc<AppCore>>) -> Result<(), String>
     disconnect_all_core(&core).await;
     Ok(())
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_tray_state(
+    app: tauri::AppHandle<tauri::Wry>,
+    state: String,
+) -> Result<(), String> {
+    #[cfg(desktop)]
+    crate::tray::set_tray_state(&app, &state).map_err(|e| e.to_string())?;
+    #[cfg(not(desktop))]
+    let _ = (app, state);
+    Ok(())
+}

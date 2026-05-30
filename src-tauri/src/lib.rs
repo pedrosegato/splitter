@@ -33,6 +33,7 @@ fn build() -> Builder<tauri::Wry> {
             commands::streams::stream_control,
             commands::ops::mute_all,
             commands::ops::disconnect_all,
+            commands::ops::set_tray_state,
             commands::perms::permission_status,
             commands::perms::request_permission,
             commands::system::set_autostart,

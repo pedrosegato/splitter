@@ -6,6 +6,15 @@ use tauri::{
 };
 use crate::core::AppCore;
 
+pub const TRAY_ID: &str = "splitter-main";
+
+const TRAY_ICON_SIZE: u32 = 22;
+
+static ICON_IDLE: &[u8] = include_bytes!("../icons/tray/idle.rgba");
+static ICON_ACTIVE: &[u8] = include_bytes!("../icons/tray/active.rgba");
+static ICON_DEGRADED: &[u8] = include_bytes!("../icons/tray/degraded.rgba");
+static ICON_ERROR: &[u8] = include_bytes!("../icons/tray/error.rgba");
+
 pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let abrir = MenuItem::with_id(app, "abrir", "Abrir", true, None::<&str>)?;
     let mute_all = MenuItem::with_id(app, "mute_all", "Mutar tudo", true, None::<&str>)?;
@@ -20,7 +29,7 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .cloned()
         .expect("app must have a window icon");
 
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -65,4 +74,27 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+pub fn set_tray_state(app: &tauri::AppHandle, state: &str) -> tauri::Result<()> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    let bytes = icon_bytes_for_state(state);
+    let img = tauri::image::Image::new_owned(
+        bytes.to_vec(),
+        TRAY_ICON_SIZE,
+        TRAY_ICON_SIZE,
+    );
+    tray.set_icon(Some(img))?;
+    Ok(())
+}
+
+fn icon_bytes_for_state(state: &str) -> &'static [u8] {
+    match state {
+        "active" => ICON_ACTIVE,
+        "degraded" => ICON_DEGRADED,
+        "error" => ICON_ERROR,
+        _ => ICON_IDLE,
+    }
 }

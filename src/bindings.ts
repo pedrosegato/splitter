@@ -141,6 +141,14 @@ async disconnectAll() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async setTrayState(state: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_tray_state", { state }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async permissionStatus() : Promise<Permissions> {
     return await TAURI_INVOKE("permission_status");
 },

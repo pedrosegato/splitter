@@ -5,19 +5,42 @@ use uuid::Uuid;
 use splitter_core::net::signaling::connect_to_peer;
 use crate::core::AppCore;
 
-pub fn spawn_reconnect(core: Arc<AppCore>, peer_id: Uuid, addr: SocketAddr) {
+pub fn spawn_reconnect(core: Arc<AppCore>, peer_id: Uuid, _addr: SocketAddr) {
     tokio::spawn(async move {
+        let in_outgoing = core.outgoing.read().await.contains_key(&peer_id);
+        let in_mdns = core
+            .peers
+            .read()
+            .await
+            .contains_key(&peer_id.to_string());
+        if !in_outgoing && !in_mdns {
+            tracing::debug!(%peer_id, "skip reconnect: no dialable address for {peer_id}");
+            return;
+        }
+
         let delays_secs: [u64; 10] = [1, 2, 4, 8, 16, 30, 30, 30, 30, 30];
         for (attempt, delay) in delays_secs.iter().enumerate() {
             tokio::time::sleep(Duration::from_secs(*delay)).await;
 
-            let current_addr = {
+            let mdns_addr = {
                 let map = core.peers.read().await;
                 map.values()
                     .find(|p| p.peer_id == peer_id.to_string())
                     .map(|p| format!("{}:{}", p.host, p.port))
                     .and_then(|s| s.parse::<SocketAddr>().ok())
-                    .unwrap_or(addr)
+            };
+            let current_addr = match mdns_addr {
+                Some(a) => a,
+                None => {
+                    let og = core.outgoing.read().await;
+                    match og.get(&peer_id).map(|h| h.remote_addr) {
+                        Some(a) => a,
+                        None => {
+                            tracing::debug!(%peer_id, "no dialable address; aborting reconnect");
+                            return;
+                        }
+                    }
+                }
             };
 
             tracing::debug!(%peer_id, attempt, %current_addr, "reconnect attempt");

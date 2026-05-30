@@ -65,7 +65,9 @@ pub fn run() {
                     app.manage(core);
                 }
                 Err(e) => {
-                    tracing::error!("AppCore init failed — app running in degraded mode: {e}");
+                    tracing::error!("fatal: AppCore init failed: {e}");
+                    eprintln!("fatal: AudioMirror failed to start: {e}");
+                    std::process::exit(1);
                 }
             }
             Ok(())

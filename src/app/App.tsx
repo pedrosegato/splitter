@@ -4,7 +4,7 @@ import { mountEventBridge } from "@/lib/events";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useUiStore } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
-import { RoutingPlaceholder } from "@/features/routing/RoutingPlaceholder";
+import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
 
 function StatusDot() {
@@ -63,7 +63,7 @@ export function App() {
         </div>
       </header>
       <main className="flex-1 overflow-auto bg-board">
-        {activeTab === "routing" ? <RoutingPlaceholder /> : <StatsView />}
+        {activeTab === "routing" ? <RoutingBoard /> : <StatsView />}
       </main>
     </div>
   );

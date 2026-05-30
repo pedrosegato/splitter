@@ -4,15 +4,6 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --color-bg: #222224;
-  --color-board: #1d1d1f;
-  --color-surface: #313134;
-  --color-surface-2: #3a3a3e;
-  --color-line: #161618;
-  --color-line-2: #414146;
-  --color-ink: #d7d7da;
-  --color-ink-2: #9a9a9f;
-  --color-ink-3: #6c6c72;
   --color-gold: #e0a52f;
   --color-green: #86c440;
   --color-s0: #e3251f;
@@ -41,6 +32,15 @@ body {
 }
 
 @theme inline {
+  --color-bg: var(--bg);
+  --color-board: var(--board);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -83,6 +83,15 @@ body {
 }
 
 :root {
+  --bg: #f4f4f5;
+  --board: #ececee;
+  --surface: #ffffff;
+  --surface-2: #f3f3f5;
+  --line: #e2e2e4;
+  --line-2: #d3d3d6;
+  --ink: #1c1c1f;
+  --ink-2: #5a5a60;
+  --ink-3: #8a8a90;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -118,6 +127,15 @@ body {
 }
 
 .dark {
+  --bg: #222224;
+  --board: #1d1d1f;
+  --surface: #313134;
+  --surface-2: #3a3a3e;
+  --line: #161618;
+  --line-2: #414146;
+  --ink: #d7d7da;
+  --ink-2: #9a9a9f;
+  --ink-3: #6c6c72;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);

@@ -8,7 +8,7 @@ import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
-import { Settings } from "lucide-react";
+import { AudioLines, Settings } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 
 function StatusDot() {
@@ -41,7 +41,11 @@ export function App() {
       <header
         className="h-10 flex items-center px-3.5 border-b border-line shrink-0 bg-elev-0"
       >
-        <StatusDot />
+        <div className="flex items-center gap-1.5">
+          <AudioLines size={18} className="text-gold shrink-0" />
+          <span className="text-xs font-semibold tracking-wide text-ink">Splitter</span>
+          <StatusDot />
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <Tabs
             value={activeTab}

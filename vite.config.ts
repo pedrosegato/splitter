@@ -9,4 +9,13 @@ export default defineConfig({
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   build: { outDir: "dist" },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    alias: {
+      "@tauri-apps/api/core": path.resolve(__dirname, "src/__mocks__/tauri-core.ts"),
+      "@tauri-apps/api/event": path.resolve(__dirname, "src/__mocks__/tauri-event.ts"),
+      "@tauri-apps/api/webviewWindow": path.resolve(__dirname, "src/__mocks__/tauri-webview.ts"),
+    },
+  },
 });

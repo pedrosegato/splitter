@@ -131,7 +131,7 @@ export function RoutingBoard() {
             </div>
           ))}
         </div>
-        <div className="flex-none min-h-[96px] bg-[#161618] border-t border-line" />
+        <div className="flex-none min-h-[96px] bg-elev-0 border-t border-line" />
       </div>
     );
   }

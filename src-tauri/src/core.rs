@@ -91,7 +91,7 @@ impl AppCore {
         let mut discovery = splitter_core::net::discovery::Discovery::start(&self.identity, signaling_port)
             .map_err(e2s)?;
         let core = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             while let Some(ev) = discovery.next_event().await {
                 apply_discovery_event(&mut *core.peers.write().await, ev);
                 let snapshot: Vec<DiscoveredPeer> =
@@ -106,7 +106,7 @@ impl AppCore {
 impl AppCore {
     pub fn spawn_stats_emitter(self: &Arc<Self>) {
         let core = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(1));
             loop {
                 ticker.tick().await;
@@ -132,7 +132,7 @@ impl AppCore {
     pub fn spawn_acceptor_supervisor(self: &Arc<Self>) {
         let core = self.clone();
         let mut established = self.server.connection_established_tx.subscribe();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             loop {
                 match established.recv().await {
                     Ok(peer_id) => {

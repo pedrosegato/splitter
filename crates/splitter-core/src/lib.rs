@@ -18,7 +18,7 @@ pub use net::trust::{TrustStore, TrustedPeer};
 pub use observability::logs::{current_log_path, log_dir, LogsGuard};
 pub use settings::{settings_path, FecMode, JitterMode, LogLevel, Settings, SettingsHandle};
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "sck"))]
 pub use audio::loopback::MacosLoopbackHandle;
 
 /// Samples per channel per 20ms Opus frame at 48 kHz.

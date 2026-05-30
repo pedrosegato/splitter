@@ -35,9 +35,10 @@ specta = { version = "=2.0.0-rc.22", features = ["derive", "uuid"], optional = t
 
 [features]
 specta = ["dep:specta"]
+sck = ["dep:screencapturekit"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
-screencapturekit = "1.5"
+screencapturekit = { version = "1.5", optional = true }
 
 [dev-dependencies]
 proptest = "1"

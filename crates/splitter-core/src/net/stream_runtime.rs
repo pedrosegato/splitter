@@ -30,7 +30,7 @@ pub enum StreamControlSignal {
 pub enum DeviceGuard {
     None,
     Capture(crate::audio::capture::CaptureHandle),
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "sck"))]
     MacosLoopback(crate::audio::loopback::MacosLoopbackHandle),
     Playback(crate::audio::playback::PlaybackHandle),
 }
@@ -875,13 +875,19 @@ pub async fn open_stream_as_source(
                 (DeviceGuard::Capture(cap), notify)
             }
             SourceKind::System => {
-                #[cfg(target_os = "macos")]
+                #[cfg(all(target_os = "macos", feature = "sck"))]
                 {
                     let cap = crate::audio::loopback::MacosLoopbackHandle::start(producer)
                         .map_err(|e| NetError::SignalingProtocol {
                             reason: format!("macos loopback start failed: {e}"),
                         })?;
                     (DeviceGuard::MacosLoopback(cap), Arc::new(Notify::new()))
+                }
+                #[cfg(all(target_os = "macos", not(feature = "sck")))]
+                {
+                    return Err(NetError::SignalingProtocol {
+                        reason: "system audio capture requires the sck feature (use BlackHole 2ch as an input device instead)".into(),
+                    });
                 }
                 #[cfg(not(target_os = "macos"))]
                 {

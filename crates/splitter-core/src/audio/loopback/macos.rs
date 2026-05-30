@@ -1,4 +1,4 @@
-#![cfg(target_os = "macos")]
+#![cfg(all(target_os = "macos", feature = "sck"))]
 
 use crate::audio::ring::RingProducer;
 use crate::error::AudioError;

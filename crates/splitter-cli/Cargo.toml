@@ -6,6 +6,9 @@ license.workspace = true
 authors.workspace = true
 build = "build.rs"
 
+[features]
+sck = ["splitter-core/sck"]
+
 [dependencies]
 splitter-core = { path = "../splitter-core" }
 tokio = { workspace = true, features = ["io-std"] }

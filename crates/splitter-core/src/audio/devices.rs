@@ -43,7 +43,7 @@ pub fn list_devices() -> Result<Vec<DeviceInfo>, AudioError> {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "sck"))]
     out.push(DeviceInfo {
         id: "SystemAudio:0:ScreenCaptureKit".into(),
         name: "Desktop Audio (ScreenCaptureKit)".into(),
@@ -142,11 +142,17 @@ mod tests {
     #[test]
     fn list_includes_system_audio_entry_on_mac_and_windows() {
         let devs = list_devices().expect("list");
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(all(target_os = "macos", feature = "sck"))]
         assert!(
             devs.iter()
                 .any(|d| matches!(d.kind, DeviceKind::SystemAudio)),
-            "expected a SystemAudio entry on this platform"
+            "expected a SystemAudio entry on macOS with sck feature"
+        );
+        #[cfg(target_os = "windows")]
+        assert!(
+            devs.iter()
+                .any(|d| matches!(d.kind, DeviceKind::SystemAudio)),
+            "expected a SystemAudio entry on Windows"
         );
         #[cfg(target_os = "linux")]
         {
@@ -154,6 +160,15 @@ mod tests {
                 .iter()
                 .any(|d| matches!(d.kind, DeviceKind::SystemAudio));
             let _ = has_monitor;
+        }
+        #[cfg(all(target_os = "macos", not(feature = "sck")))]
+        {
+            assert!(
+                !devs
+                    .iter()
+                    .any(|d| matches!(d.kind, DeviceKind::SystemAudio)),
+                "expected no SystemAudio entry on macOS without sck feature"
+            );
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {

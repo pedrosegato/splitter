@@ -9,13 +9,13 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::Duration;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "sck"))]
 use splitter_core::MacosLoopbackHandle;
 
 #[allow(dead_code)]
 enum CaptureGuard {
     Mic(CaptureHandle),
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "sck"))]
     MacSystem(MacosLoopbackHandle),
     #[cfg(not(target_os = "macos"))]
     Loopback(CaptureHandle),
@@ -25,7 +25,7 @@ impl CaptureGuard {
     fn frame_ready(&self) -> Arc<Notify> {
         match self {
             CaptureGuard::Mic(h) => h.frame_ready(),
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "sck"))]
             CaptureGuard::MacSystem(h) => h.frame_ready(),
             #[cfg(not(target_os = "macos"))]
             CaptureGuard::Loopback(h) => h.frame_ready(),
@@ -47,9 +47,13 @@ pub(crate) async fn run(
     let _capture: CaptureGuard = match source {
         Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, cap_prod)?),
         Source::System => {
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "sck"))]
             {
                 CaptureGuard::MacSystem(MacosLoopbackHandle::start(cap_prod)?)
+            }
+            #[cfg(all(target_os = "macos", not(feature = "sck")))]
+            {
+                anyhow::bail!("system audio capture requires the sck feature (use BlackHole 2ch as an input device instead)");
             }
             #[cfg(not(target_os = "macos"))]
             {

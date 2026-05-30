@@ -1,3 +1,4 @@
+mod acceptor;
 mod core;
 pub use core::AppCore;
 mod commands;

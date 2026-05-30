@@ -50,7 +50,9 @@ pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16
     .await
     .map_err(|e| e.to_string())?;
     if let Some(pid) = outcome.remote_peer_id {
+        let events = outcome.handle.events.subscribe();
         core.outgoing.write().await.insert(pid, outcome.handle);
+        crate::acceptor::spawn_acceptor((*core).clone(), pid, events);
     }
     Ok(outcome.accepted)
 }

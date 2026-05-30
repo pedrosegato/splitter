@@ -74,6 +74,30 @@ impl AppCore {
     }
 }
 
+impl AppCore {
+    pub fn spawn_acceptor_supervisor(self: &Arc<Self>) {
+        let core = self.clone();
+        let mut established = self.server.connection_established_tx.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match established.recv().await {
+                    Ok(peer_id) => {
+                        let events = {
+                            let conns = core.server.connections.read().await;
+                            conns.get(&peer_id).map(|c| c.events.subscribe())
+                        };
+                        if let Some(events) = events {
+                            crate::acceptor::spawn_acceptor(core.clone(), peer_id, events);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+}
+
 fn e2s<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }

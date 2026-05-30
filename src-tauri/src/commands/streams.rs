@@ -127,14 +127,15 @@ pub async fn open_session(
     remote_peer_id: String,
 ) -> Result<String, String> {
     let remote = Uuid::parse_str(&remote_peer_id).map_err(|e| e.to_string())?;
-    let sid = core.sessions.open_outgoing(core.identity.peer_id, remote).await;
+    let local_peer_id = core.identity.read().unwrap().peer_id;
+    let sid = core.sessions.open_outgoing(local_peer_id, remote).await;
     core.sessions.accept(&sid).await.map_err(|e| e.to_string())?;
     let (tx, _, _) = find_peer_conn(&core, remote)
         .await
         .ok_or_else(|| "no live signaling connection to remote peer".to_string())?;
     tx.send(SignalingMessage::SessionRequest {
         session_id: sid.to_string(),
-        requested_by: core.identity.peer_id.to_string(),
+        requested_by: local_peer_id.to_string(),
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -157,6 +158,7 @@ pub async fn open_stream(
 ) -> Result<u8, String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
     let bitrate = bitrate.unwrap_or(64_000);
+    let local_peer_id = core.identity.read().unwrap().peer_id;
 
     let snap = core.sessions.snapshot().await;
     let session = snap
@@ -182,7 +184,7 @@ pub async fn open_stream(
             session_id: sid.to_string(),
             stream_id,
             source: Endpoint {
-                peer_id: core.identity.peer_id.to_string(),
+                peer_id: local_peer_id.to_string(),
                 device_id: source_device_id.clone(),
             },
             sink: Endpoint {
@@ -205,7 +207,7 @@ pub async fn open_stream(
 
     let route = StreamRoute {
         source: Endpoint {
-            peer_id: core.identity.peer_id.to_string(),
+            peer_id: local_peer_id.to_string(),
             device_id: source_device_id.clone(),
         },
         sink: Endpoint {

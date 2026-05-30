@@ -9,9 +9,10 @@ use crate::dto::{IdentityDto, PendingPeerDto};
 #[tauri::command]
 #[specta::specta]
 pub async fn identity(core: State<'_, Arc<AppCore>>) -> Result<IdentityDto, String> {
+    let id = core.identity.read().unwrap().clone();
     Ok(IdentityDto {
-        peer_id: core.identity.peer_id.to_string(),
-        peer_name: core.identity.peer_name.clone(),
+        peer_id: id.peer_id.to_string(),
+        peer_name: id.peer_name,
     })
 }
 
@@ -50,9 +51,10 @@ pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16
         Some(s) => Some(uuid::Uuid::parse_str(&s).map_err(|e| e.to_string())?),
         None => None,
     };
+    let identity = core.identity.read().unwrap().clone();
     let outcome = splitter_core::net::signaling::client::connect_to_peer(
         addr,
-        &core.identity,
+        &identity,
         core.trust.clone(),
         hint,
         Duration::from_secs(5),

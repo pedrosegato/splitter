@@ -45,9 +45,10 @@ pub fn spawn_reconnect(core: Arc<AppCore>, peer_id: Uuid, _addr: SocketAddr) {
 
             tracing::debug!(%peer_id, attempt, %current_addr, "reconnect attempt");
 
+            let identity = core.identity.read().unwrap().clone();
             match connect_to_peer(
                 current_addr,
-                &core.identity,
+                &identity,
                 core.trust.clone(),
                 Some(peer_id),
                 Duration::from_secs(5),

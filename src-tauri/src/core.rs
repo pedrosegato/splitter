@@ -25,7 +25,7 @@ pub fn apply_discovery_event(map: &mut HashMap<String, DiscoveredPeer>, ev: Disc
 }
 
 pub struct AppCore {
-    pub identity: PeerIdentity,
+    pub identity: std::sync::RwLock<PeerIdentity>,
     pub settings: SettingsHandle,
     pub trust: Arc<RwLock<TrustStore>>,
     pub sessions: Arc<SessionManager>,
@@ -35,6 +35,7 @@ pub struct AppCore {
     pub peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     pub remote_devices: Arc<RwLock<HashMap<Uuid, Vec<DeviceDescriptor>>>>,
     pub app: OnceLock<tauri::AppHandle>,
+    pub discovery: OnceLock<splitter_core::net::discovery::DiscoveryHandle>,
 }
 
 impl AppCore {
@@ -60,7 +61,7 @@ impl AppCore {
             }
         };
         Ok(Arc::new(Self {
-            identity,
+            identity: std::sync::RwLock::new(identity),
             settings,
             trust,
             sessions,
@@ -70,6 +71,7 @@ impl AppCore {
             peers: Arc::new(RwLock::new(HashMap::new())),
             remote_devices: Arc::new(RwLock::new(HashMap::new())),
             app: OnceLock::new(),
+            discovery: OnceLock::new(),
         }))
     }
 }
@@ -88,9 +90,12 @@ impl AppCore {
 impl AppCore {
     pub fn spawn_discovery(self: &Arc<Self>) -> Result<(), String> {
         let signaling_port = self.server.bind_addr.port();
-        let mut discovery = splitter_core::net::discovery::Discovery::start(&self.identity, signaling_port)
+        let identity = self.identity.read().unwrap().clone();
+        let discovery = splitter_core::net::discovery::Discovery::start(&identity, signaling_port)
             .map_err(e2s)?;
+        let _ = self.discovery.set(discovery.handle());
         let core = self.clone();
+        let mut discovery = discovery;
         tauri::async_runtime::spawn(async move {
             while let Some(ev) = discovery.next_event().await {
                 apply_discovery_event(&mut *core.peers.write().await, ev);
@@ -171,6 +176,14 @@ mod tests {
         let core = AppCore::init(dir.path()).await.expect("init");
         assert!(core.server.bind_addr.port() > 0);
         assert_eq!(core.sessions.snapshot().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn identity_is_readable_through_lock() {
+        let dir = tempdir().unwrap();
+        let core = AppCore::init(dir.path()).await.expect("init");
+        let name = core.identity.read().unwrap().peer_name.clone();
+        assert!(!name.is_empty());
     }
 
     #[tokio::test]

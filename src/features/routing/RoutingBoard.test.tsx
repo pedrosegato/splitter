@@ -53,6 +53,7 @@ const STREAM: StreamSnapshot = {
   source_device: "remote-mic",
   sink_device: "spk-1",
   volume: 0.8,
+  muted: false,
 };
 
 const SESSION: SessionSnapshot = {

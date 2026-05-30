@@ -39,6 +39,7 @@ function makeStream(overrides: Partial<StreamSnapshot> = {}): StreamSnapshot {
     source_device: "MacBook Mic",
     sink_device: "PC Speaker",
     volume: 0.7,
+    muted: false,
     ...overrides,
   };
 }

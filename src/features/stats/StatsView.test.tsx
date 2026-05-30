@@ -53,6 +53,7 @@ const twoStreamSessions: SessionSnapshot[] = [
         source_device: "MacBook Mic",
         sink_device: "Studio Monitors",
         volume: 1,
+        muted: false,
       },
       {
         id: 2,
@@ -63,6 +64,7 @@ const twoStreamSessions: SessionSnapshot[] = [
         source_device: "Sistema",
         sink_device: "Fones",
         volume: 0.8,
+        muted: false,
       },
     ],
   },

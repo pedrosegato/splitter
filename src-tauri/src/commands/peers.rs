@@ -34,13 +34,17 @@ pub async fn accept_pending(core: State<'_, Arc<AppCore>>, index: usize) -> Resu
 
 #[tauri::command]
 #[specta::specta]
-pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16) -> Result<bool, String> {
-    let addr = format!("{host}:{port}").parse().map_err(|_| "bad addr".to_string())?;
+pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16, peer_id: Option<String>) -> Result<bool, String> {
+    let addr = format!("{host}:{port}").parse().map_err(|_| format!("invalid address '{host}:{port}'"))?;
+    let hint = match peer_id {
+        Some(s) => Some(uuid::Uuid::parse_str(&s).map_err(|e| e.to_string())?),
+        None => None,
+    };
     let outcome = splitter_core::net::signaling::client::connect_to_peer(
         addr,
         &core.identity,
         core.trust.clone(),
-        None,
+        hint,
         Duration::from_secs(5),
     )
     .await

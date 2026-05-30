@@ -66,7 +66,7 @@ pub fn run() {
                 }
                 Err(e) => {
                     tracing::error!("fatal: AppCore init failed: {e}");
-                    eprintln!("fatal: AudioMirror failed to start: {e}");
+                    eprintln!("fatal: Splitter failed to start: {e}");
                     std::process::exit(1);
                 }
             }

@@ -5,6 +5,7 @@ mod commands;
 mod dto;
 pub mod events;
 mod reconnect;
+mod tray;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
@@ -71,6 +72,16 @@ pub fn run() {
                     eprintln!("fatal: Splitter failed to start: {e}");
                     std::process::exit(1);
                 }
+            }
+            tray::build_tray(app.handle())?;
+            if let Some(win) = app.get_webview_window("main") {
+                let win_clone = win.clone();
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win_clone.hide();
+                    }
+                });
             }
             Ok(())
         })

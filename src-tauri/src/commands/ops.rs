@@ -3,9 +3,7 @@ use tauri::State;
 use splitter_core::net::stream_runtime::StreamControlSignal;
 use crate::core::AppCore;
 
-#[tauri::command]
-#[specta::specta]
-pub async fn mute_all(core: State<'_, Arc<AppCore>>) -> Result<(), String> {
+pub(crate) async fn mute_all_core(core: &AppCore) {
     let snap = core.sessions.snapshot().await;
     for sess in &snap {
         for stream in &sess.streams {
@@ -17,17 +15,27 @@ pub async fn mute_all(core: State<'_, Arc<AppCore>>) -> Result<(), String> {
             }
         }
     }
+}
+
+pub(crate) async fn disconnect_all_core(core: &AppCore) {
+    let snap = core.sessions.snapshot().await;
+    for sess in &snap {
+        if let Err(e) = crate::commands::peers::teardown_session(core, sess.id).await {
+            tracing::warn!(sid = %sess.id, "disconnect_all: teardown_session error: {e}");
+        }
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mute_all(core: State<'_, Arc<AppCore>>) -> Result<(), String> {
+    mute_all_core(&core).await;
     Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn disconnect_all(core: State<'_, Arc<AppCore>>) -> Result<(), String> {
-    let snap = core.sessions.snapshot().await;
-    for sess in &snap {
-        if let Err(e) = crate::commands::peers::teardown_session(&core, sess.id).await {
-            tracing::warn!(sid = %sess.id, "disconnect_all: teardown_session error: {e}");
-        }
-    }
+    disconnect_all_core(&core).await;
     Ok(())
 }

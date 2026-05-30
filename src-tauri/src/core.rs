@@ -24,6 +24,19 @@ pub fn apply_discovery_event(map: &mut HashMap<String, DiscoveredPeer>, ev: Disc
     }
 }
 
+pub fn apply_peer_rename(
+    map: &mut HashMap<String, DiscoveredPeer>,
+    peer_id: &str,
+    peer_name: &str,
+) -> bool {
+    if let Some(p) = map.get_mut(peer_id) {
+        p.peer_name = peer_name.to_string();
+        true
+    } else {
+        false
+    }
+}
+
 pub struct AppCore {
     pub identity: std::sync::RwLock<PeerIdentity>,
     pub settings: SettingsHandle,
@@ -184,6 +197,20 @@ mod tests {
         let core = AppCore::init(dir.path()).await.expect("init");
         let name = core.identity.read().unwrap().peer_name.clone();
         assert!(!name.is_empty());
+    }
+
+    #[test]
+    fn apply_peer_rename_updates_existing_entry() {
+        use splitter_core::net::discovery::DiscoveredPeer;
+        let mut map = std::collections::HashMap::new();
+        map.insert("id1".to_string(), DiscoveredPeer {
+            peer_id: "id1".into(), peer_name: "Old".into(),
+            host: "10.0.0.2".into(), port: 7000, version: "0.1.0".into(),
+        });
+        let changed = apply_peer_rename(&mut map, "id1", "New");
+        assert!(changed);
+        assert_eq!(map.get("id1").unwrap().peer_name, "New");
+        assert!(!apply_peer_rename(&mut map, "missing", "X"));
     }
 
     #[tokio::test]

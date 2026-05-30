@@ -267,6 +267,18 @@ pub fn spawn_acceptor(
                     SignalingMessage::DeviceListResponse { devices } => {
                         core.remote_devices.write().await.insert(peer_id, devices);
                     }
+                    SignalingMessage::PeerRenamed { peer_id: rid, peer_name } => {
+                        let changed = {
+                            let mut peers = core.peers.write().await;
+                            crate::core::apply_peer_rename(&mut peers, &rid, &peer_name)
+                        };
+                        if changed {
+                            let snapshot: Vec<_> =
+                                core.peers.read().await.values().cloned().collect();
+                            core.emit(crate::events::PeersChanged(snapshot));
+                        }
+                        tracing::info!(peer = %peer_id, new_name = %peer_name, "peer renamed");
+                    }
                     _ => {}
                 },
                 Ok(PeerEvent::Disconnected { reason }) => {

@@ -41,6 +41,9 @@ body {
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
+  --color-elev-0: var(--elev-0);
+  --color-elev-1: var(--elev-1);
+  --color-elev-2: var(--elev-2);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -92,6 +95,9 @@ body {
   --ink: #1c1c1f;
   --ink-2: #5a5a60;
   --ink-3: #8a8a90;
+  --elev-0: #e4e4e6;
+  --elev-1: #d6d6d8;
+  --elev-2: #dcdcde;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -136,6 +142,9 @@ body {
   --ink: #d7d7da;
   --ink-2: #9a9a9f;
   --ink-3: #6c6c72;
+  --elev-0: #161618;
+  --elev-1: #2a2a2d;
+  --elev-2: #242426;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);

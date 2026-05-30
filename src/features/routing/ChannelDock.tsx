@@ -13,7 +13,7 @@ export function ChannelDock({ sessionId, streams, isLoading }: Props) {
   const selectedStreamId = useUiStore((s) => s.selectedStreamId);
 
   return (
-    <div className="flex flex-none items-stretch bg-[#161618] border-t border-line overflow-x-auto min-h-[96px]">
+    <div className="flex flex-none items-stretch bg-elev-0 border-t border-line overflow-x-auto min-h-[96px]">
       {isLoading ? (
         <div className="flex items-center gap-3 px-4">
           {[0, 1, 2].map((i) => (

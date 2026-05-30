@@ -33,7 +33,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function Row({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-[7px] px-[11px] rounded-[2px] hover:bg-[#26262a]">
+    <div className="flex items-center justify-between gap-4 py-[7px] px-[11px] rounded-[2px] hover:bg-elev-2">
       {children}
     </div>
   );
@@ -92,7 +92,7 @@ function NumberInput({
         const n = Number(e.target.value);
         if (!Number.isNaN(n)) debouncedSet(settingKey, n);
       }}
-      className="w-[90px] h-[28px] text-[12px] font-mono bg-[#1d1d1f] border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold"
+      className="w-[90px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold"
     />
   );
 }
@@ -133,7 +133,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
         aria-describedby={undefined}
         className="w-[420px] max-w-[420px] bg-surface border-line rounded-[3px] gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-[#2a2a2d] border-b border-line rounded-t-[3px] flex-row items-center justify-between">
+        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-[3px] flex-row items-center justify-between">
           <DialogTitle className="font-mono text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
             Configurações
           </DialogTitle>
@@ -181,7 +181,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
             >
               <SelectTrigger
                 size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-[#1d1d1f] border-line-2 text-ink focus-visible:ring-gold"
+                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -201,7 +201,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
             >
               <SelectTrigger
                 size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-[#1d1d1f] border-line-2 text-ink focus-visible:ring-gold"
+                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -227,7 +227,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
             >
               <SelectTrigger
                 size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-[#1d1d1f] border-line-2 text-ink focus-visible:ring-gold"
+                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -285,7 +285,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
             >
               <SelectTrigger
                 size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-[#1d1d1f] border-line-2 text-ink focus-visible:ring-gold"
+                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -323,7 +323,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 className={`px-[10px] py-[5px] font-mono text-[11px] cursor-pointer transition-colors ${
                   theme === "dark"
                     ? "bg-gold text-[#1c1c1f] font-semibold"
-                    : "bg-[#1d1d1f] text-ink-2 hover:text-ink"
+                    : "bg-board text-ink-2 hover:text-ink"
                 }`}
               >
                 Escuro
@@ -337,7 +337,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 className={`px-[10px] py-[5px] font-mono text-[11px] cursor-pointer transition-colors border-l border-line-2 ${
                   theme === "light"
                     ? "bg-gold text-[#1c1c1f] font-semibold"
-                    : "bg-[#1d1d1f] text-ink-2 hover:text-ink"
+                    : "bg-board text-ink-2 hover:text-ink"
                 }`}
               >
                 Claro
@@ -350,7 +350,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="font-mono text-[11px] text-ink-2 bg-[#242426] border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
+            className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
           >
             fechar
           </button>

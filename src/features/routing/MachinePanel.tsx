@@ -114,7 +114,7 @@ export function MachinePanel({
 
   return (
     <div className="relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]">
-      <div className="flex items-center gap-[9px] px-[11px] py-[9px] bg-[#2a2a2d] border-b border-line">
+      <div className="flex items-center gap-[9px] px-[11px] py-[9px] bg-elev-1 border-b border-line">
         <span
           className={cn(
             "w-[7px] h-[7px] rounded-full shrink-0",
@@ -139,7 +139,7 @@ export function MachinePanel({
               type="button"
               title="desconectar"
               onClick={onDisconnect}
-              className="font-sans text-[10px] text-ink-3 bg-[#242426] border border-line-2 rounded-[2px] px-2 py-[3px] cursor-pointer hover:text-gold hover:border-gold"
+              className="font-sans text-[10px] text-ink-3 bg-elev-2 border border-line-2 rounded-[2px] px-2 py-[3px] cursor-pointer hover:text-gold hover:border-gold"
             >
               ✕
             </button>

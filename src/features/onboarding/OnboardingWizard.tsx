@@ -25,7 +25,7 @@ function StepIndicator({ current }: { current: Step }) {
               ? "w-5 bg-gold"
               : i < idx
                 ? "w-3 bg-gold/40"
-                : "w-3 bg-[#3a3a3e]"
+                : "w-3 bg-surface-2"
           }`}
         />
       ))}
@@ -58,7 +58,7 @@ function PermissionRow({
   };
 
   return (
-    <div className="flex items-center justify-between py-[7px] px-[11px] rounded-[2px] bg-[#26262a]">
+    <div className="flex items-center justify-between py-[7px] px-[11px] rounded-[2px] bg-elev-2">
       <div className="flex flex-col gap-0.5">
         <span className="text-[12.5px] text-ink">{label}</span>
         <span
@@ -78,7 +78,7 @@ function PermissionRow({
           type="button"
           onClick={() => request.mutate(kind)}
           disabled={request.isPending}
-          className="font-mono text-[11px] text-ink-2 bg-[#242426] border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line disabled:opacity-50 disabled:cursor-not-allowed"
+          className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Permitir
         </button>
@@ -205,7 +205,7 @@ export function OnboardingWizard() {
         aria-describedby={undefined}
         className="w-[400px] max-w-[400px] bg-surface border-line rounded-[3px] gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-[#2a2a2d] border-b border-line rounded-t-[3px]">
+        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-[3px]">
           <DialogTitle className="font-mono text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
             {stepTitles[step]}
           </DialogTitle>
@@ -226,7 +226,7 @@ export function OnboardingWizard() {
               <button
                 type="button"
                 onClick={back}
-                className="font-mono text-[11px] text-ink-2 bg-[#242426] border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
+                className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
               >
                 Voltar
               </button>
@@ -236,7 +236,7 @@ export function OnboardingWizard() {
                 type="button"
                 onClick={next}
                 disabled={step === "permissions" && !canAdvancePermissions}
-                className="font-mono text-[11px] text-ink bg-[#2e2e32] border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:border-line disabled:opacity-40 disabled:cursor-not-allowed"
+                className="font-mono text-[11px] text-ink bg-elev-1 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:border-line disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Próximo
               </button>

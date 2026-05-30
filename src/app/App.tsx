@@ -39,8 +39,7 @@ export function App() {
   return (
     <div className="h-full flex flex-col font-sans">
       <header
-        className="h-10 flex items-center px-3.5 border-b border-line shrink-0"
-        style={{ background: "#1a1a1c" }}
+        className="h-10 flex items-center px-3.5 border-b border-line shrink-0 bg-elev-0"
       >
         <StatusDot />
         <div className="ml-auto flex items-center gap-2">

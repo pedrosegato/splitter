@@ -151,6 +151,18 @@ body {
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+@keyframes flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="[animation:flow"] {
+    animation: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

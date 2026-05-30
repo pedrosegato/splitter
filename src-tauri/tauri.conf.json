@@ -15,5 +15,18 @@
     ],
     "security": { "csp": null }
   },
-  "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.png"] }
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis", "deb", "appimage"],
+    "icon": ["icons/icon.png"],
+    "createUpdaterArtifacts": true,
+    "publisher": "Splitter",
+    "category": "Utility",
+    "shortDescription": "Espelhe áudio entre PCs na LAN",
+    "longDescription": "Splitter compartilha áudio (sistema, microfone) entre computadores na mesma rede local, com baixa latência e roteamento modular.",
+    "copyright": "© 2026 Splitter",
+    "macOS": { "minimumSystemVersion": "13.0" },
+    "linux": { "deb": { "depends": [] } },
+    "windows": { "nsis": { "installMode": "perMachine" } }
+  }
 }

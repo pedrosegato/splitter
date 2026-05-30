@@ -1,5 +1,6 @@
 # Planning/design docs — local only
 docs/
+!docs/RELEASING.md
 *.plan.md
 .claude/
 CLAUDE.md
@@ -31,6 +32,10 @@ src-tauri/gen/
 .env
 .env.*
 !.env.example
+
+# Tauri signing keys (never commit)
+*.key
+*.key.pub
 
 # Logs
 *.log

@@ -15,5 +15,26 @@
     ],
     "security": { "csp": null }
   },
-  "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.png"] }
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY1M0NEMjhEREE3NzI2OUYKUldTZkpuZmFqZEk4OWFvQW5TTnJUN1YzbXpZTEJRaGtVVEJGQlAvWGpCQlIrQlVTYWRtRkcxYk4K",
+      "endpoints": [
+        "https://github.com/pedrosegato/splitter/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis", "deb", "appimage"],
+    "icon": ["icons/32x32.png","icons/128x128.png","icons/128x128@2x.png","icons/icon.icns","icons/icon.ico"],
+    "createUpdaterArtifacts": true,
+    "publisher": "Splitter",
+    "category": "Utility",
+    "shortDescription": "Espelhe áudio entre PCs na LAN",
+    "longDescription": "Splitter compartilha áudio (sistema, microfone) entre computadores na mesma rede local, com baixa latência e roteamento modular.",
+    "copyright": "© 2026 Splitter",
+    "macOS": { "minimumSystemVersion": "13.0" },
+    "linux": { "deb": { "depends": [] } },
+    "windows": { "nsis": { "installMode": "perMachine" } }
+  }
 }

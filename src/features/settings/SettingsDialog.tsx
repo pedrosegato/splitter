@@ -17,6 +17,15 @@ import {
 } from "@/components/ui/select";
 import { useSettingsForm } from "./useSettingsForm";
 import { useThemeStore, applyTheme } from "@/stores/theme";
+import { useUpdater } from "@/hooks/useUpdater";
+
+function AppVersion() {
+  const [v, setV] = useState("");
+  useEffect(() => {
+    import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setV).catch(() => setV("?"));
+  }, []);
+  return <span className="font-mono text-[11px] text-ink-2">{v || "…"}</span>;
+}
 
 type Props = {
   open: boolean;
@@ -108,6 +117,7 @@ function parseJitterMode(mode: { fixed: number } | "auto" | "min"): { base: Jitt
 export function SettingsDialog({ open, onOpenChange }: Props) {
   const { settings, isLoading, isSaved, set, setAutostart } = useSettingsForm();
   const { theme, setTheme } = useThemeStore();
+  const { state: updateState, checkForUpdates } = useUpdater();
 
   const [savedVisible, setSavedVisible] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -343,6 +353,43 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 Claro
               </button>
             </div>
+          </Row>
+          <SectionLabel>Sobre</SectionLabel>
+
+          <Row>
+            <SettingLabel>Versão</SettingLabel>
+            <AppVersion />
+          </Row>
+
+          <Row>
+            <SettingLabel>Atualizações</SettingLabel>
+            {updateState.status === "available" ? (
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-gold">
+                  v{updateState.version}
+                </span>
+                <button
+                  type="button"
+                  onClick={updateState.onInstall}
+                  className="font-mono text-[11px] text-[#1c1c1f] bg-gold border border-gold rounded-[2px] px-3 py-[5px] cursor-pointer hover:opacity-90"
+                >
+                  instalar
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={checkForUpdates}
+                disabled={updateState.status === "checking" || updateState.status === "installing"}
+                className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {updateState.status === "checking"
+                  ? "verificando…"
+                  : updateState.status === "installing"
+                  ? "instalando…"
+                  : "buscar atualizações"}
+              </button>
+            )}
           </Row>
         </div>
 

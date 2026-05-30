@@ -61,6 +61,7 @@ pub fn run() {
     let pause_id = pause_shortcut.id();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -135,6 +136,11 @@ pub fn run() {
             }
             tray::build_tray(app.handle())?;
             if let Some(win) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                {
+                    use tauri_plugin_decorum::WebviewWindowExt;
+                    let _ = win.set_traffic_lights_inset(15.0, 22.0);
+                }
                 let win_clone = win.clone();
                 win.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {

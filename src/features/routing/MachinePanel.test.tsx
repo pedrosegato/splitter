@@ -43,8 +43,8 @@ describe("MachinePanel", () => {
     expect(ports).toHaveLength(4);
   });
 
-  it("shows ESTE PC tag for self panel", () => {
-    const { getByText } = wrap(
+  it("omits the ESTE PC tag and disconnect control for the self panel", () => {
+    const { getByText, queryByText, queryByTitle } = wrap(
       <MachinePanel
         peerId="local"
         name="Este Mac"
@@ -56,7 +56,9 @@ describe("MachinePanel", () => {
       />,
     );
 
-    expect(getByText("ESTE PC")).toBeTruthy();
+    expect(getByText("Este Mac")).toBeTruthy();
+    expect(queryByText("ESTE PC")).toBeNull();
+    expect(queryByTitle("desconectar")).toBeNull();
   });
 
   it("renders only the connect slot for right side when not connected", () => {

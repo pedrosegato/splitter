@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "title": "Splitter", "width": 1100, "height": 720, "minWidth": 820, "minHeight": 540 }
+      { "title": "Splitter", "width": 1100, "height": 720, "minWidth": 820, "minHeight": 540, "titleBarStyle": "Overlay", "hiddenTitle": true }
     ],
     "security": { "csp": null }
   },

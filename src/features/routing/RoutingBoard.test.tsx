@@ -130,9 +130,10 @@ describe("RoutingBoard — with session", () => {
     expect(svg).toBeDefined();
   });
 
-  it("shows ESTE PC badge on the left panel", () => {
-    const { getByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
-    expect(getByText("ESTE PC")).toBeDefined();
+  it("renders the self machine by name on the left panel", () => {
+    const { getByText, queryByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
+    expect(getByText("Este Mac")).toBeDefined();
+    expect(queryByText("ESTE PC")).toBeNull();
   });
 });
 

@@ -121,15 +121,11 @@ export function MachinePanel({
             connected ? "bg-green" : "bg-[#555]",
           )}
         />
-        <span className="font-semibold text-[12.5px] tracking-[0.2px]">
+        <span className="flex-1 min-w-0 truncate font-semibold text-[12.5px] tracking-[0.2px]">
           {name}
         </span>
-        {isSelf ? (
-          <span className="ml-auto font-sans text-[8.5px] tracking-[0.5px] text-ink-2 border border-line-2 px-[6px] py-[2px] rounded-[2px]">
-            ESTE PC
-          </span>
-        ) : (
-          <div className="ml-auto flex items-center gap-2">
+        {!isSelf && (
+          <div className="ml-auto flex items-center gap-2 shrink-0">
             {connected && latencyMs != null && (
               <span className="font-sans text-[10px] text-gold tabular-nums">
                 {latencyMs} ms

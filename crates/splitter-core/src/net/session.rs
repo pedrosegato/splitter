@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub type SessionId = Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
     PendingOutgoing,

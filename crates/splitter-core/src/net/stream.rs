@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub type StreamId = u8;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum StreamState {
     Negotiating,

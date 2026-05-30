@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct StreamSnapshot {
     pub id: StreamId,
     pub state: StreamState,
@@ -17,6 +18,7 @@ pub struct StreamSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct SessionSnapshot {
     pub id: SessionId,
     pub remote_peer_id: Uuid,

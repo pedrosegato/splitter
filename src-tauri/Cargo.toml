@@ -15,7 +15,7 @@ splitter-core = { path = "../crates/splitter-core" }
 tauri = { version = "2", features = [] }
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 specta = "=2.0.0-rc.22"
-specta-typescript = "0.0.9"
+specta-typescript = "=0.0.9"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

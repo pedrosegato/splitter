@@ -19,6 +19,14 @@ import { useSettingsForm } from "./useSettingsForm";
 import { useThemeStore, applyTheme } from "@/stores/theme";
 import { useUpdater } from "@/hooks/useUpdater";
 
+function AppVersion() {
+  const [v, setV] = useState("");
+  useEffect(() => {
+    import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setV).catch(() => setV("?"));
+  }, []);
+  return <span className="font-mono text-[11px] text-ink-2">{v || "…"}</span>;
+}
+
 type Props = {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -350,7 +358,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
 
           <Row>
             <SettingLabel>Versão</SettingLabel>
-            <span className="font-mono text-[11px] text-ink-2">0.1.0</span>
+            <AppVersion />
           </Row>
 
           <Row>

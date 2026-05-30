@@ -94,18 +94,22 @@ pub async fn peer_devices(
     Ok(cached.unwrap_or_default())
 }
 
-#[tauri::command]
-#[specta::specta]
-pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Result<(), String> {
-    let sid = uuid::Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<(), String> {
     let snap = core.sessions.snapshot().await;
     if let Some(sess) = snap.iter().find(|s| s.id == sid) {
         for stream in &sess.streams {
             if let Err(e) = core.stream_registry.close(&sid, stream.id).await {
-                tracing::warn!(%sid, stream_id = stream.id, "disconnect: stream_registry.close error: {e}");
+                tracing::warn!(%sid, stream_id = stream.id, "teardown_session: stream_registry.close error: {e}");
             }
-            crate::commands::streams::notify_remote(&core, sid, stream.id, StreamAction::Close, None).await;
+            crate::commands::streams::notify_remote(core, sid, stream.id, StreamAction::Close, None).await;
         }
     }
     core.sessions.close(&sid).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Result<(), String> {
+    let sid = uuid::Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    teardown_session(&core, sid).await
 }

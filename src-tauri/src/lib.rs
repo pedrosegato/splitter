@@ -28,6 +28,8 @@ fn build() -> Builder<tauri::Wry> {
             commands::streams::open_stream,
             commands::streams::close_stream,
             commands::streams::stream_control,
+            commands::ops::mute_all,
+            commands::ops::disconnect_all,
         ])
         .events(collect_events![
             events::PeersChanged,

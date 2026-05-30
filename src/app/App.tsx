@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useUiStore } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { RoutingPlaceholder } from "@/features/routing/RoutingPlaceholder";
-import { StatsPlaceholder } from "@/features/stats/StatsPlaceholder";
+import { StatsView } from "@/features/stats/StatsView";
 
 function StatusDot() {
   const { data: sessions } = useSnapshot();
@@ -63,7 +63,7 @@ export function App() {
         </div>
       </header>
       <main className="flex-1 overflow-auto bg-board">
-        {activeTab === "routing" ? <RoutingPlaceholder /> : <StatsPlaceholder />}
+        {activeTab === "routing" ? <RoutingPlaceholder /> : <StatsView />}
       </main>
     </div>
   );

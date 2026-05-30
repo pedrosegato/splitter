@@ -57,9 +57,30 @@ pub fn spawn_acceptor(
                             .register_incoming(sid_uuid, local_peer_id, requester_uuid)
                             .await;
                         let _ = core.sessions.accept(&sid_uuid).await;
+                        let peer_name = {
+                            let trust_name = core
+                                .trust
+                                .read()
+                                .await
+                                .peer_for(&requester_uuid)
+                                .map(|p| p.peer_name.clone());
+                            if let Some(name) = trust_name {
+                                name
+                            } else {
+                                let discovered_name = core
+                                    .peers
+                                    .read()
+                                    .await
+                                    .get(&requester_uuid.to_string())
+                                    .map(|p| p.peer_name.clone());
+                                discovered_name.unwrap_or_else(|| {
+                                    requester_uuid.to_string()[..8].to_string()
+                                })
+                            }
+                        };
                         core.emit(IncomingSession {
                             peer_id: requester_uuid.to_string(),
-                            peer_name: requester_uuid.to_string(),
+                            peer_name,
                         });
                         tracing::info!(peer = %peer_id, session = %sid_uuid, "opened session");
                     }

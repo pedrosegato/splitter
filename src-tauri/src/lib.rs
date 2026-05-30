@@ -1,5 +1,6 @@
 mod core;
 pub use core::AppCore;
+mod commands;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

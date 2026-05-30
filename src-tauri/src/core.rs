@@ -8,7 +8,18 @@ use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, Trus
 use splitter_core::settings::SettingsHandle;
 use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
 use splitter_core::net::signaling::connection::PeerConnectionHandle;
-use splitter_core::net::discovery::DiscoveredPeer;
+use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
+
+pub fn apply_discovery_event(map: &mut HashMap<String, DiscoveredPeer>, ev: DiscoveryEvent) {
+    match ev {
+        DiscoveryEvent::Found(p) => {
+            map.insert(p.peer_id.clone(), p);
+        }
+        DiscoveryEvent::Removed(fullname) => {
+            map.retain(|peer_id, _| !fullname.contains(peer_id.as_str()));
+        }
+    }
+}
 
 pub struct AppCore {
     pub identity: PeerIdentity,
@@ -49,6 +60,20 @@ impl AppCore {
     }
 }
 
+impl AppCore {
+    pub fn spawn_discovery(self: &Arc<Self>, signaling_port: u16) -> Result<(), String> {
+        let mut discovery = splitter_core::net::discovery::Discovery::start(&self.identity, signaling_port)
+            .map_err(e2s)?;
+        let peers = self.peers.clone();
+        tokio::spawn(async move {
+            while let Some(ev) = discovery.next_event().await {
+                apply_discovery_event(&mut *peers.write().await, ev);
+            }
+        });
+        Ok(())
+    }
+}
+
 fn e2s<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
@@ -64,5 +89,22 @@ mod tests {
         let core = AppCore::init(dir.path(), 0).await.expect("init");
         assert!(core.server.bind_addr.port() > 0);
         assert_eq!(core.sessions.snapshot().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn discovery_reducer_adds_and_removes() {
+        use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
+        let mut map = std::collections::HashMap::new();
+        let p = DiscoveredPeer {
+            peer_id: "id1".into(),
+            peer_name: "Studio PC".into(),
+            host: "192.168.0.21".into(),
+            port: 7000,
+            version: "0.1.0".into(),
+        };
+        apply_discovery_event(&mut map, DiscoveryEvent::Found(p.clone()));
+        assert_eq!(map.len(), 1);
+        apply_discovery_event(&mut map, DiscoveryEvent::Removed("id1._splitter._tcp.local.".into()));
+        assert_eq!(map.len(), 0);
     }
 }

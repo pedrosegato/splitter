@@ -4,6 +4,7 @@ members = [
     "crates/splitter-core",
     "crates/splitter-cli",
     "crates/splitter-integration-tests",
+    "src-tauri",
 ]
 
 [workspace.package]

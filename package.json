@@ -1,0 +1,8 @@
+{
+  "name": "splitter-ui",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build" },
+  "devDependencies": { "vite": "^5", "typescript": "^5" },
+  "dependencies": { "@tauri-apps/api": "^2" }
+}

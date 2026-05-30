@@ -4,7 +4,7 @@ use std::time::Duration;
 use tauri::State;
 use uuid::Uuid;
 use splitter_core::SessionSnapshot;
-use splitter_core::net::signaling::{CodecParams, Endpoint, PeerEvent, SignalingMessage};
+use splitter_core::net::signaling::{CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction};
 use splitter_core::net::stream::StreamRoute;
 use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
 use crate::core::AppCore;
@@ -23,6 +23,16 @@ fn signal_from(action: &str, value: Option<f32>) -> Result<StreamControlSignal, 
         "resume" => Ok(StreamControlSignal::Resume),
         "close" => Ok(StreamControlSignal::Close),
         other => Err(format!("unknown stream action: {other}")),
+    }
+}
+
+fn remote_action_from(signal: &StreamControlSignal) -> Option<(StreamAction, Option<f32>)> {
+    match signal {
+        StreamControlSignal::Pause => Some((StreamAction::Pause, None)),
+        StreamControlSignal::Resume => Some((StreamAction::Resume, None)),
+        StreamControlSignal::Close => Some((StreamAction::Close, None)),
+        StreamControlSignal::SetVolume(v) => Some((StreamAction::SetVolume, Some(*v))),
+        StreamControlSignal::SetMuted(_) => None,
     }
 }
 
@@ -47,6 +57,37 @@ async fn find_peer_conn(
         }
     }
     None
+}
+
+async fn notify_remote(
+    core: &AppCore,
+    sid: Uuid,
+    stream_id: u8,
+    action: StreamAction,
+    volume: Option<f32>,
+) {
+    let snap = core.sessions.snapshot().await;
+    let remote = match snap.iter().find(|s| s.id == sid).map(|s| s.remote_peer_id) {
+        Some(r) => r,
+        None => {
+            tracing::warn!(%sid, "notify_remote: session not found, skipping remote signal");
+            return;
+        }
+    };
+    match find_peer_conn(core, remote).await {
+        Some((tx, _, _)) => {
+            tx.send(SignalingMessage::StreamControl {
+                stream_id,
+                action,
+                volume,
+            })
+            .await
+            .ok();
+        }
+        None => {
+            tracing::warn!(%sid, %remote, "notify_remote: no live connection to remote peer, skipping remote signal");
+        }
+    }
 }
 
 async fn wait_for_stream_open_ack(
@@ -122,7 +163,12 @@ pub async fn open_stream(
     let remote_peer_id = session.remote_peer_id;
     let stream_id: u8 = session.streams.len() as u8;
 
-    let _ = sink_peer_id;
+    let sink_uuid = Uuid::parse_str(&sink_peer_id).map_err(|e| e.to_string())?;
+    if sink_uuid != remote_peer_id {
+        return Err(format!(
+            "sink peer {sink_uuid} does not match session remote {remote_peer_id}"
+        ));
+    }
 
     let (conn_tx, conn_remote_addr, conn_events) = find_peer_conn(&core, remote_peer_id)
         .await
@@ -200,7 +246,9 @@ pub async fn close_stream(
     core.stream_registry
         .close(&sid, stream_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    notify_remote(&core, sid, stream_id, StreamAction::Close, None).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -214,17 +262,22 @@ pub async fn stream_control(
 ) -> Result<(), String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
     let signal = signal_from(&action, value)?;
+    let remote_action = remote_action_from(&signal);
     if matches!(signal, StreamControlSignal::Close) {
-        return core
-            .stream_registry
+        core.stream_registry
             .close(&sid, stream_id)
             .await
-            .map_err(|e| e.to_string());
+            .map_err(|e| e.to_string())?;
+    } else {
+        core.stream_registry
+            .send_control(&sid, stream_id, signal)
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    core.stream_registry
-        .send_control(&sid, stream_id, signal)
-        .await
-        .map_err(|e| e.to_string())
+    if let Some((ra, rv)) = remote_action {
+        notify_remote(&core, sid, stream_id, ra, rv).await;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -281,6 +334,44 @@ mod tests {
     #[test]
     fn signal_from_unknown_errors() {
         assert!(signal_from("frobnicate", None).is_err());
+    }
+
+    #[test]
+    fn remote_action_from_pause() {
+        assert_eq!(
+            remote_action_from(&StreamControlSignal::Pause),
+            Some((StreamAction::Pause, None))
+        );
+    }
+
+    #[test]
+    fn remote_action_from_resume() {
+        assert_eq!(
+            remote_action_from(&StreamControlSignal::Resume),
+            Some((StreamAction::Resume, None))
+        );
+    }
+
+    #[test]
+    fn remote_action_from_close() {
+        assert_eq!(
+            remote_action_from(&StreamControlSignal::Close),
+            Some((StreamAction::Close, None))
+        );
+    }
+
+    #[test]
+    fn remote_action_from_set_volume() {
+        assert_eq!(
+            remote_action_from(&StreamControlSignal::SetVolume(0.75)),
+            Some((StreamAction::SetVolume, Some(0.75)))
+        );
+    }
+
+    #[test]
+    fn remote_action_from_set_muted_is_none() {
+        assert_eq!(remote_action_from(&StreamControlSignal::SetMuted(true)), None);
+        assert_eq!(remote_action_from(&StreamControlSignal::SetMuted(false)), None);
     }
 
     #[test]

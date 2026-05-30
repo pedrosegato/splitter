@@ -12,6 +12,7 @@ import { useSnapshot } from "@/hooks/useSnapshot";
 import { usePeers } from "@/hooks/usePeers";
 import { useDisconnect } from "@/hooks/useConnection";
 import { useUiStore } from "@/stores/ui";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { StreamSnapshot } from "@/bindings";
 
 function useRemoteName(remotePeerId: string | undefined): string {
@@ -70,9 +71,10 @@ export function RoutingBoard() {
   const boardRef = useRef<HTMLDivElement | null>(null);
 
   const { data: identity } = useIdentity();
-  const { data: devices } = useDevices();
-  const { data: snapshots } = useSnapshot();
+  const { data: devices, isLoading: devicesLoading } = useDevices();
+  const { data: snapshots, isLoading: snapshotLoading } = useSnapshot();
   const disconnect = useDisconnect();
+  const isLoading = devicesLoading || snapshotLoading;
 
   const selectedStreamId = useUiStore((s) => s.selectedStreamId);
   const selectStream = useUiStore((s) => s.selectStream);
@@ -112,6 +114,24 @@ export function RoutingBoard() {
       setModalOpen(true);
     }
   }, [incoming]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="relative flex flex-1 items-center justify-center gap-[120px] bg-board">
+          {[0, 1].map((i) => (
+            <div key={i} className="w-[262px] bg-surface border border-line rounded-[3px] p-3 flex flex-col gap-2">
+              <Skeleton className="h-4 w-2/3 bg-line-2" />
+              <Skeleton className="h-3 w-full bg-line-2" />
+              <Skeleton className="h-3 w-4/5 bg-line-2" />
+              <Skeleton className="h-3 w-3/4 bg-line-2" />
+            </div>
+          ))}
+        </div>
+        <div className="flex-none min-h-[96px] bg-[#161618] border-t border-line" />
+      </div>
+    );
+  }
 
   return (
     <PortRegistryProvider>

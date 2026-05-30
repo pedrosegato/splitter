@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { commands, unwrap } from "@/lib/api";
 
 export const useSettings = () =>
@@ -15,6 +16,9 @@ export const useSetSetting = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
   });
 };
 
@@ -24,6 +28,9 @@ export const useSetAutostart = () => {
     mutationFn: (enabled: boolean) => unwrap(commands.setAutostart(enabled)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 };

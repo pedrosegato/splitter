@@ -8,6 +8,7 @@ import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { Settings } from "lucide-react";
+import { Toaster } from "@/components/ui/sonner";
 
 function StatusDot() {
   const { data: sessions } = useSnapshot();
@@ -77,6 +78,7 @@ export function App() {
         {activeTab === "routing" ? <RoutingBoard /> : <StatsView />}
       </main>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <Toaster position="bottom-right" />
     </div>
   );
 }

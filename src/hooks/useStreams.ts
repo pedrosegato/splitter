@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { commands, unwrap } from "@/lib/api";
 
 export const useOpenStream = () => {
@@ -32,6 +33,9 @@ export const useOpenStream = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
     },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
   });
 };
 
@@ -47,6 +51,9 @@ export const useCloseStream = () => {
     }) => unwrap(commands.closeStream(sessionId, streamId)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 };
@@ -70,6 +77,9 @@ export const useStreamControl = () => {
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 };

@@ -1,10 +1,16 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDevices } from "./useDevices";
 import { useSetSetting } from "./useSettings";
+import { useConnectPeer, useDisconnect } from "./useConnection";
 import { useIdentity } from "./useIdentity";
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+  Toaster: () => null,
+}));
 
 vi.mock("@/lib/api", () => ({
   commands: {
@@ -32,6 +38,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { commands, unwrap } from "@/lib/api";
+import { toast } from "sonner";
 
 const mockedCommands = commands as unknown as Record<string, ReturnType<typeof vi.fn>>;
 const mockedUnwrap = unwrap as unknown as ReturnType<typeof vi.fn>;
@@ -130,5 +137,42 @@ describe("useIdentity", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(identity);
     expect(mockedCommands.identity).toHaveBeenCalledOnce();
+  });
+});
+
+describe("toast.error on mutation failure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls toast.error when useConnectPeer fails", async () => {
+    mockedUnwrap.mockRejectedValue(new Error("connection refused"));
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useConnectPeer(), { wrapper });
+
+    act(() => {
+      result.current.mutate({ host: "localhost", port: 9000, peerId: null });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith("connection refused");
+  });
+
+  it("calls toast.success when useDisconnect succeeds", async () => {
+    mockedCommands.disconnect.mockResolvedValue({ status: "ok", data: null });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDisconnect(), { wrapper });
+
+    act(() => {
+      result.current.mutate({ sessionId: "sess-123" });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(toast.success).toHaveBeenCalledWith("Desconectado");
   });
 });

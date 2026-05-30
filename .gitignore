@@ -1,5 +1,6 @@
 # Planning/design docs — local only
 docs/
+!docs/RELEASING.md
 *.plan.md
 .claude/
 CLAUDE.md

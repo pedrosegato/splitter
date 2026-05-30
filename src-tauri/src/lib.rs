@@ -21,6 +21,7 @@ fn build() -> Builder<tauri::Wry> {
             commands::peers::pending_peers,
             commands::peers::connect_peer,
             commands::peers::accept_pending,
+            commands::peers::peer_devices,
             commands::peers::disconnect,
             commands::streams::snapshot,
             commands::streams::open_session,

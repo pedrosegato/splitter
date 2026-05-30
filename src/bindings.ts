@@ -69,6 +69,14 @@ async acceptPending(index: number) : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async peerDevices(peerId: string) : Promise<Result<DeviceDescriptor[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("peer_devices", { peerId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async disconnect(sessionId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("disconnect", { sessionId }) };
@@ -140,6 +148,7 @@ statsTick: "stats-tick"
 
 /** user-defined types **/
 
+export type DeviceDescriptor = { id: string; name: string; kind: string }
 export type DeviceInfo = { id: string; name: string; kind: DeviceKind; default_sample_rate: number; channels: number }
 export type DeviceKind = "Input" | "Output" | "SystemAudio"
 export type DiscoveredPeer = { peer_id: string; peer_name: string; host: string; port: number; version: string }

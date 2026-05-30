@@ -9,6 +9,7 @@ use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, Trus
 use splitter_core::settings::SettingsHandle;
 use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
 use splitter_core::net::signaling::connection::PeerConnectionHandle;
+use splitter_core::net::signaling::DeviceDescriptor;
 use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
 use crate::events::{PeersChanged, StatsTick, StreamStat};
 
@@ -32,6 +33,7 @@ pub struct AppCore {
     pub server: SignalingServerHandle,
     pub outgoing: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
     pub peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
+    pub remote_devices: Arc<RwLock<HashMap<Uuid, Vec<DeviceDescriptor>>>>,
     pub app: OnceLock<tauri::AppHandle>,
 }
 
@@ -66,6 +68,7 @@ impl AppCore {
             server,
             outgoing: Arc::new(RwLock::new(HashMap::new())),
             peers: Arc::new(RwLock::new(HashMap::new())),
+            remote_devices: Arc::new(RwLock::new(HashMap::new())),
             app: OnceLock::new(),
         }))
     }

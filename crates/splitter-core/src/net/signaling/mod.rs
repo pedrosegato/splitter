@@ -10,7 +10,7 @@ pub use connection::{
 };
 pub use heartbeat::build_heartbeat;
 pub use message::{
-    Capabilities, CodecParams, Endpoint, HeartbeatStreamStats, SignalingMessage, StreamAction,
-    PROTOCOL_VERSION,
+    Capabilities, CodecParams, DeviceDescriptor, Endpoint, HeartbeatStreamStats, SignalingMessage,
+    StreamAction, PROTOCOL_VERSION,
 };
 pub use server::{PendingPeer, SignalingServer, SignalingServerHandle};

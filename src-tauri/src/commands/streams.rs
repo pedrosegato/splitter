@@ -138,6 +138,9 @@ pub async fn open_session(
     })
     .await
     .map_err(|e| e.to_string())?;
+    tx.send(SignalingMessage::DeviceListRequest {})
+        .await
+        .ok();
     Ok(sid.to_string())
 }
 

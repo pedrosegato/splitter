@@ -3,7 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 use splitter_core::net::session::SessionState;
 use splitter_core::net::signaling::{
-    CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction,
+    CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, StreamAction,
 };
 use splitter_core::net::stream::StreamRoute;
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
@@ -225,6 +225,26 @@ pub fn spawn_acceptor(
                         }
                         let _ = core.sessions.close(&sid_uuid).await;
                         tracing::info!(peer = %peer_id, session = %sid_uuid, "remote closed session");
+                    }
+                    SignalingMessage::DeviceListRequest {} => {
+                        let devices = splitter_core::audio::devices::list_devices()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|d| DeviceDescriptor {
+                                id: d.id,
+                                name: d.name,
+                                kind: format!("{:?}", d.kind),
+                            })
+                            .collect();
+                        send_to_peer(
+                            &core,
+                            peer_id,
+                            SignalingMessage::DeviceListResponse { devices },
+                        )
+                        .await;
+                    }
+                    SignalingMessage::DeviceListResponse { devices } => {
+                        core.remote_devices.write().await.insert(peer_id, devices);
                     }
                     _ => {}
                 },

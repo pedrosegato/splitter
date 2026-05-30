@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::State;
 use splitter_core::net::discovery::DiscoveredPeer;
-use splitter_core::net::signaling::StreamAction;
+use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage, StreamAction};
 use crate::core::AppCore;
 use crate::dto::{IdentityDto, PendingPeerDto};
 
@@ -62,10 +62,36 @@ pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16
     if let Some(pid) = outcome.remote_peer_id {
         let events = outcome.handle.events.subscribe();
         let addr = outcome.handle.remote_addr;
+        let tx = outcome.handle.tx.clone();
         core.outgoing.write().await.insert(pid, outcome.handle);
         crate::acceptor::spawn_acceptor((*core).clone(), pid, events, addr);
+        tx.send(SignalingMessage::DeviceListRequest {}).await.ok();
     }
     Ok(outcome.accepted)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn peer_devices(
+    core: State<'_, Arc<AppCore>>,
+    peer_id: String,
+) -> Result<Vec<DeviceDescriptor>, String> {
+    let pid = uuid::Uuid::parse_str(&peer_id).map_err(|e| e.to_string())?;
+    let cached = core.remote_devices.read().await.get(&pid).cloned();
+    if cached.is_none() {
+        let g = core.server.connections.read().await;
+        let tx = g.get(&pid).map(|c| c.tx.clone());
+        drop(g);
+        let tx = if let Some(t) = tx {
+            Some(t)
+        } else {
+            core.outgoing.read().await.get(&pid).map(|c| c.tx.clone())
+        };
+        if let Some(tx) = tx {
+            tx.send(SignalingMessage::DeviceListRequest {}).await.ok();
+        }
+    }
+    Ok(cached.unwrap_or_default())
 }
 
 #[tauri::command]

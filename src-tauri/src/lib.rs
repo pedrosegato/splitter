@@ -6,7 +6,6 @@ mod dto;
 pub mod events;
 
 use specta_typescript::Typescript;
-use std::sync::Arc;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
 
@@ -45,8 +44,6 @@ pub fn run() {
         .export(Typescript::default(), "../src/bindings.ts")
         .expect("failed to export typescript bindings");
 
-    let signaling_port: u16 = 7000;
-
     tauri::Builder::default()
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
@@ -57,14 +54,18 @@ pub fn run() {
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             std::fs::create_dir_all(&config_dir).ok();
-            let core: Arc<AppCore> =
-                tauri::async_runtime::block_on(AppCore::init(&config_dir, signaling_port))
-                    .expect("AppCore init failed");
-            let _ = core.app.set(handle);
-            core.spawn_discovery(signaling_port).expect("discovery");
-            core.spawn_stats_emitter();
-            core.spawn_acceptor_supervisor();
-            app.manage(core);
+            match tauri::async_runtime::block_on(AppCore::init(&config_dir)) {
+                Ok(core) => {
+                    let _ = core.app.set(handle);
+                    core.spawn_discovery().expect("discovery");
+                    core.spawn_stats_emitter();
+                    core.spawn_acceptor_supervisor();
+                    app.manage(core);
+                }
+                Err(e) => {
+                    tracing::error!("AppCore init failed — app running in degraded mode: {e}");
+                }
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

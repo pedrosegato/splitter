@@ -34,6 +34,7 @@ pub fn apply_setting(s: &mut Settings, key: &str, val: &str) -> Result<(), Strin
             _ => return Err("trace|debug|info|warn|error".into()),
         },
         "metrics_enabled" => s.metrics_enabled = val.parse().map_err(|_| "expected bool")?,
+        "signaling_port" => s.signaling_port = val.parse().map_err(|_| "expected u16")?,
         other => return Err(format!("unknown setting: {other}")),
     }
     Ok(())
@@ -70,5 +71,13 @@ mod tests {
         assert!(matches!(s.jitter_mode, splitter_core::JitterMode::Fixed(40)));
         assert!(apply_setting(&mut s, "nope", "x").is_err());
         assert!(apply_setting(&mut s, "jitter_mode", "fixed:xx").is_err());
+    }
+
+    #[test]
+    fn apply_signaling_port_parses_u16() {
+        let mut s = Settings::default();
+        apply_setting(&mut s, "signaling_port", "8080").unwrap();
+        assert_eq!(s.signaling_port, 8080);
+        assert!(apply_setting(&mut s, "signaling_port", "not_a_number").is_err());
     }
 }

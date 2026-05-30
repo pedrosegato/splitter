@@ -10,6 +10,7 @@ mod tray;
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
+use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
 fn build() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
@@ -49,7 +50,42 @@ pub fn run() {
         .export(Typescript::default(), "../src/bindings.ts")
         .expect("failed to export typescript bindings");
 
+    let mute_shortcut: Shortcut = "CmdOrCtrl+Shift+M".parse().expect("valid mute shortcut");
+    let pause_shortcut: Shortcut = "CmdOrCtrl+Shift+P".parse().expect("valid pause shortcut");
+    let mute_id = mute_shortcut.id();
+    let pause_id = pause_shortcut.id();
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcut(mute_shortcut)
+                .expect("valid mute shortcut")
+                .with_shortcut(pause_shortcut)
+                .expect("valid pause shortcut")
+                .with_handler(move |app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    let id = shortcut.id();
+                    let core = app.state::<std::sync::Arc<AppCore>>().inner().clone();
+                    if id == mute_id {
+                        tauri::async_runtime::spawn(async move {
+                            commands::ops::mute_all_core(&core).await;
+                        });
+                    } else if id == pause_id {
+                        tauri::async_runtime::spawn(async move {
+                            commands::ops::pause_all_core(&core).await;
+                        });
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

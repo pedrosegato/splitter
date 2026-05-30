@@ -17,6 +17,17 @@ pub(crate) async fn mute_all_core(core: &AppCore) {
     }
 }
 
+pub(crate) async fn pause_all_core(core: &AppCore) {
+    let snap = core.sessions.snapshot().await;
+    for sess in &snap {
+        for stream in &sess.streams {
+            if let Err(e) = core.stream_registry.send_control(&sess.id, stream.id, StreamControlSignal::Pause).await {
+                tracing::warn!(sid = %sess.id, stream_id = stream.id, "pause_all: send_control error: {e}");
+            }
+        }
+    }
+}
+
 pub(crate) async fn disconnect_all_core(core: &AppCore) {
     let snap = core.sessions.snapshot().await;
     for sess in &snap {

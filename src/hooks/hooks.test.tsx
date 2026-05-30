@@ -4,9 +4,11 @@ import { type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDevices } from "./useDevices";
 import { useSetSetting } from "./useSettings";
+import { useIdentity } from "./useIdentity";
 
 vi.mock("@/lib/api", () => ({
   commands: {
+    identity: vi.fn(),
     listDevices: vi.fn(),
     settingsGet: vi.fn(),
     settingsSet: vi.fn(),
@@ -107,5 +109,26 @@ describe("useSetSetting mutation", () => {
 
     expect(mockedCommands.settingsSet).toHaveBeenCalledWith("auto_accept_trusted", "true");
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["settings"] });
+  });
+});
+
+describe("useIdentity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns local peer id and name", async () => {
+    const identity = { peer_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", peer_name: "Studio PC" };
+    mockedCommands.identity.mockResolvedValue({ status: "ok", data: identity });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useIdentity(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(identity);
+    expect(mockedCommands.identity).toHaveBeenCalledOnce();
   });
 });

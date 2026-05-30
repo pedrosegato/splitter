@@ -29,6 +29,14 @@ async settingsSet(key: string, value: string) : Promise<Result<Settings, string>
     else return { status: "error", error: e  as any };
 }
 },
+async identity() : Promise<Result<IdentityDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("identity") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async discoveredPeers() : Promise<Result<DiscoveredPeer[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("discovered_peers") };
@@ -136,6 +144,7 @@ export type DeviceInfo = { id: string; name: string; kind: DeviceKind; default_s
 export type DeviceKind = "Input" | "Output" | "SystemAudio"
 export type DiscoveredPeer = { peer_id: string; peer_name: string; host: string; port: number; version: string }
 export type FecMode = "auto" | "always" | "never"
+export type IdentityDto = { peer_id: string; peer_name: string }
 export type IncomingSession = { peer_id: string; peer_name: string }
 export type JitterMode = "auto" | "min" | { fixed: number }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"

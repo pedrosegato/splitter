@@ -3,6 +3,12 @@ use specta::Type;
 use splitter_core::net::signaling::server::PendingPeer;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct IdentityDto {
+    pub peer_id: String,
+    pub peer_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct PendingPeerDto {
     pub peer_id: String,
     pub peer_name: String,

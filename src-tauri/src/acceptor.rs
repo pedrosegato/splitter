@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 use splitter_core::net::session::SessionState;
@@ -24,6 +25,7 @@ pub fn spawn_acceptor(
     core: Arc<AppCore>,
     peer_id: Uuid,
     mut events: tokio::sync::broadcast::Receiver<PeerEvent>,
+    addr: SocketAddr,
 ) {
     let default_output = pick_default_output_device_id();
     let local_peer_id = core.identity.peer_id;
@@ -240,6 +242,7 @@ pub fn spawn_acceptor(
                         .filter(|s| s.remote_peer_id == peer_id)
                         .map(|s| s.id)
                         .collect();
+                    let had_active_session = !session_ids.is_empty();
                     for sid in &session_ids {
                         let stream_ids: Vec<u8> = core
                             .sessions
@@ -253,6 +256,9 @@ pub fn spawn_acceptor(
                             let _ = core.stream_registry.close(sid, stream_id).await;
                         }
                         let _ = core.sessions.close(sid).await;
+                    }
+                    if had_active_session {
+                        crate::reconnect::spawn_reconnect(core.clone(), peer_id, addr);
                     }
                     break;
                 }

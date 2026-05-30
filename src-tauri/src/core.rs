@@ -133,12 +133,12 @@ impl AppCore {
             loop {
                 match established.recv().await {
                     Ok(peer_id) => {
-                        let events = {
+                        let conn_info = {
                             let conns = core.server.connections.read().await;
-                            conns.get(&peer_id).map(|c| c.events.subscribe())
+                            conns.get(&peer_id).map(|c| (c.events.subscribe(), c.remote_addr))
                         };
-                        if let Some(events) = events {
-                            crate::acceptor::spawn_acceptor(core.clone(), peer_id, events);
+                        if let Some((events, addr)) = conn_info {
+                            crate::acceptor::spawn_acceptor(core.clone(), peer_id, events, addr);
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,

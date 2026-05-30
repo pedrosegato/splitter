@@ -4,6 +4,7 @@ pub use core::AppCore;
 mod commands;
 mod dto;
 pub mod events;
+mod reconnect;
 
 use specta_typescript::Typescript;
 use tauri::Manager;

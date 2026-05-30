@@ -17,3 +17,13 @@ export const useSetSetting = () => {
     },
   });
 };
+
+export const useSetAutostart = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => unwrap(commands.setAutostart(enabled)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+};

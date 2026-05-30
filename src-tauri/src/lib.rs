@@ -10,6 +10,7 @@ mod tray;
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
 fn build() -> Builder<tauri::Wry> {
@@ -34,6 +35,7 @@ fn build() -> Builder<tauri::Wry> {
             commands::ops::disconnect_all,
             commands::perms::permission_status,
             commands::perms::request_permission,
+            commands::system::set_autostart,
         ])
         .events(collect_events![
             events::PeersChanged,
@@ -58,6 +60,10 @@ pub fn run() {
     let pause_id = pause_shortcut.id();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
@@ -99,11 +105,24 @@ pub fn run() {
             std::fs::create_dir_all(&config_dir).ok();
             match tauri::async_runtime::block_on(AppCore::init(&config_dir)) {
                 Ok(core) => {
+                    let auto_start = tauri::async_runtime::block_on(async {
+                        core.settings.read().await.auto_start_with_system
+                    });
                     let _ = core.app.set(handle);
                     core.spawn_discovery().expect("discovery");
                     core.spawn_stats_emitter();
                     core.spawn_acceptor_supervisor();
                     app.manage(core);
+                    let manager = app.autolaunch();
+                    if auto_start {
+                        if let Err(e) = manager.enable() {
+                            tracing::warn!("autostart reconcile enable failed: {e}");
+                        }
+                    } else {
+                        if let Err(e) = manager.disable() {
+                            tracing::warn!("autostart reconcile disable failed: {e}");
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::error!("fatal: AppCore init failed: {e}");

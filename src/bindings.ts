@@ -146,6 +146,14 @@ async permissionStatus() : Promise<Permissions> {
 },
 async requestPermission(kind: string) : Promise<PermStatus> {
     return await TAURI_INVOKE("request_permission", { kind });
+},
+async setAutostart(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_autostart", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 

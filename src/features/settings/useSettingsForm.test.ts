@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 
 const mockMutate = vi.fn();
+const mockAutostartMutate = vi.fn();
 
 vi.mock("@/hooks/useSettings", () => ({
   useSettings: () => ({
@@ -26,6 +27,10 @@ vi.mock("@/hooks/useSettings", () => ({
   }),
   useSetSetting: () => ({
     mutate: mockMutate,
+    isSuccess: false,
+  }),
+  useSetAutostart: () => ({
+    mutate: mockAutostartMutate,
     isSuccess: false,
   }),
 }));

@@ -106,7 +106,7 @@ function parseJitterMode(mode: { fixed: number } | "auto" | "min"): { base: Jitt
 }
 
 export function SettingsDialog({ open, onOpenChange }: Props) {
-  const { settings, isLoading, isSaved, set } = useSettingsForm();
+  const { settings, isLoading, isSaved, set, setAutostart } = useSettingsForm();
   const { theme, setTheme } = useThemeStore();
 
   const [savedVisible, setSavedVisible] = useState(false);
@@ -273,7 +273,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               id="auto-start-system"
               size="sm"
               checked={settings.auto_start_with_system}
-              onCheckedChange={(checked) => set("auto_start_with_system", checked)}
+              onCheckedChange={(checked) => setAutostart(checked)}
             />
           </Row>
 

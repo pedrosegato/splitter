@@ -6,6 +6,7 @@ import { useThemeStore, applyTheme } from "@/stores/theme";
 import type { Settings } from "@/bindings";
 
 const mockSet = vi.fn();
+const mockSetAutostart = vi.fn();
 
 const defaultSettings: Settings = {
   auto_accept_trusted: false,
@@ -29,6 +30,7 @@ vi.mock("./useSettingsForm", () => ({
     isLoading: false,
     isSaved: false,
     set: mockSet,
+    setAutostart: mockSetAutostart,
   }),
 }));
 
@@ -122,7 +124,7 @@ describe("SettingsDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("auto_start_with_system switch calls set with true when toggled", () => {
+  it("auto_start_with_system switch calls setAutostart with true when toggled", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />, {
       wrapper: makeWrapper(),
     });
@@ -134,7 +136,8 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(switchEl);
 
-    expect(mockSet).toHaveBeenCalledWith("auto_start_with_system", true);
+    expect(mockSetAutostart).toHaveBeenCalledWith(true);
+    expect(mockSet).not.toHaveBeenCalledWith("auto_start_with_system", expect.anything());
   });
 
   it("metrics_enabled switch calls set with true when toggled", () => {

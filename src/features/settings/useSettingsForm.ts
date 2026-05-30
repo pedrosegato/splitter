@@ -1,4 +1,4 @@
-import { useSettings, useSetSetting } from "@/hooks/useSettings";
+import { useSettings, useSetSetting, useSetAutostart } from "@/hooks/useSettings";
 import type { JitterMode } from "@/bindings";
 
 function toBackendString(key: string, value: string | number | boolean): string {
@@ -15,6 +15,7 @@ function jitterModeToBackend(mode: JitterMode): string {
 export function useSettingsForm() {
   const query = useSettings();
   const mutation = useSetSetting();
+  const autostartMutation = useSetAutostart();
 
   function set(key: string, value: string | number | boolean) {
     let stringValue: string;
@@ -28,10 +29,15 @@ export function useSettingsForm() {
     mutation.mutate({ key, value: stringValue });
   }
 
+  function setAutostart(enabled: boolean) {
+    autostartMutation.mutate(enabled);
+  }
+
   return {
     settings: query.data,
     isLoading: query.isLoading,
-    isSaved: mutation.isSuccess,
+    isSaved: mutation.isSuccess || autostartMutation.isSuccess,
     set,
+    setAutostart,
   };
 }

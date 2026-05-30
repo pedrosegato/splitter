@@ -3,14 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { StreamStat, SessionSnapshot } from "@/bindings";
+import type { StreamHistory } from "@/stores/ui";
 import { aggregate } from "./aggregate";
 
 const mockUseUiStoreSelector = vi.fn();
 const mockUseSnapshot = vi.fn();
 
 vi.mock("@/stores/ui", () => ({
-  useUiStore: (selector: (s: { stats: StreamStat[] }) => unknown) =>
-    mockUseUiStoreSelector(selector),
+  useUiStore: (
+    selector: (s: { stats: StreamStat[]; statsHistory: Record<number, StreamHistory> }) => unknown,
+  ) => mockUseUiStoreSelector(selector),
 }));
 
 vi.mock("@/hooks/useSnapshot", () => ({
@@ -79,10 +81,19 @@ function makeWrapper() {
   );
 }
 
-function setupMocks(stats: StreamStat[], sessions: SessionSnapshot[]) {
+const baseStatsHistory: Record<number, StreamHistory> = {
+  1: { rtt: [10, 12, 8, 11, 10], loss: [0.5, 0.3, 0.7, 0.5, 0.4], kbps: [150, 160, 155, 148, 150] },
+  2: { rtt: [30, 28, 32, 29, 31], loss: [1.5, 1.3, 1.7, 1.4, 1.6], kbps: [280, 290, 275, 285, 280] },
+};
+
+function setupMocks(
+  stats: StreamStat[],
+  sessions: SessionSnapshot[],
+  statsHistory: Record<number, StreamHistory> = {},
+) {
   mockUseUiStoreSelector.mockImplementation(
-    (selector: (s: { stats: StreamStat[] }) => unknown) =>
-      selector({ stats }),
+    (selector: (s: { stats: StreamStat[]; statsHistory: Record<number, StreamHistory> }) => unknown) =>
+      selector({ stats, statsHistory }),
   );
   mockUseSnapshot.mockReturnValue({ data: sessions });
 }
@@ -120,57 +131,101 @@ describe("aggregate", () => {
 
 describe("StatsView", () => {
   it("renders aggregate card for streams ativos with count from active session", () => {
-    setupMocks(twoStats, twoStreamSessions);
+    setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("streams ativos")).toBeDefined();
     expect(getByText("2")).toBeDefined();
   });
 
   it("renders latência média card with avg rtt rounded", () => {
-    setupMocks(twoStats, twoStreamSessions);
+    setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("latência média")).toBeDefined();
     expect(getByText("20")).toBeDefined();
   });
 
   it("renders perda média card with one decimal", () => {
-    setupMocks(twoStats, twoStreamSessions);
+    setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("perda média")).toBeDefined();
     expect(getByText("1.0")).toBeDefined();
   });
 
   it("renders banda total card with sum of all kbps", () => {
-    setupMocks(twoStats, twoStreamSessions);
+    setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("banda total")).toBeDefined();
     expect(getByText("430")).toBeDefined();
   });
 
   it("renders sample rate card with static 48 kHz", () => {
-    setupMocks(twoStats, twoStreamSessions);
+    setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("sample rate")).toBeDefined();
     expect(getByText("48")).toBeDefined();
   });
 
   it("renders one row per stat entry with source_device → sink_device label", () => {
-    setupMocks(twoStats, twoStreamSessions);
+    setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("MacBook Mic → Studio Monitors")).toBeDefined();
     expect(getByText("Sistema → Fones")).toBeDefined();
   });
 
   it("shows fallback label when stream snapshot is not found", () => {
-    setupMocks(twoStats, []);
+    setupMocks(twoStats, [], baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("stream 1")).toBeDefined();
     expect(getByText("stream 2")).toBeDefined();
   });
 
   it("shows sem streams ativos when stats array is empty", () => {
-    setupMocks([], twoStreamSessions);
+    setupMocks([], twoStreamSessions, {});
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("sem streams ativos")).toBeDefined();
+  });
+
+  it("renders three sparklines per stream row when history is present", () => {
+    const singleStat: StreamStat[] = [twoStats[0]];
+    setupMocks(singleStat, twoStreamSessions, baseStatsHistory);
+    const { container } = render(<StatsView />, { wrapper: makeWrapper() });
+
+    const rttSparkline = container.querySelector("[data-testid='sparkline-rtt-1']");
+    const lossSparkline = container.querySelector("[data-testid='sparkline-loss-1']");
+    const kbpsSparkline = container.querySelector("[data-testid='sparkline-kbps-1']");
+
+    expect(rttSparkline).not.toBeNull();
+    expect(lossSparkline).not.toBeNull();
+    expect(kbpsSparkline).not.toBeNull();
+
+    expect(rttSparkline!.querySelector("svg")).not.toBeNull();
+    expect(lossSparkline!.querySelector("svg")).not.toBeNull();
+    expect(kbpsSparkline!.querySelector("svg")).not.toBeNull();
+  });
+
+  it("renders sparklines with polylines when history series has values", () => {
+    const singleStat: StreamStat[] = [twoStats[0]];
+    setupMocks(singleStat, twoStreamSessions, baseStatsHistory);
+    const { container } = render(<StatsView />, { wrapper: makeWrapper() });
+
+    const rttPolyline = container.querySelector("[data-testid='sparkline-rtt-1'] polyline");
+    const lossPolyline = container.querySelector("[data-testid='sparkline-loss-1'] polyline");
+    const kbpsPolyline = container.querySelector("[data-testid='sparkline-kbps-1'] polyline");
+
+    expect(rttPolyline).not.toBeNull();
+    expect(lossPolyline).not.toBeNull();
+    expect(kbpsPolyline).not.toBeNull();
+  });
+
+  it("renders empty sparklines when no history for a stream", () => {
+    const singleStat: StreamStat[] = [twoStats[0]];
+    setupMocks(singleStat, twoStreamSessions, {});
+    const { container } = render(<StatsView />, { wrapper: makeWrapper() });
+
+    const rttSparkline = container.querySelector("[data-testid='sparkline-rtt-1'] svg");
+    expect(rttSparkline).not.toBeNull();
+
+    const rttPolyline = container.querySelector("[data-testid='sparkline-rtt-1'] polyline");
+    expect(rttPolyline).toBeNull();
   });
 });

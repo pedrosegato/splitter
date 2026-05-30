@@ -1,7 +1,9 @@
 import type { StreamStat, StreamSnapshot } from "@/bindings";
 import { useUiStore } from "@/stores/ui";
+import type { StreamHistory } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { streamColor } from "@/features/routing/useWireGeometry";
+import { Sparkline } from "@/components/Sparkline";
 import { aggregate } from "./aggregate";
 
 function MetricCard({
@@ -35,14 +37,20 @@ function MetricCard({
 function StreamRow({
   stat,
   stream,
+  history,
 }: {
   stat: StreamStat;
   stream: StreamSnapshot | undefined;
+  history: StreamHistory | undefined;
 }) {
   const color = streamColor(stat.stream_id);
   const label = stream
     ? `${stream.source_device} → ${stream.sink_device}`
     : `stream ${stat.stream_id}`;
+
+  const rttHistory = history?.rtt ?? [];
+  const lossHistory = history?.loss ?? [];
+  const kbpsHistory = history?.kbps ?? [];
 
   return (
     <div className="flex items-center gap-3 py-2.5 px-4 border-b border-line last:border-b-0">
@@ -54,17 +62,26 @@ function StreamRow({
         <div className="text-xs text-ink truncate">{label}</div>
       </div>
       <div className="flex items-center gap-4 text-xs tabular-nums text-ink-2 flex-none">
-        <span>
+        <span className="flex items-center gap-1.5">
           <span className="text-ink">{stat.rtt_ms}</span>
-          <span className="text-ink-3 ml-0.5">ms</span>
+          <span className="text-ink-3">ms</span>
+          <span data-testid={`sparkline-rtt-${stat.stream_id}`}>
+            <Sparkline values={rttHistory} width={60} height={20} color={color} />
+          </span>
         </span>
-        <span>
+        <span className="flex items-center gap-1.5">
           <span className="text-ink">{stat.loss_pct.toFixed(1)}</span>
-          <span className="text-ink-3 ml-0.5">%</span>
+          <span className="text-ink-3">%</span>
+          <span data-testid={`sparkline-loss-${stat.stream_id}`}>
+            <Sparkline values={lossHistory} width={60} height={20} color="var(--color-ink-3)" />
+          </span>
         </span>
-        <span>
+        <span className="flex items-center gap-1.5">
           <span className="text-ink">{stat.kbps_sent + stat.kbps_received}</span>
-          <span className="text-ink-3 ml-0.5">kbps</span>
+          <span className="text-ink-3">kbps</span>
+          <span data-testid={`sparkline-kbps-${stat.stream_id}`}>
+            <Sparkline values={kbpsHistory} width={60} height={20} color={color} />
+          </span>
         </span>
       </div>
     </div>
@@ -73,6 +90,7 @@ function StreamRow({
 
 export function StatsView() {
   const stats = useUiStore((s) => s.stats);
+  const statsHistory = useUiStore((s) => s.statsHistory);
   const { data: sessions } = useSnapshot();
 
   const activeSession = sessions?.find((s) => s.state === "active");
@@ -132,6 +150,7 @@ export function StatsView() {
                 key={`${stat.session_id}-${stat.stream_id}`}
                 stat={stat}
                 stream={stream}
+                history={statsHistory[stat.stream_id]}
               />
             );
           })

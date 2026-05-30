@@ -1,0 +1,26 @@
+---
+source: crates/splitter-cli/tests/help_snapshots.rs
+expression: output
+---
+Browse for Splitter peers on the local network via mDNS
+(_splitter._tcp.local.). Prints discovered peers with their peer ID, display name,
+address, and version, then exits after the scan window.
+
+This is a one-shot query and does not require a running daemon. Use the `daemon` REPL
+`peers` command for continuous discovery with automatic reconnection.
+
+Examples:
+splitter-cli discover
+splitter-cli discover --duration-secs 10
+
+Usage: splitter-cli discover [OPTIONS]
+
+Options:
+      --duration-secs <DURATION_SECS>
+          [default: 5]
+
+      --signaling-port <SIGNALING_PORT>
+          [default: 7000]
+
+  -h, --help
+          Print help (see a summary with '-h')

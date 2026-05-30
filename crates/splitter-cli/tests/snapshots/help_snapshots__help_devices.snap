@@ -1,0 +1,18 @@
+---
+source: crates/splitter-cli/tests/help_snapshots.rs
+expression: output
+---
+Enumerate all audio input and output devices available on the host
+and print them to stdout with their index and display name.
+
+Use the reported indices or names as arguments to --input / --output / --from / --to
+in other subcommands.
+
+Example:
+splitter-cli devices
+
+Usage: splitter-cli devices
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

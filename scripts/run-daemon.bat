@@ -13,10 +13,10 @@ if "%2"=="" (
     set PORT=%2
 )
 
-set IDENTITY_DIR=%USERPROFILE%\.audiomirror\%PEER_NAME%
+set IDENTITY_DIR=%USERPROFILE%\.splitter\%PEER_NAME%
 set CMAKE_POLICY_VERSION_MINIMUM=3.5
 
-echo === AudioMirror daemon launcher ===
+echo === Splitter daemon launcher ===
 echo peer_name: %PEER_NAME%
 echo port:      %PORT%
 echo identity:  %IDENTITY_DIR%
@@ -29,7 +29,7 @@ git pull
 
 echo.
 echo [2/3] cargo build --release...
-cargo build -p audiomirror-cli --release
+cargo build -p splitter-cli --release
 if errorlevel 1 (
     echo build failed.
     pause
@@ -38,12 +38,12 @@ if errorlevel 1 (
 
 echo.
 echo === Local audio devices ===
-.\target\release\audiomirror-cli.exe devices
+.\target\release\splitter-cli.exe devices
 echo.
 
 echo [3/3] launching daemon...
 echo press Ctrl+C inside daemon to graceful shutdown.
 echo.
-.\target\release\audiomirror-cli.exe daemon --signaling-port %PORT% --peer-name %PEER_NAME% --identity-dir "%IDENTITY_DIR%"
+.\target\release\splitter-cli.exe daemon --signaling-port %PORT% --peer-name %PEER_NAME% --identity-dir "%IDENTITY_DIR%"
 
 endlocal

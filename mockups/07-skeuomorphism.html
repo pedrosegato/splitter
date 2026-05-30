@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1024">
+<title>Splitter — Skeuomorphism / Mixer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background: #1a1a2e;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Main mixer panel */
+  .window {
+    width: 1024px;
+    height: 640px;
+    background: linear-gradient(180deg, #1c2535 0%, #141b28 50%, #0f1520 100%);
+    border-radius: 12px;
+    border: 2px solid #2a3548;
+    box-shadow:
+      0 0 0 1px #0a0f1a,
+      0 4px 0 #0a0f1a,
+      0 24px 80px rgba(0,0,0,0.7),
+      inset 0 1px 0 rgba(255,255,255,0.04);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Top panel — steel brushed look */
+  .titlebar {
+    height: 46px;
+    background: linear-gradient(180deg, #2a3548 0%, #1e2a3d 100%);
+    border-bottom: 1px solid #0f1520;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 0 #0f1520;
+    display: flex; align-items: center;
+    padding: 0 18px; gap: 14px;
+    flex-shrink: 0;
+  }
+
+  .traffic-lights { display: flex; gap: 7px; align-items: center; }
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  .dot-red    { background: radial-gradient(circle at 35% 30%, #ff7272, #c41c1c); }
+  .dot-yellow { background: radial-gradient(circle at 35% 30%, #ffe266, #b87a00); }
+  .dot-green  { background: radial-gradient(circle at 35% 30%, #7dff8a, #00a020); }
+
+  .app-title {
+    font-size: 12px; font-weight: 700; color: #e8d5a0;
+    letter-spacing: 0.12em; text-transform: uppercase; flex: 1; text-align: center;
+    text-shadow: 0 0 8px rgba(232,213,160,0.4);
+  }
+
+  .peer-label {
+    font-size: 10px; font-weight: 600; color: #7a9ab8;
+    background: rgba(0,0,0,0.3); padding: 3px 10px; border-radius: 3px;
+    border: 1px solid #2a3548;
+  }
+
+  /* LED status */
+  .led-status { display: flex; align-items: center; gap: 6px; }
+  .led {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #00FF66;
+    box-shadow: 0 0 6px #00FF66, 0 0 12px rgba(0,255,102,0.4);
+    animation: led-pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes led-pulse {
+    0%, 100% { box-shadow: 0 0 6px #00FF66, 0 0 12px rgba(0,255,102,0.4); }
+    50%       { box-shadow: 0 0 10px #00FF66, 0 0 24px rgba(0,255,102,0.7), 0 0 36px rgba(0,255,102,0.2); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .led { animation: none; }
+    .cta-sku { transition: none; }
+    .vu-bar  { animation: none; }
+  }
+  .led-label { font-size: 9px; font-weight: 700; color: #00FF66; letter-spacing: 0.1em; }
+
+  /* Main area */
+  .main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 220px 1fr 240px;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  /* Panel sections with inset look */
+  .mixer-section {
+    border-right: 1px solid #0f1520;
+    padding: 14px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #141b28 0%, #0f1520 100%);
+  }
+  .mixer-section:last-child { border-right: none; }
+
+  .section-plate {
+    background: linear-gradient(180deg, #1e2a3d 0%, #192030 100%);
+    border: 1px solid #2a3548;
+    border-radius: 6px;
+    padding: 10px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 2px 4px rgba(0,0,0,0.3);
+    margin-bottom: 10px;
+    flex-shrink: 0;
+  }
+
+  .plate-label {
+    font-size: 8px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.15em;
+    color: #4a6180; margin-bottom: 8px;
+    text-align: center;
+    border-bottom: 1px solid #1a2535; padding-bottom: 6px;
+  }
+
+  /* Device channel strips */
+  .ch-strip {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 4px; margin-bottom: 4px;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid #1a2535;
+    cursor: default;
+    transition: border-color 0.15s;
+  }
+  .ch-strip:hover { border-color: #2a3a50; }
+
+  .ch-id {
+    font-size: 9px; font-weight: 700; font-family: monospace;
+    padding: 2px 5px; border-radius: 3px; flex-shrink: 0;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .ch-in  { background: rgba(0,180,120,0.2); color: #00FF66; border: 1px solid rgba(0,255,102,0.2); }
+  .ch-out { background: rgba(50,120,220,0.2); color: #6ab0ff; border: 1px solid rgba(106,176,255,0.2); }
+
+  .ch-info { flex: 1; min-width: 0; }
+  .ch-name { font-size: 10.5px; font-weight: 500; color: #c8d8e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ch-spec { font-size: 9px; color: #4a6180; margin-top: 1px; }
+
+  /* VU meter mini */
+  .vu-mini {
+    width: 6px; height: 28px; background: #0a0f1a;
+    border: 1px solid #1a2535; border-radius: 2px;
+    overflow: hidden; display: flex; flex-direction: column-reverse;
+  }
+  .vu-bar {
+    width: 100%; background: #00FF66; border-radius: 1px;
+    animation: vu-dance 1.2s ease-in-out infinite alternate;
+  }
+  .vu-bar-2 { animation-duration: 0.9s; animation-delay: 0.1s; }
+  @keyframes vu-dance {
+    0%   { height: 15%; background: #00FF66; }
+    60%  { height: 65%; background: #ffe066; }
+    100% { height: 80%; background: #ff6060; }
+  }
+
+  /* Streams section */
+  .stream-plate {
+    background: linear-gradient(180deg, #1a2535 0%, #141b28 100%);
+    border: 1px solid #2a3548; border-radius: 6px;
+    padding: 12px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    margin-bottom: 8px;
+  }
+  .sp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .sp-id {
+    font-size: 9px; font-weight: 700; color: #00FF66;
+    background: rgba(0,255,102,0.1); border: 1px solid rgba(0,255,102,0.2);
+    padding: 2px 6px; border-radius: 3px;
+    box-shadow: 0 0 4px rgba(0,255,102,0.2);
+  }
+  .sp-route { font-size: 10.5px; font-weight: 500; color: #c8d8e8; line-height: 1.4; flex: 1; }
+  .sp-route em { color: #6ab0ff; font-style: normal; }
+
+  .sp-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .sp-s { font-size: 9.5px; }
+  .sp-s span { color: #4a6180; }
+  .sp-s strong { color: #e8d5a0; font-weight: 700; }
+  .sp-warn span  { color: #4a6180; }
+  .sp-warn strong { color: #ff6060; font-weight: 700; }
+
+  /* VU meter full width */
+  .vu-full {
+    height: 8px;
+    background: #0a0f1a; border: 1px solid #1a2535; border-radius: 3px; overflow: hidden;
+    position: relative;
+  }
+  .vu-fill {
+    height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, #00FF66 0%, #ffe066 70%, #ff6060 100%);
+    animation: vu-sweep 2s ease-in-out infinite alternate;
+  }
+  @keyframes vu-sweep {
+    from { width: 42%; }
+    to   { width: 72%; }
+  }
+
+  /* Right side — peers + knobs panel */
+  .right-mixer { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+  .knob-panel {
+    background: linear-gradient(180deg, #1e2a3d 0%, #192030 100%);
+    border: 1px solid #2a3548; border-radius: 6px;
+    padding: 12px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+
+  .peer-entry-sku {
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .pe-row { display: flex; align-items: center; gap: 8px; }
+  .pe-avatar {
+    width: 28px; height: 28px; border-radius: 4px;
+    background: linear-gradient(135deg, #1e3a5f, #0f2040);
+    border: 1px solid #2a4060; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #6ab0ff; flex-shrink: 0;
+  }
+  .pe-name { font-size: 11px; font-weight: 600; color: #c8d8e8; }
+  .pe-ip   { font-size: 9px; color: #4a6180; font-family: monospace; }
+
+  .pe-tags { display: flex; gap: 5px; }
+  .pe-tag {
+    font-size: 8.5px; font-weight: 700; padding: 2px 7px; border-radius: 3px;
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .pte-trusted { background: rgba(0,255,102,0.1); color: #00FF66; border: 1px solid rgba(0,255,102,0.2); }
+  .pte-rtt     { background: rgba(106,176,255,0.1); color: #6ab0ff; border: 1px solid rgba(106,176,255,0.2); }
+  .pte-ver     { background: rgba(255,255,255,0.05); color: #4a6180; border: 1px solid #1a2535; }
+
+  /* Knobs */
+  .knobs-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 6px; }
+  .knob-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .knob {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: radial-gradient(circle at 38% 35%, #3a4a60, #1a2535);
+    border: 2px solid #2a3548;
+    box-shadow:
+      0 4px 8px rgba(0,0,0,0.5),
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      0 0 0 1px #0a0f1a;
+    position: relative;
+    cursor: pointer;
+    transition: box-shadow 0.15s;
+  }
+  .knob:hover { box-shadow: 0 4px 10px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 1px #0a0f1a, 0 0 8px rgba(0,255,102,0.15); }
+  .knob::after {
+    content: '';
+    position: absolute; top: 6px; left: 50%;
+    transform: translateX(-50%);
+    width: 3px; height: 8px; border-radius: 2px;
+    background: #00FF66;
+    box-shadow: 0 0 4px rgba(0,255,102,0.6);
+  }
+  .knob-label { font-size: 8px; font-weight: 600; color: #4a6180; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* Fader */
+  .fader-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .fader-track {
+    width: 14px; height: 60px; border-radius: 3px;
+    background: #0a0f1a; border: 1px solid #1a2535;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    position: relative;
+  }
+  .fader-cap {
+    position: absolute; left: -5px; top: 18px;
+    width: 24px; height: 16px; border-radius: 3px;
+    background: linear-gradient(180deg, #3a4a60 0%, #2a3548 100%);
+    border: 1px solid #4a5a70;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+  .fader-cap::after {
+    content: '';
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 12px; height: 1px; background: rgba(255,255,255,0.15);
+    box-shadow: 0 -2px 0 rgba(255,255,255,0.05), 0 2px 0 rgba(255,255,255,0.05);
+  }
+  .fader-label { font-size: 8px; font-weight: 600; color: #4a6180; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .knobs-faders { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+
+  /* Footer */
+  .footer {
+    height: 48px;
+    background: linear-gradient(180deg, #1e2a3d 0%, #141b28 100%);
+    border-top: 1px solid #0f1520;
+    box-shadow: 0 -1px 0 rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.02);
+    display: flex; align-items: center;
+    padding: 0 18px; gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .cta-sku {
+    background: linear-gradient(180deg, #1a7a40 0%, #0f5028 100%);
+    color: #00FF66; border: 1px solid #00cc52;
+    border-radius: 4px; padding: 7px 16px;
+    font-size: 11px; font-weight: 700; font-family: inherit;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4), 0 0 6px rgba(0,255,102,0.1);
+    cursor: pointer;
+    transition: transform 0.12s, box-shadow 0.12s;
+  }
+  .cta-sku:hover  { transform: scale(1.02); box-shadow: 0 2px 6px rgba(0,0,0,0.4), 0 0 12px rgba(0,255,102,0.2); }
+  .cta-sku:active { transform: scale(0.98); }
+
+  .sec-sku {
+    background: rgba(0,0,0,0.2); color: #7a9ab8;
+    border: 1px solid #2a3548; border-radius: 4px;
+    padding: 6px 12px; font-size: 10px; font-weight: 600; font-family: inherit;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    cursor: pointer; transition: color 0.12s, border-color 0.12s;
+  }
+  .sec-sku:hover { color: #c8d8e8; border-color: #3a4a60; }
+
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic-lights">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-yellow"></div>
+      <div class="dot dot-green"></div>
+    </div>
+    <div class="app-title">Splitter</div>
+    <div class="peer-label">alice</div>
+    <div class="led-status"><div class="led"></div><span class="led-label">LINK</span></div>
+  </div>
+
+  <div class="main">
+    <!-- Channel strips -->
+    <div class="mixer-section">
+      <div class="plate-label">Input / Output Channels</div>
+      <div class="ch-strip">
+        <span class="ch-id ch-in">IN:0</span>
+        <div class="ch-info">
+          <div class="ch-name">BlackHole 2ch</div>
+          <div class="ch-spec">2ch · 48kHz</div>
+        </div>
+        <div class="vu-mini"><div class="vu-bar vu-bar-1" style="height:65%"></div></div>
+      </div>
+      <div class="ch-strip">
+        <span class="ch-id ch-in">IN:1</span>
+        <div class="ch-info">
+          <div class="ch-name">Microfone (MacBook Air)</div>
+          <div class="ch-spec">1ch · 48kHz</div>
+        </div>
+        <div class="vu-mini"><div class="vu-bar vu-bar-2" style="height:45%"></div></div>
+      </div>
+      <div class="ch-strip">
+        <span class="ch-id ch-out">OUT:0</span>
+        <div class="ch-info">
+          <div class="ch-name">MCHOSE V9 PRO</div>
+          <div class="ch-spec">2ch · 48kHz</div>
+        </div>
+        <div class="vu-mini"><div class="vu-bar" style="height:70%"></div></div>
+      </div>
+      <div class="ch-strip">
+        <span class="ch-id ch-out">OUT:1</span>
+        <div class="ch-info">
+          <div class="ch-name">MacBook Speakers</div>
+          <div class="ch-spec">2ch · 48kHz</div>
+        </div>
+        <div class="vu-mini"><div class="vu-bar" style="height:50%"></div></div>
+      </div>
+    </div>
+
+    <!-- Streams -->
+    <div class="mixer-section">
+      <div class="plate-label">Active Stream Patches</div>
+      <div class="stream-plate">
+        <div class="sp-head">
+          <span class="sp-id">CH 00</span>
+          <div class="sp-route">BlackHole 2ch → <em>windows</em>:MCHOSE V9 PRO</div>
+        </div>
+        <div class="sp-stats">
+          <div class="sp-s"><strong>64</strong><span> kbps</span></div>
+          <div class="sp-s"><strong>0</strong><span> lost</span></div>
+          <div class="sp-s"><strong>12ms</strong><span> RTT</span></div>
+        </div>
+        <div class="vu-full"><div class="vu-fill" style="width:55%"></div></div>
+      </div>
+      <div class="stream-plate">
+        <div class="sp-head">
+          <span class="sp-id">CH 01</span>
+          <div class="sp-route"><em>windows</em>:Microfone → MacBook Speakers</div>
+        </div>
+        <div class="sp-stats">
+          <div class="sp-s"><strong>64</strong><span> kbps</span></div>
+          <div class="sp-warn"><strong>3</strong><span> lost</span></div>
+          <div class="sp-s"><strong>14ms</strong><span> RTT</span></div>
+        </div>
+        <div class="vu-full"><div class="vu-fill" style="width:68%"></div></div>
+      </div>
+    </div>
+
+    <!-- Right: Peers + knobs -->
+    <div class="right-mixer">
+      <div class="knob-panel">
+        <div class="plate-label">Remote Peer</div>
+        <div class="peer-entry-sku">
+          <div class="pe-row">
+            <div class="pe-avatar">W</div>
+            <div>
+              <div class="pe-name">windows</div>
+              <div class="pe-ip">192.168.1.68:7001</div>
+            </div>
+          </div>
+          <div class="pe-tags">
+            <span class="pe-tag pte-trusted">trusted</span>
+            <span class="pe-tag pte-rtt">12ms</span>
+            <span class="pe-tag pte-ver">v0.1.0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="knob-panel">
+        <div class="plate-label">Mix Controls</div>
+        <div class="knobs-faders">
+          <div class="knob-wrap">
+            <div class="knob" style="--rot:45deg"></div>
+            <div class="knob-label">Gain</div>
+          </div>
+          <div class="knob-wrap">
+            <div class="knob" style="--rot:-30deg"></div>
+            <div class="knob-label">Pan</div>
+          </div>
+          <div class="fader-wrap">
+            <div class="fader-track"><div class="fader-cap"></div></div>
+            <div class="fader-label">Vol</div>
+          </div>
+          <div class="fader-wrap">
+            <div class="fader-track"><div class="fader-cap" style="top:30px"></div></div>
+            <div class="fader-label">Mon</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="cta-sku">+ open stream</button>
+    <div class="spacer"></div>
+    <button class="sec-sku">settings</button>
+    <button class="sec-sku">quit</button>
+  </div>
+</div>
+</body>
+</html>

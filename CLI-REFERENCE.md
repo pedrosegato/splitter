@@ -1,6 +1,6 @@
-# AudioMirror CLI Reference
+# Splitter CLI Reference
 
-Command reference for `audiomirror-cli`. All subcommands exit with **0** on
+Command reference for `splitter-cli`. All subcommands exit with **0** on
 success and **non-zero** on error unless noted otherwise.
 
 ---
@@ -25,7 +25,7 @@ success and **non-zero** on error unless noted otherwise.
 
 ## devices
 
-**Synopsis:** `audiomirror-cli devices`
+**Synopsis:** `splitter-cli devices`
 
 **Description:**
 Enumerate all audio input and output devices available on the host and print
@@ -38,7 +38,7 @@ subcommands.
 **Example:**
 
 ```sh
-audiomirror-cli devices
+splitter-cli devices
 ```
 
 **Exit codes:**
@@ -54,7 +54,7 @@ audiomirror-cli devices
 
 ## send
 
-**Synopsis:** `audiomirror-cli send --input <device-id> --addr <host:port> [flags]`
+**Synopsis:** `splitter-cli send --input <device-id> --addr <host:port> [flags]`
 
 **Description:**
 Capture audio from a local input device, encode it with Opus, and transmit UDP
@@ -69,7 +69,7 @@ Use `--source system` to capture desktop/loopback audio:
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--input` | string | *(required)* | Device ID from `audiomirror-cli devices` |
+| `--input` | string | *(required)* | Device ID from `splitter-cli devices` |
 | `--addr` | string | *(required)* | Destination `host:port`, e.g. `192.168.1.50:5004` |
 | `--stream-id` | u8 | `0` | Stream identifier embedded in UDP packet header |
 | `--bitrate` | i32 | `64000` | Opus target bitrate in bits/s |
@@ -81,10 +81,10 @@ Use `--source system` to capture desktop/loopback audio:
 
 ```sh
 # Send microphone to a remote host
-audiomirror-cli send --input "Built-in Microphone" --addr 192.168.1.50:5004
+splitter-cli send --input "Built-in Microphone" --addr 192.168.1.50:5004
 
 # Send system audio (BlackHole) with FEC always on
-audiomirror-cli send --input "BlackHole 2ch" --addr 10.0.0.2:5004 \
+splitter-cli send --input "BlackHole 2ch" --addr 10.0.0.2:5004 \
     --source system --fec-mode always --bitrate 96000
 ```
 
@@ -101,7 +101,7 @@ audiomirror-cli send --input "BlackHole 2ch" --addr 10.0.0.2:5004 \
 
 ## recv
 
-**Synopsis:** `audiomirror-cli recv --output <device-id> --bind <addr:port> [flags]`
+**Synopsis:** `splitter-cli recv --output <device-id> --bind <addr:port> [flags]`
 
 **Description:**
 Listen for UDP Opus packets on the given bind address and play decoded audio to
@@ -112,7 +112,7 @@ configurable jitter buffer for packet reordering and FEC-assisted concealment.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--output` | string | *(required)* | Device ID from `audiomirror-cli devices` |
+| `--output` | string | *(required)* | Device ID from `splitter-cli devices` |
 | `--bind` | string | *(required)* | Local bind address, e.g. `0.0.0.0:5004` |
 | `--jitter-mode` | `auto\|min` | `auto` | Jitter buffer depth strategy |
 | `--jitter-max-depth-ms` | u32 | `100` | Maximum jitter buffer depth in milliseconds |
@@ -120,10 +120,10 @@ configurable jitter buffer for packet reordering and FEC-assisted concealment.
 **Example:**
 
 ```sh
-audiomirror-cli recv --output "Built-in Speakers" --bind 0.0.0.0:5004
+splitter-cli recv --output "Built-in Speakers" --bind 0.0.0.0:5004
 
 # Minimum latency mode
-audiomirror-cli recv --output "Headphones" --bind 0.0.0.0:5004 --jitter-mode min
+splitter-cli recv --output "Headphones" --bind 0.0.0.0:5004 --jitter-mode min
 ```
 
 **Exit codes:**
@@ -139,7 +139,7 @@ audiomirror-cli recv --output "Headphones" --bind 0.0.0.0:5004 --jitter-mode min
 
 ## loop
 
-**Synopsis:** `audiomirror-cli loop --input <device-id> --output <device-id> [flags]`
+**Synopsis:** `splitter-cli loop --input <device-id> --output <device-id> [flags]`
 
 **Description:**
 Single-process loopback test: capture from an input device, encode with Opus,
@@ -163,12 +163,12 @@ Note: `--source system` works on Windows (WASAPI loopback) and Linux
 **Example:**
 
 ```sh
-audiomirror-cli loop \
+splitter-cli loop \
     --input "Built-in Microphone" \
     --output "Built-in Speakers"
 
 # Windows system audio loopback test
-audiomirror-cli loop --input ignored --output "Speakers" --source system
+splitter-cli loop --input ignored --output "Speakers" --source system
 ```
 
 **Exit codes:**
@@ -184,11 +184,11 @@ audiomirror-cli loop --input ignored --output "Speakers" --source system
 
 ## discover
 
-**Synopsis:** `audiomirror-cli discover [--duration-secs <n>] [--signaling-port <port>]`
+**Synopsis:** `splitter-cli discover [--duration-secs <n>] [--signaling-port <port>]`
 
 **Description:**
-Browse for AudioMirror peers on the local network via mDNS
-(`_audiomirror._tcp.local.`). Prints discovered peers with their peer ID, name,
+Browse for Splitter peers on the local network via mDNS
+(`_splitter._tcp.local.`). Prints discovered peers with their peer ID, name,
 address, and version, then exits after the scan window. Does not require a
 running daemon.
 
@@ -202,8 +202,8 @@ running daemon.
 **Example:**
 
 ```sh
-audiomirror-cli discover
-audiomirror-cli discover --duration-secs 10
+splitter-cli discover
+splitter-cli discover --duration-secs 10
 ```
 
 **Exit codes:**
@@ -222,14 +222,14 @@ audiomirror-cli discover --duration-secs 10
 **Synopsis:**
 
 ```sh
-audiomirror-cli daemon \
+splitter-cli daemon \
     [--signaling-port <port>] \
     [--peer-name <name>] \
     [--identity-dir <path>]
 ```
 
 **Description:**
-Start the AudioMirror background daemon. The daemon binds a TCP signaling
+Start the Splitter background daemon. The daemon binds a TCP signaling
 server, registers an mDNS service record, starts a device hot-plug watcher, and
 optionally enables a Prometheus metrics endpoint. After startup it prints:
 
@@ -241,7 +241,7 @@ where `<N>` is the actual TCP port (may differ from `--signaling-port` if the
 OS reassigned it). After that line the daemon reads REPL commands from stdin.
 
 Identity files are read from / written to `--identity-dir` (default:
-`~/.audiomirror/<generated-uuid>/`). Separating identity directories allows
+`~/.splitter/<generated-uuid>/`). Separating identity directories allows
 running two daemon instances on the same machine for testing.
 
 **Flags:**
@@ -250,14 +250,14 @@ running two daemon instances on the same machine for testing.
 |------|------|---------|-------------|
 | `--signaling-port` | u16 | `7000` | TCP port for the signaling server (`0` = OS-assigned) |
 | `--peer-name` | string | *(from identity file)* | Override the peer name advertised via mDNS |
-| `--identity-dir` | path | `~/.audiomirror/<id>/` | Directory for identity, trust store, and settings |
+| `--identity-dir` | path | `~/.splitter/<id>/` | Directory for identity, trust store, and settings |
 
 **Example:**
 
 ```sh
-audiomirror-cli daemon
-audiomirror-cli daemon --signaling-port 5100 --peer-name "Studio Mac"
-audiomirror-cli daemon --signaling-port 0 --identity-dir /tmp/alice-test
+splitter-cli daemon
+splitter-cli daemon --signaling-port 5100 --peer-name "Studio Mac"
+splitter-cli daemon --signaling-port 0 --identity-dir /tmp/alice-test
 ```
 
 **Exit codes:**
@@ -322,7 +322,7 @@ All `stream` sub-verbs accept `<session_id>:<stream_id>` as `UUID:u8`.
 
 ## stream
 
-**Synopsis:** `audiomirror-cli stream open --from <dev> --to <peer>:<dev> [--session <UUID>] [--bitrate N]`
+**Synopsis:** `splitter-cli stream open --from <dev> --to <peer>:<dev> [--session <UUID>] [--bitrate N]`
 
 **Description:**
 This subcommand is normally invoked from the daemon's interactive REPL rather
@@ -361,7 +361,7 @@ stream open --from in:0 --to bob:out:1 --session e5f6a7b8-... --bitrate 96000
 
 ## stats
 
-**Synopsis:** `audiomirror-cli stats [--stream-id <id>]`
+**Synopsis:** `splitter-cli stats [--stream-id <id>]`
 
 **Description:**
 Display real-time statistics for all active streams managed by the running
@@ -380,8 +380,8 @@ RTT ms, total bandwidth.
 **Example:**
 
 ```sh
-audiomirror-cli stats
-audiomirror-cli stats --stream-id 1
+splitter-cli stats
+splitter-cli stats --stream-id 1
 ```
 
 **Exit codes:**
@@ -397,7 +397,7 @@ audiomirror-cli stats --stream-id 1
 
 ## logs
 
-**Synopsis:** `audiomirror-cli logs <subcommand>`
+**Synopsis:** `splitter-cli logs <subcommand>`
 
 **Description:**
 Inspect the structured application log file written by the daemon and other
@@ -413,8 +413,8 @@ subcommands. Logs rotate daily with 7-day retention.
 **Example:**
 
 ```sh
-audiomirror-cli logs path
-audiomirror-cli logs tail
+splitter-cli logs path
+splitter-cli logs tail
 ```
 
 **Exit codes:**
@@ -428,7 +428,7 @@ audiomirror-cli logs tail
 
 ## settings
 
-**Synopsis:** `audiomirror-cli settings <subcommand>`
+**Synopsis:** `splitter-cli settings <subcommand>`
 
 **Description:**
 Read or write the persistent application settings stored as TOML in the platform
@@ -463,11 +463,11 @@ for a running daemon via the hot-reload poll).
 **Example:**
 
 ```sh
-audiomirror-cli settings show
-audiomirror-cli settings get log_level
-audiomirror-cli settings set log_level debug
-audiomirror-cli settings set fec_mode always
-audiomirror-cli settings set auto_accept_trusted true
+splitter-cli settings show
+splitter-cli settings get log_level
+splitter-cli settings set log_level debug
+splitter-cli settings set fec_mode always
+splitter-cli settings set auto_accept_trusted true
 ```
 
 **Exit codes:**
@@ -481,7 +481,7 @@ audiomirror-cli settings set auto_accept_trusted true
 
 ## autostart
 
-**Synopsis:** `audiomirror-cli autostart <subcommand>`
+**Synopsis:** `splitter-cli autostart <subcommand>`
 
 **Description:**
 Manage the platform-native autostart mechanism for the daemon.
@@ -503,9 +503,9 @@ Manage the platform-native autostart mechanism for the daemon.
 **Example:**
 
 ```sh
-audiomirror-cli autostart enable
-audiomirror-cli autostart status
-audiomirror-cli autostart disable
+splitter-cli autostart enable
+splitter-cli autostart status
+splitter-cli autostart disable
 ```
 
 **Exit codes:**
@@ -521,7 +521,7 @@ audiomirror-cli autostart disable
 
 ## metrics
 
-**Synopsis:** `audiomirror-cli metrics <subcommand>`
+**Synopsis:** `splitter-cli metrics <subcommand>`
 
 **Description:**
 Manage the optional Prometheus `/metrics` HTTP endpoint. The endpoint is served
@@ -539,10 +539,10 @@ take effect.
 **Example:**
 
 ```sh
-audiomirror-cli metrics enable
-audiomirror-cli daemon &
+splitter-cli metrics enable
+splitter-cli daemon &
 curl http://localhost:9000/metrics
-audiomirror-cli metrics status
+splitter-cli metrics status
 # metrics_enabled: true  port: 9000  endpoint_live: true
 ```
 

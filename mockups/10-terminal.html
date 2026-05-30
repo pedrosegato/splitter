@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1024">
+<title>Splitter — Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #09090b;
+    --bg2:     #111113;
+    --bg3:     #18181b;
+    --bg4:     #1f1f23;
+    --border:  #27272a;
+    --border2: #3f3f46;
+    --em:      #34d399;  /* emerald-400 */
+    --em2:     #a7f3d0;  /* emerald-200 */
+    --em3:     rgba(52,211,153,0.1);
+    --text:    #d4d4d8;
+    --text2:   #71717a;
+    --text3:   #52525b;
+    --red:     #f87171;
+    --yellow:  #fbbf24;
+    --blue:    #60a5fa;
+    --orange:  #fb923c;
+  }
+
+  body {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: #070709;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .window {
+    width: 1024px;
+    height: 640px;
+    background: var(--bg);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.4),
+      0 20px 60px rgba(0,0,0,0.8);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Titlebar */
+  .titlebar {
+    height: 40px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 14px; gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .traffic-lights { display: flex; gap: 7px; align-items: center; }
+  .dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    opacity: 0.8; transition: opacity 0.1s;
+  }
+  .dot:hover { opacity: 1; }
+  .dot-red    { background: #ff5f57; }
+  .dot-yellow { background: #febc2e; }
+  .dot-green  { background: #28c840; }
+
+  .tab-bar {
+    display: flex; align-items: center; gap: 1px; flex: 1;
+    margin: 0 8px;
+  }
+  .tab {
+    font-size: 11px; font-weight: 500; padding: 5px 14px; border-radius: 5px;
+    color: var(--text2); cursor: default; transition: background 0.1s, color 0.1s;
+  }
+  .tab:hover { background: var(--bg3); color: var(--text); }
+  .tab-active { background: var(--bg3); color: var(--em); border: 1px solid var(--border); }
+
+  .peer-mono {
+    font-size: 10px; font-weight: 600; color: var(--text2);
+    letter-spacing: 0.02em;
+  }
+  .peer-mono span { color: var(--em); }
+
+  .conn-status {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 600; color: var(--em);
+    letter-spacing: 0.02em;
+  }
+  .blink-em {
+    width: 7px; height: 14px; background: var(--em);
+    animation: cursor-blink 1s step-end infinite;
+  }
+  @keyframes cursor-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .blink-em  { animation: none; }
+    .cta-term  { transition: none; }
+    .scan-em   { animation: none; }
+  }
+
+  /* Main layout */
+  .main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 200px 1px 1fr 1px 220px;
+    overflow: hidden;
+  }
+
+  .col-divider { background: var(--border); }
+
+  .col {
+    display: flex; flex-direction: column;
+    overflow: hidden; padding: 10px 12px;
+  }
+
+  /* Section headers */
+  .s-head {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--text3);
+    margin-bottom: 8px; padding-bottom: 5px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .s-head-em { color: var(--em); }
+  .s-head-count {
+    font-size: 9px; font-weight: 700; color: var(--bg);
+    background: var(--em); padding: 0 5px; border-radius: 3px; margin-left: auto;
+  }
+
+  /* Devices */
+  .dev-term {
+    display: flex; align-items: flex-start; gap: 7px;
+    padding: 6px 7px; border-radius: 5px; margin-bottom: 3px;
+    cursor: default; transition: background 0.08s;
+  }
+  .dev-term:hover { background: var(--bg3); }
+  .dev-term::before { content: '›'; color: var(--border2); font-size: 12px; margin-top: 1px; }
+  .dev-term:hover::before { color: var(--em); }
+
+  .dt-id {
+    font-size: 9.5px; font-weight: 700;
+    font-family: inherit; flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .dt-in  { color: var(--em); }
+  .dt-out { color: var(--blue); }
+
+  .dt-info { min-width: 0; }
+  .dt-name { font-size: 11px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dt-spec { font-size: 9.5px; color: var(--text3); margin-top: 1px; }
+
+  /* Streams */
+  .stream-term {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 10px; margin-bottom: 7px;
+    transition: border-color 0.1s;
+  }
+  .stream-term:hover { border-color: var(--border2); }
+
+  .st-prompt { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+  .st-prompt::before {
+    content: '$'; color: var(--em); font-weight: 700; font-size: 12px;
+    flex-shrink: 0; margin-top: 1px;
+  }
+
+  .st-id-t {
+    font-size: 9.5px; font-weight: 700; color: var(--em);
+    background: var(--em3); border: 1px solid rgba(52,211,153,0.2);
+    padding: 1px 6px; border-radius: 3px; flex-shrink: 0; margin-top: 1px;
+  }
+  .st-cmd { font-size: 11px; font-weight: 500; color: var(--text); line-height: 1.5; }
+  .st-cmd em { color: var(--blue); font-style: normal; }
+  .st-cmd .arrow { color: var(--em); }
+
+  .st-output { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; padding-left: 16px; }
+  .st-o { font-size: 9.5px; color: var(--text2); }
+  .st-o span { color: var(--text); font-weight: 600; }
+  .st-warn span { color: var(--orange); }
+
+  .scan-em {
+    height: 2px; background: var(--border); border-radius: 1px; overflow: hidden; margin-top: 2px;
+  }
+  .scan-fill {
+    height: 100%; background: var(--em); border-radius: 1px;
+    animation: scan-em 2.5s linear infinite;
+    background: linear-gradient(90deg, transparent, var(--em), transparent);
+  }
+  @keyframes scan-em {
+    from { transform: translateX(-100%); width: 60%; }
+    to   { transform: translateX(200%);  width: 60%; }
+  }
+
+  /* Peers */
+  .peer-term {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 10px; margin-bottom: 8px;
+  }
+  .peer-term-row { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+  .peer-sq-t {
+    width: 26px; height: 26px; border-radius: 4px;
+    background: var(--em3); border: 1px solid rgba(52,211,153,0.2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: var(--em); flex-shrink: 0;
+  }
+  .peer-host-t { font-size: 12px; font-weight: 700; color: var(--text); }
+  .peer-ip-t   { font-size: 9px; color: var(--text3); margin-top: 2px; }
+
+  .peer-tags-t { display: flex; gap: 5px; flex-wrap: wrap; }
+  .term-tag {
+    font-size: 8.5px; font-weight: 700; padding: 2px 6px; border-radius: 3px;
+    border: 1px solid var(--border); color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .tt-green { color: #86efac; border-color: rgba(134,239,172,0.2); background: rgba(134,239,172,0.05); }
+  .tt-blue  { color: var(--blue); border-color: rgba(96,165,250,0.2); background: rgba(96,165,250,0.05); }
+
+  /* Stat list */
+  .stat-list { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+  .stat-line {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 10px; color: var(--text3);
+  }
+  .stat-line::before { content: attr(data-key); color: var(--text3); }
+  .stat-line .val { color: var(--text); font-weight: 600; }
+  .stat-line .val-em { color: var(--em); }
+  .stat-line .val-warn { color: var(--orange); }
+
+  /* Footer / command palette */
+  .footer {
+    height: 46px;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 14px; gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .prompt-prefix {
+    font-size: 13px; font-weight: 700; color: var(--em);
+    flex-shrink: 0; user-select: none;
+  }
+
+  .cta-term {
+    background: var(--em3); color: var(--em);
+    border: 1px solid rgba(52,211,153,0.3); border-radius: 5px;
+    padding: 6px 16px; font-size: 11px; font-weight: 700; font-family: inherit;
+    letter-spacing: 0.02em; cursor: pointer;
+    transition: transform 0.1s, background 0.1s;
+  }
+  .cta-term:hover  { background: rgba(52,211,153,0.15); transform: scale(1.02); }
+  .cta-term:active { transform: scale(0.97); }
+
+  .sec-term {
+    background: transparent; color: var(--text2);
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 5px 12px; font-size: 10px; font-weight: 600; font-family: inherit;
+    letter-spacing: 0.02em; cursor: pointer;
+    transition: color 0.1s, border-color 0.1s;
+  }
+  .sec-term:hover { color: var(--text); border-color: var(--border2); }
+
+  .spacer { flex: 1; }
+
+  /* Kbd hints */
+  .kbd-hint {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 9px; color: var(--text3); margin-left: auto;
+  }
+  kbd {
+    display: inline-block; font-family: inherit; font-size: 9px;
+    padding: 1px 5px; border-radius: 3px;
+    background: var(--bg3); border: 1px solid var(--border2);
+    color: var(--text2);
+  }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic-lights">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-yellow"></div>
+      <div class="dot dot-green"></div>
+    </div>
+    <div class="tab-bar">
+      <div class="tab tab-active">Splitter</div>
+      <div class="tab">devices</div>
+      <div class="tab">logs</div>
+    </div>
+    <div class="peer-mono">user:<span>alice</span></div>
+    <div class="conn-status"><div class="blink-em"></div>CONNECTED</div>
+  </div>
+
+  <div class="main">
+    <!-- Devices col -->
+    <div class="col">
+      <div class="s-head"><span class="s-head-em">$</span> devices <span class="s-head-count">4</span></div>
+
+      <div class="dev-term">
+        <span class="dt-id dt-in">in:0</span>
+        <div class="dt-info">
+          <div class="dt-name">BlackHole 2ch</div>
+          <div class="dt-spec">2ch · 48kHz</div>
+        </div>
+      </div>
+      <div class="dev-term">
+        <span class="dt-id dt-in">in:1</span>
+        <div class="dt-info">
+          <div class="dt-name">Microfone (MacBook Air)</div>
+          <div class="dt-spec">1ch · 48kHz</div>
+        </div>
+      </div>
+      <div class="dev-term">
+        <span class="dt-id dt-out">out:0</span>
+        <div class="dt-info">
+          <div class="dt-name">MCHOSE V9 PRO</div>
+          <div class="dt-spec">2ch · 48kHz</div>
+        </div>
+      </div>
+      <div class="dev-term">
+        <span class="dt-id dt-out">out:1</span>
+        <div class="dt-info">
+          <div class="dt-name">MacBook Speakers</div>
+          <div class="dt-spec">2ch · 48kHz</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-divider"></div>
+
+    <!-- Streams col -->
+    <div class="col">
+      <div class="s-head"><span class="s-head-em">$</span> streams --active <span class="s-head-count">2</span></div>
+
+      <div class="stream-term">
+        <div class="st-prompt">
+          <span class="st-id-t">00</span>
+          <div class="st-cmd">BlackHole 2ch <span class="arrow">→</span> <em>windows</em>:MCHOSE V9 PRO</div>
+        </div>
+        <div class="st-output">
+          <div class="st-o"><span>64 kbps</span></div>
+          <div class="st-o"><span>0</span> lost</div>
+          <div class="st-o"><span>12ms</span> RTT</div>
+          <div class="st-o">opus</div>
+        </div>
+        <div class="scan-em"><div class="scan-fill"></div></div>
+      </div>
+
+      <div class="stream-term">
+        <div class="st-prompt">
+          <span class="st-id-t">01</span>
+          <div class="st-cmd"><em>windows</em>:Microfone <span class="arrow">→</span> MacBook Speakers</div>
+        </div>
+        <div class="st-output">
+          <div class="st-o"><span>64 kbps</span></div>
+          <div class="st-o st-warn"><span>3</span> lost</div>
+          <div class="st-o"><span>14ms</span> RTT</div>
+          <div class="st-o">opus</div>
+        </div>
+        <div class="scan-em"><div class="scan-fill" style="animation-delay:0.6s"></div></div>
+      </div>
+    </div>
+
+    <div class="col-divider"></div>
+
+    <!-- Peers + stats col -->
+    <div class="col">
+      <div class="s-head"><span class="s-head-em">$</span> peers <span class="s-head-count">1</span></div>
+
+      <div class="peer-term">
+        <div class="peer-term-row">
+          <div class="peer-sq-t">W</div>
+          <div>
+            <div class="peer-host-t">windows</div>
+            <div class="peer-ip-t">192.168.1.68:7001</div>
+          </div>
+        </div>
+        <div class="peer-tags-t">
+          <span class="term-tag tt-green">trusted</span>
+          <span class="term-tag tt-blue">12ms RTT</span>
+          <span class="term-tag">v0.1.0</span>
+        </div>
+      </div>
+
+      <div class="s-head" style="margin-top:8px"><span class="s-head-em">$</span> status</div>
+      <div class="stat-list">
+        <div class="stat-line" data-key="streams">
+          <span class="val-em">2 active</span>
+        </div>
+        <div class="stat-line" data-key="codec  ">
+          <span class="val">Opus</span>
+        </div>
+        <div class="stat-line" data-key="avg_rtt">
+          <span class="val-em">13ms</span>
+        </div>
+        <div class="stat-line" data-key="lost   ">
+          <span class="val-warn">3 pkts</span>
+        </div>
+        <div class="stat-line" data-key="bitrate">
+          <span class="val">128 kbps</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span class="prompt-prefix">›</span>
+    <button class="cta-term">open-stream</button>
+    <div class="spacer"></div>
+    <button class="sec-term">settings</button>
+    <button class="sec-term">quit</button>
+    <div class="kbd-hint"><kbd>⌘K</kbd> command</div>
+  </div>
+</div>
+</body>
+</html>

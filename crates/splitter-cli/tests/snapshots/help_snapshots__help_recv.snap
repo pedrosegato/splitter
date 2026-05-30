@@ -1,0 +1,35 @@
+---
+source: crates/splitter-cli/tests/help_snapshots.rs
+expression: output
+---
+Listen for incoming UDP Opus packets on the given bind address and
+play decoded audio on the specified output device. Runs until interrupted (Ctrl-C).
+
+An adaptive jitter buffer absorbs packet reordering and network jitter. Use
+--jitter-mode min for lowest-latency monitoring, or leave it as auto (default) for
+robust delivery over congested LANs.
+
+Examples:
+splitter-cli recv --output "Built-in Speakers" --bind 0.0.0.0:5004
+
+# Minimum latency mode
+splitter-cli recv --output "Headphones" --bind 0.0.0.0:5004 --jitter-mode min
+
+Usage: splitter-cli recv [OPTIONS] --output <OUTPUT> --bind <BIND>
+
+Options:
+      --output <OUTPUT>
+          
+
+      --bind <BIND>
+          
+
+      --jitter-mode <JITTER_MODE>
+          [default: auto]
+          [possible values: auto, min]
+
+      --jitter-max-depth-ms <JITTER_MAX_DEPTH_MS>
+          [default: 100]
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,47 @@
+---
+source: crates/splitter-cli/tests/help_snapshots.rs
+expression: output
+---
+Start the Splitter background daemon. The daemon binds a TCP
+signaling server, registers an mDNS service record (_splitter._tcp.local.),
+starts a device hot-plug watcher, and optionally enables a Prometheus metrics endpoint.
+
+After startup it prints the machine-readable banner:
+READY port=<N>
+where <N> is the actual TCP port. Supervisor scripts must wait for this line before
+issuing REPL commands via stdin.
+
+On first launch a UUID identity is written to the platform config directory:
+macOS   — ~/Library/Application Support/Splitter/<identity>/
+Linux   — ~/.config/Splitter/<identity>/
+Windows — %APPDATA%\Splitter\<identity>\
+
+REPL quick reference (full list: see CLI-REFERENCE.md):
+peers                     list mDNS-discovered peers
+connect <name|id>         open a TCP signaling link to a peer
+accept <n>                trust a pending HELLO from peer at index <n>
+open <name|id>            open a Session with a connected peer
+sessions                  list active sessions and streams
+stream open --from in:0 --to <peer>:out:0 --session <UUID>
+stream stats              live per-stream statistics table
+quit                      graceful shutdown
+
+Examples:
+splitter-cli daemon
+splitter-cli daemon --signaling-port 5100 --peer-name "Studio Mac"
+splitter-cli daemon --identity-dir ~/.splitter/alice
+
+Usage: splitter-cli daemon [OPTIONS]
+
+Options:
+      --signaling-port <SIGNALING_PORT>
+          [default: 7000]
+
+      --peer-name <PEER_NAME>
+          
+
+      --identity-dir <IDENTITY_DIR>
+          
+
+  -h, --help
+          Print help (see a summary with '-h')

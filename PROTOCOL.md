@@ -1,7 +1,7 @@
-# AudioMirror Protocol Reference
+# Splitter Protocol Reference
 
 Wire-format and signaling protocol reference for engineers. This document
-distils the implementation in `crates/audiomirror-core/src/net/` and does not
+distils the implementation in `crates/splitter-core/src/net/` and does not
 repeat the product narrative in `SPEC.md`.
 
 ---
@@ -19,7 +19,7 @@ repeat the product narrative in `SPEC.md`.
 
 ## 1. Audio UDP packet
 
-Source: `crates/audiomirror-core/src/net/packet.rs`
+Source: `crates/splitter-core/src/net/packet.rs`
 
 ```
 pub const HEADER_LEN: usize = 10;
@@ -92,7 +92,7 @@ The actual bound port is reported in the `READY port=<N>` startup line.
 
 ## 3. Signaling JSON messages
 
-Source: `crates/audiomirror-core/src/net/signaling/message.rs`
+Source: `crates/splitter-core/src/net/signaling/message.rs`
 
 All messages are tagged with `"type"` using `serde(tag = "type", rename_all = "snake_case")`.
 Optional fields are omitted from serialised output when absent (`skip_serializing_if = "Option::is_none"`).
@@ -363,7 +363,7 @@ Notes:
 
 ## 5. Heartbeat timing
 
-Source: `crates/audiomirror-core/src/net/signaling/connection.rs`
+Source: `crates/splitter-core/src/net/signaling/connection.rs`
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
@@ -379,12 +379,12 @@ connection.
 
 ## 6. mDNS service discovery
 
-Source: `crates/audiomirror-core/src/net/discovery.rs`
+Source: `crates/splitter-core/src/net/discovery.rs`
 
 ### Service type
 
 ```
-_audiomirror._tcp.local.
+_splitter._tcp.local.
 ```
 
 ### TXT record keys
@@ -401,7 +401,7 @@ _audiomirror._tcp.local.
 The instance name in the DNS-SD record is the peer UUID string:
 
 ```
-<peer-uuid>._audiomirror._tcp.local.
+<peer-uuid>._splitter._tcp.local.
 ```
 
 The hostname is `<peer-uuid>.local.` with address auto-detection enabled
@@ -415,7 +415,7 @@ Discovering clients use the TXT value to form the TCP connection address.
 
 ### Discovery flow
 
-1. The discovering client queries for `_audiomirror._tcp.local.`.
+1. The discovering client queries for `_splitter._tcp.local.`.
 2. Each resolved `ServiceEvent::ServiceResolved` yields a `DiscoveredPeer`
    struct with the fields above, plus the resolved IP address from the SRV/A
    record.

@@ -2,6 +2,7 @@ use crate::error::AudioError;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct DeviceInfo {
     pub id: String,
     pub name: String,
@@ -11,6 +12,7 @@ pub struct DeviceInfo {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum DeviceKind {
     Input,
     Output,

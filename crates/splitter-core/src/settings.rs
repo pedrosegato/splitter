@@ -7,6 +7,7 @@ use tokio::sync::RwLock;
 pub type SettingsHandle = Arc<RwLock<Settings>>;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum FecMode {
     Auto,
@@ -15,6 +16,7 @@ pub enum FecMode {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum JitterMode {
     Auto,
@@ -23,6 +25,7 @@ pub enum JitterMode {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum LogLevel {
     Trace,
@@ -33,6 +36,7 @@ pub enum LogLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(default)]
 pub struct Settings {
     pub auto_accept_trusted: bool,

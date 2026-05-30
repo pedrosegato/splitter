@@ -15,6 +15,9 @@ pub struct StreamSnapshot {
     pub source_peer: String,
     pub sink_peer: String,
     pub udp_port: u16,
+    pub source_device: String,
+    pub sink_device: String,
+    pub volume: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,6 +130,9 @@ impl SessionManager {
                         source_peer: st.route.source.peer_id.clone(),
                         sink_peer: st.route.sink.peer_id.clone(),
                         udp_port: st.udp_port,
+                        source_device: st.route.source.device_id.clone(),
+                        sink_device: st.route.sink.device_id.clone(),
+                        volume: st.route.volume,
                     })
                     .collect(),
             })

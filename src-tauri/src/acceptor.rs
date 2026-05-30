@@ -1,8 +1,9 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 use splitter_core::net::session::SessionState;
 use splitter_core::net::signaling::{
-    CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction,
+    CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, StreamAction,
 };
 use splitter_core::net::stream::StreamRoute;
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
@@ -24,6 +25,7 @@ pub fn spawn_acceptor(
     core: Arc<AppCore>,
     peer_id: Uuid,
     mut events: tokio::sync::broadcast::Receiver<PeerEvent>,
+    addr: SocketAddr,
 ) {
     let default_output = pick_default_output_device_id();
     let local_peer_id = core.identity.peer_id;
@@ -55,9 +57,30 @@ pub fn spawn_acceptor(
                             .register_incoming(sid_uuid, local_peer_id, requester_uuid)
                             .await;
                         let _ = core.sessions.accept(&sid_uuid).await;
+                        let peer_name = {
+                            let trust_name = core
+                                .trust
+                                .read()
+                                .await
+                                .peer_for(&requester_uuid)
+                                .map(|p| p.peer_name.clone());
+                            if let Some(name) = trust_name {
+                                name
+                            } else {
+                                let discovered_name = core
+                                    .peers
+                                    .read()
+                                    .await
+                                    .get(&requester_uuid.to_string())
+                                    .map(|p| p.peer_name.clone());
+                                discovered_name.unwrap_or_else(|| {
+                                    requester_uuid.to_string()[..8].to_string()
+                                })
+                            }
+                        };
                         core.emit(IncomingSession {
                             peer_id: requester_uuid.to_string(),
-                            peer_name: requester_uuid.to_string(),
+                            peer_name,
                         });
                         tracing::info!(peer = %peer_id, session = %sid_uuid, "opened session");
                     }
@@ -224,6 +247,26 @@ pub fn spawn_acceptor(
                         let _ = core.sessions.close(&sid_uuid).await;
                         tracing::info!(peer = %peer_id, session = %sid_uuid, "remote closed session");
                     }
+                    SignalingMessage::DeviceListRequest {} => {
+                        let devices = splitter_core::audio::devices::list_devices()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|d| DeviceDescriptor {
+                                id: d.id,
+                                name: d.name,
+                                kind: format!("{:?}", d.kind),
+                            })
+                            .collect();
+                        send_to_peer(
+                            &core,
+                            peer_id,
+                            SignalingMessage::DeviceListResponse { devices },
+                        )
+                        .await;
+                    }
+                    SignalingMessage::DeviceListResponse { devices } => {
+                        core.remote_devices.write().await.insert(peer_id, devices);
+                    }
                     _ => {}
                 },
                 Ok(PeerEvent::Disconnected { reason }) => {
@@ -240,6 +283,7 @@ pub fn spawn_acceptor(
                         .filter(|s| s.remote_peer_id == peer_id)
                         .map(|s| s.id)
                         .collect();
+                    let had_active_session = !session_ids.is_empty();
                     for sid in &session_ids {
                         let stream_ids: Vec<u8> = core
                             .sessions
@@ -253,6 +297,9 @@ pub fn spawn_acceptor(
                             let _ = core.stream_registry.close(sid, stream_id).await;
                         }
                         let _ = core.sessions.close(sid).await;
+                    }
+                    if had_active_session {
+                        crate::reconnect::spawn_reconnect(core.clone(), peer_id, addr);
                     }
                     break;
                 }

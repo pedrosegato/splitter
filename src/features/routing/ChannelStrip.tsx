@@ -70,7 +70,7 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
       onKeyDown={(e) => e.key === "Enter" && selectStream(stream.id)}
       className={cn(
         "relative flex w-[232px] flex-none flex-col justify-center border-r border-line px-3 py-2.5 cursor-default transition-colors",
-        selected ? "bg-[#242427]" : "bg-[#1b1b1d] hover:bg-[#202023]",
+        selected ? "bg-elev-2" : "bg-elev-0 hover:bg-elev-2",
       )}
       style={
         selected

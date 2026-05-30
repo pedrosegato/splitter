@@ -29,6 +29,7 @@ pub struct Stream {
     pub route: StreamRoute,
     pub udp_port: u16,
     pub state: StreamState,
+    pub muted: bool,
 }
 
 impl Stream {
@@ -38,6 +39,7 @@ impl Stream {
             route,
             udp_port,
             state: StreamState::Negotiating,
+            muted: false,
         }
     }
 
@@ -74,6 +76,10 @@ impl Stream {
 
     pub fn set_volume(&mut self, volume: f32) {
         self.route.volume = volume.clamp(0.0, 2.0);
+    }
+
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
     }
 }
 

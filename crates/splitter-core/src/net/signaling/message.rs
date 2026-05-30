@@ -5,6 +5,14 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct DeviceDescriptor {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Capabilities {
     pub codecs: Vec<String>,
     pub max_streams: u32,
@@ -91,6 +99,10 @@ pub enum SignalingMessage {
     Heartbeat {
         timestamp_ms: u64,
         streams_stats: Vec<HeartbeatStreamStats>,
+    },
+    DeviceListRequest {},
+    DeviceListResponse {
+        devices: Vec<DeviceDescriptor>,
     },
 }
 

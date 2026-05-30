@@ -4,11 +4,14 @@ pub use core::AppCore;
 mod commands;
 mod dto;
 pub mod events;
+mod reconnect;
+mod tray;
 
 use specta_typescript::Typescript;
-use std::sync::Arc;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
+use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
 fn build() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
@@ -21,12 +24,19 @@ fn build() -> Builder<tauri::Wry> {
             commands::peers::pending_peers,
             commands::peers::connect_peer,
             commands::peers::accept_pending,
+            commands::peers::peer_devices,
             commands::peers::disconnect,
             commands::streams::snapshot,
             commands::streams::open_session,
             commands::streams::open_stream,
             commands::streams::close_stream,
             commands::streams::stream_control,
+            commands::ops::mute_all,
+            commands::ops::disconnect_all,
+            commands::ops::set_tray_state,
+            commands::perms::permission_status,
+            commands::perms::request_permission,
+            commands::system::set_autostart,
         ])
         .events(collect_events![
             events::PeersChanged,
@@ -45,9 +55,46 @@ pub fn run() {
         .export(Typescript::default(), "../src/bindings.ts")
         .expect("failed to export typescript bindings");
 
-    let signaling_port: u16 = 7000;
+    let mute_shortcut: Shortcut = "CmdOrCtrl+Shift+M".parse().expect("valid mute shortcut");
+    let pause_shortcut: Shortcut = "CmdOrCtrl+Shift+P".parse().expect("valid pause shortcut");
+    let mute_id = mute_shortcut.id();
+    let pause_id = pause_shortcut.id();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcut(mute_shortcut)
+                .expect("valid mute shortcut")
+                .with_shortcut(pause_shortcut)
+                .expect("valid pause shortcut")
+                .with_handler(move |app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    let id = shortcut.id();
+                    let core = app.state::<std::sync::Arc<AppCore>>().inner().clone();
+                    if id == mute_id {
+                        tauri::async_runtime::spawn(async move {
+                            commands::ops::mute_all_core(&core).await;
+                        });
+                    } else if id == pause_id {
+                        tauri::async_runtime::spawn(async move {
+                            commands::ops::pause_all_core(&core).await;
+                        });
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -57,14 +104,43 @@ pub fn run() {
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             std::fs::create_dir_all(&config_dir).ok();
-            let core: Arc<AppCore> =
-                tauri::async_runtime::block_on(AppCore::init(&config_dir, signaling_port))
-                    .expect("AppCore init failed");
-            let _ = core.app.set(handle);
-            core.spawn_discovery(signaling_port).expect("discovery");
-            core.spawn_stats_emitter();
-            core.spawn_acceptor_supervisor();
-            app.manage(core);
+            match tauri::async_runtime::block_on(AppCore::init(&config_dir)) {
+                Ok(core) => {
+                    let auto_start = tauri::async_runtime::block_on(async {
+                        core.settings.read().await.auto_start_with_system
+                    });
+                    let _ = core.app.set(handle);
+                    core.spawn_discovery().expect("discovery");
+                    core.spawn_stats_emitter();
+                    core.spawn_acceptor_supervisor();
+                    app.manage(core);
+                    let manager = app.autolaunch();
+                    if auto_start {
+                        if let Err(e) = manager.enable() {
+                            tracing::warn!("autostart reconcile enable failed: {e}");
+                        }
+                    } else {
+                        if let Err(e) = manager.disable() {
+                            tracing::warn!("autostart reconcile disable failed: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("fatal: AppCore init failed: {e}");
+                    eprintln!("fatal: Splitter failed to start: {e}");
+                    std::process::exit(1);
+                }
+            }
+            tray::build_tray(app.handle())?;
+            if let Some(win) = app.get_webview_window("main") {
+                let win_clone = win.clone();
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win_clone.hide();
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

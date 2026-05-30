@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { commands, unwrap } from "@/lib/api";
 
 export const useConnectPeer = () => {
@@ -16,6 +17,10 @@ export const useConnectPeer = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["peers"] });
       queryClient.invalidateQueries({ queryKey: ["pending"] });
+      toast.success("Peer pareado");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 };
@@ -29,6 +34,9 @@ export const useAcceptPending = () => {
       queryClient.invalidateQueries({ queryKey: ["pending"] });
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
     },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
   });
 };
 
@@ -39,6 +47,10 @@ export const useDisconnect = () => {
       unwrap(commands.disconnect(sessionId)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+      toast.success("Desconectado");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 };
@@ -50,6 +62,9 @@ export const useOpenSession = () => {
       unwrap(commands.openSession(remotePeerId)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 };

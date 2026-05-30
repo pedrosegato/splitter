@@ -9,6 +9,7 @@ use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, Trus
 use splitter_core::settings::SettingsHandle;
 use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
 use splitter_core::net::signaling::connection::PeerConnectionHandle;
+use splitter_core::net::signaling::DeviceDescriptor;
 use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
 use crate::events::{PeersChanged, StatsTick, StreamStat};
 
@@ -32,24 +33,32 @@ pub struct AppCore {
     pub server: SignalingServerHandle,
     pub outgoing: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
     pub peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
+    pub remote_devices: Arc<RwLock<HashMap<Uuid, Vec<DeviceDescriptor>>>>,
     pub app: OnceLock<tauri::AppHandle>,
 }
 
 impl AppCore {
-    pub async fn init(config_dir: &Path, signaling_port: u16) -> Result<Arc<Self>, String> {
+    pub async fn init(config_dir: &Path) -> Result<Arc<Self>, String> {
         let identity = PeerIdentity::load_or_create(&config_dir.join("identity.toml")).map_err(e2s)?;
-        let settings: SettingsHandle = Arc::new(RwLock::new(
-            Settings::load_or_default(&config_dir.join("settings.toml")).map_err(e2s)?,
-        ));
+        let loaded_settings = Settings::load_or_default(&config_dir.join("settings.toml")).map_err(e2s)?;
+        let signaling_port = loaded_settings.signaling_port;
+        let settings: SettingsHandle = Arc::new(RwLock::new(loaded_settings));
         let trust = Arc::new(RwLock::new(
             TrustStore::load_or_create(&config_dir.join("trust.toml")).map_err(e2s)?,
         ));
         let sessions = SessionManager::new();
         let stream_registry = StreamRegistry::new();
-        let bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse().map_err(e2s)?;
-        let server = SignalingServer::start(bind, identity.clone(), trust.clone(), sessions.clone(), settings.clone())
-            .await
-            .map_err(e2s)?;
+        let preferred_bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse().map_err(e2s)?;
+        let server = match SignalingServer::start(preferred_bind, identity.clone(), trust.clone(), sessions.clone(), settings.clone()).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("failed to bind signaling server on port {signaling_port}: {e}; retrying on OS-assigned port");
+                let fallback_bind: SocketAddr = "0.0.0.0:0".parse().map_err(e2s)?;
+                SignalingServer::start(fallback_bind, identity.clone(), trust.clone(), sessions.clone(), settings.clone())
+                    .await
+                    .map_err(e2s)?
+            }
+        };
         Ok(Arc::new(Self {
             identity,
             settings,
@@ -59,6 +68,7 @@ impl AppCore {
             server,
             outgoing: Arc::new(RwLock::new(HashMap::new())),
             peers: Arc::new(RwLock::new(HashMap::new())),
+            remote_devices: Arc::new(RwLock::new(HashMap::new())),
             app: OnceLock::new(),
         }))
     }
@@ -76,7 +86,8 @@ impl AppCore {
 }
 
 impl AppCore {
-    pub fn spawn_discovery(self: &Arc<Self>, signaling_port: u16) -> Result<(), String> {
+    pub fn spawn_discovery(self: &Arc<Self>) -> Result<(), String> {
+        let signaling_port = self.server.bind_addr.port();
         let mut discovery = splitter_core::net::discovery::Discovery::start(&self.identity, signaling_port)
             .map_err(e2s)?;
         let core = self.clone();
@@ -125,12 +136,12 @@ impl AppCore {
             loop {
                 match established.recv().await {
                     Ok(peer_id) => {
-                        let events = {
+                        let conn_info = {
                             let conns = core.server.connections.read().await;
-                            conns.get(&peer_id).map(|c| c.events.subscribe())
+                            conns.get(&peer_id).map(|c| (c.events.subscribe(), c.remote_addr))
                         };
-                        if let Some(events) = events {
-                            crate::acceptor::spawn_acceptor(core.clone(), peer_id, events);
+                        if let Some((events, addr)) = conn_info {
+                            crate::acceptor::spawn_acceptor(core.clone(), peer_id, events, addr);
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -157,7 +168,7 @@ mod tests {
     #[tokio::test]
     async fn init_builds_all_handles_in_temp_dir() {
         let dir = tempdir().unwrap();
-        let core = AppCore::init(dir.path(), 0).await.expect("init");
+        let core = AppCore::init(dir.path()).await.expect("init");
         assert!(core.server.bind_addr.port() > 0);
         assert_eq!(core.sessions.snapshot().await.len(), 0);
     }

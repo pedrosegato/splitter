@@ -18,6 +18,7 @@ pub struct StreamSnapshot {
     pub source_device: String,
     pub sink_device: String,
     pub volume: f32,
+    pub muted: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,6 +114,28 @@ impl SessionManager {
         Ok(())
     }
 
+    pub async fn set_stream_muted(
+        &self,
+        id: &SessionId,
+        stream_id: StreamId,
+        muted: bool,
+    ) -> Result<(), NetError> {
+        let mut guard = self.sessions.write().await;
+        let s = guard
+            .get_mut(id)
+            .ok_or_else(|| NetError::SignalingProtocol {
+                reason: format!("unknown session {id}"),
+            })?;
+        let st = s
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| NetError::SignalingProtocol {
+                reason: format!("unknown stream {stream_id} in session {id}"),
+            })?;
+        st.set_muted(muted);
+        Ok(())
+    }
+
     pub async fn snapshot(&self) -> Vec<SessionSnapshot> {
         let guard = self.sessions.read().await;
         guard
@@ -133,6 +156,7 @@ impl SessionManager {
                         source_device: st.route.source.device_id.clone(),
                         sink_device: st.route.sink.device_id.clone(),
                         volume: st.route.volume,
+                        muted: st.muted,
                     })
                     .collect(),
             })
@@ -212,5 +236,33 @@ mod tests {
         let snap = mgr.snapshot().await;
         assert_eq!(snap[0].state, SessionState::Closed);
         assert_eq!(snap[0].streams[0].state, StreamState::Closed);
+    }
+
+    #[tokio::test]
+    async fn muted_defaults_false_and_reflects_set_stream_muted() {
+        let mgr = SessionManager::new();
+        let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
+        mgr.accept(&id).await.unwrap();
+        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+            .await
+            .unwrap();
+        let snap = mgr.snapshot().await;
+        assert!(!snap[0].streams[0].muted);
+
+        mgr.set_stream_muted(&id, 0, true).await.unwrap();
+        let snap = mgr.snapshot().await;
+        assert!(snap[0].streams[0].muted);
+
+        mgr.set_stream_muted(&id, 0, false).await.unwrap();
+        let snap = mgr.snapshot().await;
+        assert!(!snap[0].streams[0].muted);
+    }
+
+    #[tokio::test]
+    async fn set_stream_muted_unknown_session_errors() {
+        let mgr = SessionManager::new();
+        let fake = Uuid::new_v4();
+        let err = mgr.set_stream_muted(&fake, 0, true).await.unwrap_err();
+        assert!(matches!(err, NetError::SignalingProtocol { .. }));
     }
 }

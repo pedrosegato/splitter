@@ -69,6 +69,14 @@ async acceptPending(index: number) : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async peerDevices(peerId: string) : Promise<Result<DeviceDescriptor[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("peer_devices", { peerId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async disconnect(sessionId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("disconnect", { sessionId }) };
@@ -116,6 +124,44 @@ async streamControl(sessionId: string, streamId: number, action: string, value: 
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async muteAll() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mute_all") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async disconnectAll() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("disconnect_all") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setTrayState(state: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_tray_state", { state }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async permissionStatus() : Promise<Permissions> {
+    return await TAURI_INVOKE("permission_status");
+},
+async requestPermission(kind: string) : Promise<PermStatus> {
+    return await TAURI_INVOKE("request_permission", { kind });
+},
+async setAutostart(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_autostart", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -140,6 +186,7 @@ statsTick: "stats-tick"
 
 /** user-defined types **/
 
+export type DeviceDescriptor = { id: string; name: string; kind: string }
 export type DeviceInfo = { id: string; name: string; kind: DeviceKind; default_sample_rate: number; channels: number }
 export type DeviceKind = "Input" | "Output" | "SystemAudio"
 export type DiscoveredPeer = { peer_id: string; peer_name: string; host: string; port: number; version: string }
@@ -151,11 +198,13 @@ export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
 export type PeerDisconnected = { peer_id: string; reason: string }
 export type PeersChanged = DiscoveredPeer[]
 export type PendingPeerDto = { peer_id: string; peer_name: string; addr: string }
+export type PermStatus = "granted" | "denied" | "prompt" | "not_applicable"
+export type Permissions = { microphone: PermStatus; screen: PermStatus }
 export type SessionSnapshot = { id: string; remote_peer_id: string; state: SessionState; streams: StreamSnapshot[] }
 export type SessionState = "pending_outgoing" | "pending_incoming" | "active" | "closed"
-export type Settings = { auto_accept_trusted: boolean; auto_start_with_system: boolean; default_bitrate: number; fec_mode: FecMode; fec_on_threshold_pct: number; fec_off_threshold_pct: number; fec_hysteresis_secs: number; jitter_mode: JitterMode; jitter_max_depth_ms: number; log_level: LogLevel; metrics_enabled: boolean; metrics_port: number }
+export type Settings = { auto_accept_trusted: boolean; auto_start_with_system: boolean; default_bitrate: number; fec_mode: FecMode; fec_on_threshold_pct: number; fec_off_threshold_pct: number; fec_hysteresis_secs: number; jitter_mode: JitterMode; jitter_max_depth_ms: number; log_level: LogLevel; metrics_enabled: boolean; metrics_port: number; signaling_port: number }
 export type StatsTick = StreamStat[]
-export type StreamSnapshot = { id: number; state: StreamState; source_peer: string; sink_peer: string; udp_port: number; source_device: string; sink_device: string; volume: number }
+export type StreamSnapshot = { id: number; state: StreamState; source_peer: string; sink_peer: string; udp_port: number; source_device: string; sink_device: string; volume: number; muted: boolean }
 export type StreamStat = { session_id: string; stream_id: number; rtt_ms: number; loss_pct: number; kbps_sent: number; kbps_received: number }
 export type StreamState = "negotiating" | "active" | "paused" | "error" | "closed"
 

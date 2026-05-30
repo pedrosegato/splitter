@@ -43,6 +43,7 @@ function makeStream(
     source_device: sourceDevice,
     sink_device: sinkDevice,
     volume: 80,
+    muted: false,
   };
 }
 

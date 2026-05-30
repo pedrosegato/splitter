@@ -43,7 +43,7 @@ function DiscoveredRow({
   }
 
   return (
-    <div className="flex items-center gap-[11px] px-[11px] py-[10px] rounded-[2px] border border-transparent hover:bg-[#26262a] hover:border-line-2 cursor-default">
+    <div className="flex items-center gap-[11px] px-[11px] py-[10px] rounded-[2px] border border-transparent hover:bg-elev-2 hover:border-line-2 cursor-default">
       <span className="w-[7px] h-[7px] rounded-full bg-green shrink-0" />
       <span className="flex-1 text-[12.5px]">
         {peer.peer_name}
@@ -73,7 +73,7 @@ function PendingRow({
   const acceptPending = useAcceptPending();
 
   return (
-    <div className="flex items-center gap-[11px] px-[11px] py-[10px] rounded-[2px] border border-transparent hover:bg-[#26262a] hover:border-line-2 cursor-default">
+    <div className="flex items-center gap-[11px] px-[11px] py-[10px] rounded-[2px] border border-transparent hover:bg-elev-2 hover:border-line-2 cursor-default">
       <span className="w-[7px] h-[7px] rounded-full bg-gold shrink-0" />
       <span className="flex-1 text-[12.5px]">
         {peer.peer_name}
@@ -105,7 +105,7 @@ export function ConnectModal({ open, onOpenChange }: Props) {
         aria-describedby={undefined}
         className="w-[378px] max-w-[378px] bg-surface border-line rounded-[3px] gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-[#2a2a2d] border-b border-line rounded-t-[3px]">
+        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-[3px]">
           <DialogTitle className="font-mono text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
             Máquinas na rede
           </DialogTitle>
@@ -147,7 +147,7 @@ export function ConnectModal({ open, onOpenChange }: Props) {
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="font-mono text-[11px] text-ink-2 bg-[#242426] border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
+            className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
           >
             cancelar
           </button>

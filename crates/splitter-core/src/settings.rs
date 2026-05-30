@@ -51,6 +51,7 @@ pub struct Settings {
     pub log_level: LogLevel,
     pub metrics_enabled: bool,
     pub metrics_port: u16,
+    pub signaling_port: u16,
 }
 
 impl Default for Settings {
@@ -68,6 +69,7 @@ impl Default for Settings {
             log_level: LogLevel::Info,
             metrics_enabled: false,
             metrics_port: 9000,
+            signaling_port: 7000,
         }
     }
 }
@@ -160,6 +162,7 @@ mod tests {
             log_level: LogLevel::Debug,
             metrics_enabled: true,
             metrics_port: 9100,
+            signaling_port: 8888,
         };
         original.save_atomic(&path).unwrap();
         let loaded = Settings::load_or_default(&path).unwrap();
@@ -173,5 +176,26 @@ mod tests {
         std::fs::write(&path, "metrics_enabled = true\nfuture_unknown = 42\n").unwrap();
         let loaded = Settings::load_or_default(&path).unwrap();
         assert!(loaded.metrics_enabled);
+    }
+
+    #[test]
+    fn signaling_port_defaults_to_7000_and_roundtrips() {
+        let s = Settings::default();
+        assert_eq!(s.signaling_port, 7000);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let custom = Settings { signaling_port: 8765, ..Default::default() };
+        custom.save_atomic(&path).unwrap();
+        let loaded = Settings::load_or_default(&path).unwrap();
+        assert_eq!(loaded.signaling_port, 8765);
+    }
+
+    #[test]
+    fn signaling_port_missing_in_file_falls_back_to_default() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "metrics_enabled = true\n").unwrap();
+        let loaded = Settings::load_or_default(&path).unwrap();
+        assert_eq!(loaded.signaling_port, 7000);
     }
 }

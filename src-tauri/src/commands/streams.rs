@@ -138,6 +138,9 @@ pub async fn open_session(
     })
     .await
     .map_err(|e| e.to_string())?;
+    tx.send(SignalingMessage::DeviceListRequest {})
+        .await
+        .ok();
     Ok(sid.to_string())
 }
 
@@ -269,6 +272,12 @@ pub async fn stream_control(
             .await
             .map_err(|e| e.to_string())?;
     } else {
+        if let StreamControlSignal::SetMuted(m) = signal {
+            core.sessions
+                .set_stream_muted(&sid, stream_id, m)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
         core.stream_registry
             .send_control(&sid, stream_id, signal)
             .await

@@ -1,11 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { queryClient } from "@/app/queryClient";
 import { mountEventBridge } from "@/lib/events";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUiStore } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
+import { SettingsDialog } from "@/features/settings/SettingsDialog";
+import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
+import { Settings } from "lucide-react";
+import { Toaster } from "@/components/ui/sonner";
 
 function StatusDot() {
   const { data: sessions } = useSnapshot();
@@ -21,6 +25,7 @@ function StatusDot() {
 export function App() {
   const activeTab = useUiStore((s) => s.activeTab);
   const setTab = useUiStore((s) => s.setTab);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -34,11 +39,10 @@ export function App() {
   return (
     <div className="h-full flex flex-col font-sans">
       <header
-        className="h-10 flex items-center px-3.5 border-b border-line shrink-0"
-        style={{ background: "#1a1a1c" }}
+        className="h-10 flex items-center px-3.5 border-b border-line shrink-0 bg-elev-0"
       >
         <StatusDot />
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <Tabs
             value={activeTab}
             onValueChange={(v) => setTab(v as "routing" | "stats")}
@@ -60,11 +64,22 @@ export function App() {
               </TabsTrigger>
             </TabsList>
           </Tabs>
+          <button
+            type="button"
+            aria-label="Configurações"
+            onClick={() => setSettingsOpen(true)}
+            className="flex items-center justify-center w-6 h-6 rounded-sm text-ink-2 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold"
+          >
+            <Settings size={16} />
+          </button>
         </div>
       </header>
       <main className="flex-1 overflow-auto bg-board">
         {activeTab === "routing" ? <RoutingBoard /> : <StatsView />}
       </main>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <OnboardingWizard />
+      <Toaster position="bottom-right" />
     </div>
   );
 }

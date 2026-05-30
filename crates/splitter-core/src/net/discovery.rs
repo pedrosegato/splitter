@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 pub const SERVICE_TYPE: &str = "_splitter._tcp.local.";
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct DiscoveredPeer {
     pub peer_id: String,
     pub peer_name: String,

@@ -31,6 +31,10 @@ tracing-subscriber = { workspace = true }
 prometheus = { workspace = true }
 futures = "0.3"
 crossbeam-queue = "0.3"
+specta = { version = "=2.0.0-rc.22", optional = true }
+
+[features]
+specta = ["dep:specta"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = "1.5"

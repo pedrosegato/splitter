@@ -18,7 +18,11 @@ pub fn apply_setting(s: &mut Settings, key: &str, val: &str) -> Result<(), Strin
         "jitter_mode" => s.jitter_mode = match val {
             "auto" => JitterMode::Auto,
             "min" => JitterMode::Min,
-            _ => return Err("auto|min".into()),
+            v if v.starts_with("fixed:") => {
+                let ms: u32 = v[6..].parse().map_err(|_| "fixed:<ms> expected u32")?;
+                JitterMode::Fixed(ms)
+            }
+            _ => return Err("auto|min|fixed:<ms>".into()),
         },
         "jitter_max_depth_ms" => s.jitter_max_depth_ms = val.parse().map_err(|_| "expected u32")?,
         "log_level" => s.log_level = match val {
@@ -60,8 +64,11 @@ mod tests {
         let mut s = Settings::default();
         apply_setting(&mut s, "log_level", "debug").unwrap();
         apply_setting(&mut s, "default_bitrate", "96000").unwrap();
+        apply_setting(&mut s, "jitter_mode", "fixed:40").unwrap();
         assert!(matches!(s.log_level, splitter_core::LogLevel::Debug));
         assert_eq!(s.default_bitrate, 96000);
+        assert!(matches!(s.jitter_mode, splitter_core::JitterMode::Fixed(40)));
         assert!(apply_setting(&mut s, "nope", "x").is_err());
+        assert!(apply_setting(&mut s, "jitter_mode", "fixed:xx").is_err());
     }
 }

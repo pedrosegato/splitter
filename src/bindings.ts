@@ -140,6 +140,12 @@ async disconnectAll() : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async permissionStatus() : Promise<Permissions> {
+    return await TAURI_INVOKE("permission_status");
+},
+async requestPermission(kind: string) : Promise<PermStatus> {
+    return await TAURI_INVOKE("request_permission", { kind });
 }
 }
 
@@ -176,6 +182,8 @@ export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
 export type PeerDisconnected = { peer_id: string; reason: string }
 export type PeersChanged = DiscoveredPeer[]
 export type PendingPeerDto = { peer_id: string; peer_name: string; addr: string }
+export type PermStatus = "granted" | "denied" | "prompt" | "not_applicable"
+export type Permissions = { microphone: PermStatus; screen: PermStatus }
 export type SessionSnapshot = { id: string; remote_peer_id: string; state: SessionState; streams: StreamSnapshot[] }
 export type SessionState = "pending_outgoing" | "pending_incoming" | "active" | "closed"
 export type Settings = { auto_accept_trusted: boolean; auto_start_with_system: boolean; default_bitrate: number; fec_mode: FecMode; fec_on_threshold_pct: number; fec_off_threshold_pct: number; fec_hysteresis_secs: number; jitter_mode: JitterMode; jitter_max_depth_ms: number; log_level: LogLevel; metrics_enabled: boolean; metrics_port: number; signaling_port: number }

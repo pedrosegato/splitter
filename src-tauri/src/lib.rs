@@ -32,6 +32,8 @@ fn build() -> Builder<tauri::Wry> {
             commands::streams::stream_control,
             commands::ops::mute_all,
             commands::ops::disconnect_all,
+            commands::perms::permission_status,
+            commands::perms::request_permission,
         ])
         .events(collect_events![
             events::PeersChanged,

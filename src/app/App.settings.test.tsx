@@ -24,6 +24,10 @@ vi.mock("@/features/settings/SettingsDialog", () => ({
     open ? <div data-testid="settings-dialog">Configurações</div> : null,
 }));
 
+vi.mock("@/features/onboarding/OnboardingWizard", () => ({
+  OnboardingWizard: () => null,
+}));
+
 import { App } from "./App";
 
 function makeWrapper() {

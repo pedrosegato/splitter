@@ -7,6 +7,7 @@ import { useSnapshot } from "@/hooks/useSnapshot";
 import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
+import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
 import { Settings } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -78,6 +79,7 @@ export function App() {
         {activeTab === "routing" ? <RoutingBoard /> : <StatsView />}
       </main>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <OnboardingWizard />
       <Toaster position="bottom-right" />
     </div>
   );

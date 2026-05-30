@@ -13,7 +13,7 @@ export async function mountEventBridge(qc: QueryClient): Promise<() => void> {
       qc.invalidateQueries({ queryKey: ["snapshot"] });
       qc.invalidateQueries({ queryKey: ["pending"] });
     }),
-    events.statsTick.listen((e) => useUiStore.getState().setStats(e.payload)),
+    events.statsTick.listen((e) => useUiStore.getState().pushStats(e.payload)),
     events.peerDisconnected.listen(() => {
       qc.invalidateQueries({ queryKey: ["snapshot"] });
       qc.invalidateQueries({ queryKey: ["peers"] });

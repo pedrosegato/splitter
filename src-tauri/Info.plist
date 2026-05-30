@@ -3,4 +3,6 @@
 <plist version="1.0"><dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Splitter usa o microfone para compartilhar áudio entre PCs na sua rede.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Splitter usa a captura de tela para compartilhar o áudio do sistema entre PCs na sua rede.</string>
 </dict></plist>

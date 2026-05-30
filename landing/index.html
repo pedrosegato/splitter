@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Splitter — Roteador de áudio LAN</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #1d1d1f;
+      --bg-card:  #262628;
+      --bg-line:  #2e2e30;
+      --ink:      #d7d7da;
+      --ink-dim:  #8a8a8e;
+      --gold:     #e0a52f;
+      --gold-dim: #c48a1a;
+      --radius:   6px;
+      --font:     'IBM Plex Sans', system-ui, sans-serif;
+      --mono:     'IBM Plex Mono', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    section { padding: 64px 0; }
+
+    hr.divider {
+      border: none;
+      border-top: 1px solid var(--bg-line);
+      margin: 0;
+    }
+
+    /* ── Nav ─────────────────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(29, 29, 31, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--bg-line);
+    }
+
+    nav .inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 52px;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    nav .logo {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      color: var(--ink);
+      text-decoration: none;
+      text-transform: uppercase;
+    }
+
+    nav .nav-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+
+    nav .nav-links a {
+      font-size: 13px;
+      color: var(--ink-dim);
+      text-decoration: none;
+      transition: color .15s;
+    }
+    nav .nav-links a:hover { color: var(--ink); }
+
+    /* ── Hero ────────────────────────────────────────────────────────── */
+    #hero {
+      padding: 80px 0 72px;
+      text-align: center;
+    }
+
+    .waveform {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 4px;
+      height: 56px;
+      margin-bottom: 32px;
+    }
+
+    .waveform span {
+      display: block;
+      width: 4px;
+      background: var(--gold);
+      border-radius: 2px 2px 0 0;
+      opacity: 0.85;
+    }
+
+    h1 {
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      line-height: 1.1;
+      margin-bottom: 16px;
+    }
+
+    h1 .accent { color: var(--gold); }
+
+    .tagline {
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      font-weight: 300;
+      color: var(--ink-dim);
+      max-width: 540px;
+      margin: 0 auto 40px;
+    }
+
+    /* ── Download ────────────────────────────────────────────────────── */
+    #download { padding: 0 0 72px; }
+
+    .download-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .dl-card {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-line);
+      border-radius: var(--radius);
+      padding: 20px 16px 16px;
+      text-decoration: none;
+      color: var(--ink);
+      transition: border-color .15s, background .15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      position: relative;
+    }
+    .dl-card:hover {
+      border-color: var(--gold-dim);
+      background: #2a2a2c;
+    }
+
+    .dl-card.active {
+      border-color: var(--gold);
+      background: #2a2720;
+    }
+
+    .dl-card .os-icon {
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .dl-card .os-name {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .dl-card .os-sub {
+      font-size: 11px;
+      color: var(--ink-dim);
+      font-family: var(--mono);
+    }
+
+    .dl-hint {
+      margin-top: 14px;
+      font-size: 12px;
+      color: var(--ink-dim);
+      text-align: center;
+    }
+
+    .dl-hint a {
+      color: var(--gold-dim);
+      text-decoration: none;
+    }
+    .dl-hint a:hover { color: var(--gold); text-decoration: underline; }
+
+    /* ── How it works ────────────────────────────────────────────────── */
+    #how h2, #requirements h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      margin-bottom: 32px;
+      color: var(--ink);
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .step {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-line);
+      border-radius: var(--radius);
+      padding: 24px 20px;
+    }
+
+    .step-num {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--gold);
+      letter-spacing: 0.1em;
+      margin-bottom: 10px;
+    }
+
+    .step-title {
+      font-size: 15px;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+
+    .step-desc {
+      font-size: 13px;
+      color: var(--ink-dim);
+    }
+
+    /* ── Requirements ────────────────────────────────────────────────── */
+    .req-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .req-list li {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--ink-dim);
+    }
+
+    .req-list li::before {
+      content: '–';
+      color: var(--gold);
+      flex-shrink: 0;
+    }
+
+    .req-list code {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: var(--bg-line);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--ink);
+    }
+
+    /* ── Footer ──────────────────────────────────────────────────────── */
+    footer {
+      padding: 28px 0;
+      border-top: 1px solid var(--bg-line);
+    }
+
+    footer .inner {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    footer p {
+      font-size: 13px;
+      color: var(--ink-dim);
+    }
+
+    footer a {
+      color: var(--gold-dim);
+      text-decoration: none;
+    }
+    footer a:hover { color: var(--gold); }
+
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      nav .nav-links { display: none; }
+      section { padding: 48px 0; }
+      #hero { padding: 56px 0 48px; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="inner">
+    <a href="#" class="logo">Splitter</a>
+    <ul class="nav-links">
+      <li><a href="#download">Download</a></li>
+      <li><a href="#how">Como funciona</a></li>
+      <li><a href="#requirements">Requisitos</a></li>
+      <li><a href="https://github.com/pedrosegato/splitter" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ── Hero ──────────────────────────────────────────────────────────── -->
+<section id="hero">
+  <div class="container">
+    <div class="waveform" aria-hidden="true">
+      <span style="height:18px"></span>
+      <span style="height:30px"></span>
+      <span style="height:44px"></span>
+      <span style="height:24px"></span>
+      <span style="height:52px"></span>
+      <span style="height:36px"></span>
+      <span style="height:56px"></span>
+      <span style="height:40px"></span>
+      <span style="height:52px"></span>
+      <span style="height:28px"></span>
+      <span style="height:44px"></span>
+      <span style="height:32px"></span>
+      <span style="height:20px"></span>
+    </div>
+    <h1><span class="accent">Splitter</span></h1>
+    <p class="tagline">Espelhe áudio entre PCs na sua rede local. Leve, sem cloud, sem conta.</p>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- ── Download ───────────────────────────────────────────────────────── -->
+<section id="download">
+  <div class="container">
+    <div class="download-grid">
+      <a class="dl-card" data-os="mac-arm" href="https://github.com/pedrosegato/splitter/releases/latest" target="_blank" rel="noopener">
+        <span class="os-icon">&#63743;</span>
+        <span class="os-name">macOS</span>
+        <span class="os-sub">Apple Silicon</span>
+      </a>
+      <a class="dl-card" data-os="mac-intel" href="https://github.com/pedrosegato/splitter/releases/latest" target="_blank" rel="noopener">
+        <span class="os-icon">&#63743;</span>
+        <span class="os-name">macOS</span>
+        <span class="os-sub">Intel (x86_64)</span>
+      </a>
+      <a class="dl-card" data-os="windows" href="https://github.com/pedrosegato/splitter/releases/latest" target="_blank" rel="noopener">
+        <span class="os-icon">⊞</span>
+        <span class="os-name">Windows</span>
+        <span class="os-sub">.msi / .exe</span>
+      </a>
+      <a class="dl-card" data-os="linux" href="https://github.com/pedrosegato/splitter/releases/latest" target="_blank" rel="noopener">
+        <span class="os-icon">🐧</span>
+        <span class="os-name">Linux</span>
+        <span class="os-sub">.AppImage / .deb</span>
+      </a>
+    </div>
+    <p class="dl-hint">
+      Todos os botões abrem a página de releases mais recente no GitHub.
+      Escolha o asset que corresponde ao seu sistema.
+      Versão anterior?
+      <a href="https://github.com/pedrosegato/splitter/releases" target="_blank" rel="noopener">Ver todas as releases</a>.
+    </p>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- ── Como funciona ──────────────────────────────────────────────────── -->
+<section id="how">
+  <div class="container">
+    <h2>Como funciona</h2>
+    <div class="steps">
+      <div class="step">
+        <p class="step-num">01</p>
+        <p class="step-title">Abrir o Splitter</p>
+        <p class="step-desc">Inicie o app em cada máquina que vai participar. Nenhuma conta, nenhuma configuração de servidor.</p>
+      </div>
+      <div class="step">
+        <p class="step-num">02</p>
+        <p class="step-title">Escolher a máquina na rede</p>
+        <p class="step-desc">O Splitter descobre automaticamente os peers na LAN. Selecione para onde rotear.</p>
+      </div>
+      <div class="step">
+        <p class="step-num">03</p>
+        <p class="step-title">Rotear áudio</p>
+        <p class="step-desc">O áudio flui direto pela rede local, com latência mínima e sem intermediários na nuvem.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- ── Requisitos ─────────────────────────────────────────────────────── -->
+<section id="requirements">
+  <div class="container">
+    <h2>Requisitos</h2>
+    <ul class="req-list">
+      <li>Rede local (LAN / Wi-Fi) entre as máquinas — sem internet necessária.</li>
+      <li>macOS: <code>BlackHole 2ch</code> para capturar áudio de sistema e expor microfone virtual.</li>
+      <li>Windows: <code>VB-Cable</code> para as mesmas funções de áudio de sistema e microfone virtual.</li>
+      <li>Linux: nenhum driver adicional — ALSA/PipeWire nativos.</li>
+      <li>macOS 12+, Windows 10+ ou Linux (glibc 2.17+).</li>
+    </ul>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- ── Footer ─────────────────────────────────────────────────────────── -->
+<footer>
+  <div class="inner">
+    <p>Splitter &mdash; open source, sem cloud, sem conta.</p>
+    <p>
+      <a href="https://github.com/pedrosegato/splitter" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/pedrosegato/splitter/releases" target="_blank" rel="noopener">Releases</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/pedrosegato/splitter/blob/main/LICENSE" target="_blank" rel="noopener">Licença</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var ua = navigator.userAgent;
+    var os = null;
+    if (/iPhone|iPad|iPod/.test(ua)) { return; }
+    if (/Macintosh/.test(ua)) {
+      os = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 ? 'mac-arm' : 'mac-arm';
+      try {
+        var gl = document.createElement('canvas').getContext('webgl');
+        var info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+        var renderer = info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || '';
+        os = /Apple/.test(renderer) ? 'mac-arm' : 'mac-intel';
+      } catch (e) { os = 'mac-arm'; }
+    } else if (/Windows/.test(ua)) {
+      os = 'windows';
+    } else if (/Linux/.test(ua)) {
+      os = 'linux';
+    }
+    if (!os) return;
+    var card = document.querySelector('[data-os="' + os + '"]');
+    if (card) card.classList.add('active');
+  })();
+</script>
+</body>
+</html>

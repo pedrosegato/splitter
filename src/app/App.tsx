@@ -24,12 +24,11 @@ export function App() {
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     mountEventBridge(queryClient).then((fn) => {
-      unlisten = fn;
+      if (cancelled) { fn(); } else { unlisten = fn; }
     });
-    return () => {
-      unlisten?.();
-    };
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
 
   return (

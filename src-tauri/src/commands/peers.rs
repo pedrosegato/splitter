@@ -4,7 +4,16 @@ use tauri::State;
 use splitter_core::net::discovery::DiscoveredPeer;
 use splitter_core::net::signaling::StreamAction;
 use crate::core::AppCore;
-use crate::dto::PendingPeerDto;
+use crate::dto::{IdentityDto, PendingPeerDto};
+
+#[tauri::command]
+#[specta::specta]
+pub async fn identity(core: State<'_, Arc<AppCore>>) -> Result<IdentityDto, String> {
+    Ok(IdentityDto {
+        peer_id: core.identity.peer_id.to_string(),
+        peer_name: core.identity.peer_name.clone(),
+    })
+}
 
 #[tauri::command]
 #[specta::specta]

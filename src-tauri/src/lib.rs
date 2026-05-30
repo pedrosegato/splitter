@@ -16,6 +16,7 @@ fn build() -> Builder<tauri::Wry> {
             commands::devices::list_devices,
             commands::settings::settings_get,
             commands::settings::settings_set,
+            commands::peers::identity,
             commands::peers::discovered_peers,
             commands::peers::pending_peers,
             commands::peers::connect_peer,

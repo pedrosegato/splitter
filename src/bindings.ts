@@ -29,6 +29,14 @@ async settingsSet(key: string, value: string) : Promise<Result<Settings, string>
     else return { status: "error", error: e  as any };
 }
 },
+async identity() : Promise<Result<IdentityDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("identity") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async discoveredPeers() : Promise<Result<DiscoveredPeer[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("discovered_peers") };
@@ -136,6 +144,7 @@ export type DeviceInfo = { id: string; name: string; kind: DeviceKind; default_s
 export type DeviceKind = "Input" | "Output" | "SystemAudio"
 export type DiscoveredPeer = { peer_id: string; peer_name: string; host: string; port: number; version: string }
 export type FecMode = "auto" | "always" | "never"
+export type IdentityDto = { peer_id: string; peer_name: string }
 export type IncomingSession = { peer_id: string; peer_name: string }
 export type JitterMode = "auto" | "min" | { fixed: number }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
@@ -146,7 +155,7 @@ export type SessionSnapshot = { id: string; remote_peer_id: string; state: Sessi
 export type SessionState = "pending_outgoing" | "pending_incoming" | "active" | "closed"
 export type Settings = { auto_accept_trusted: boolean; auto_start_with_system: boolean; default_bitrate: number; fec_mode: FecMode; fec_on_threshold_pct: number; fec_off_threshold_pct: number; fec_hysteresis_secs: number; jitter_mode: JitterMode; jitter_max_depth_ms: number; log_level: LogLevel; metrics_enabled: boolean; metrics_port: number }
 export type StatsTick = StreamStat[]
-export type StreamSnapshot = { id: number; state: StreamState; source_peer: string; sink_peer: string; udp_port: number }
+export type StreamSnapshot = { id: number; state: StreamState; source_peer: string; sink_peer: string; udp_port: number; source_device: string; sink_device: string; volume: number }
 export type StreamStat = { session_id: string; stream_id: number; rtt_ms: number; loss_pct: number; kbps_sent: number; kbps_received: number }
 export type StreamState = "negotiating" | "active" | "paused" | "error" | "closed"
 

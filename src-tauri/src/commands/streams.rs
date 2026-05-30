@@ -59,7 +59,7 @@ async fn find_peer_conn(
     None
 }
 
-async fn notify_remote(
+pub(crate) async fn notify_remote(
     core: &AppCore,
     sid: Uuid,
     stream_id: u8,

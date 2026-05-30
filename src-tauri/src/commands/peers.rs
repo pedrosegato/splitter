@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::State;
 use splitter_core::net::discovery::DiscoveredPeer;
+use splitter_core::net::signaling::StreamAction;
 use crate::core::AppCore;
 use crate::dto::PendingPeerDto;
 
@@ -61,5 +62,14 @@ pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16
 #[specta::specta]
 pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Result<(), String> {
     let sid = uuid::Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let snap = core.sessions.snapshot().await;
+    if let Some(sess) = snap.iter().find(|s| s.id == sid) {
+        for stream in &sess.streams {
+            if let Err(e) = core.stream_registry.close(&sid, stream.id).await {
+                tracing::warn!(%sid, stream_id = stream.id, "disconnect: stream_registry.close error: {e}");
+            }
+            crate::commands::streams::notify_remote(&core, sid, stream.id, StreamAction::Close, None).await;
+        }
+    }
     core.sessions.close(&sid).await.map_err(|e| e.to_string())
 }

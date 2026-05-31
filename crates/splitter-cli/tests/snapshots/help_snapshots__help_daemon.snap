@@ -16,7 +16,7 @@ macOS   — ~/Library/Application Support/Splitter/<identity>/
 Linux   — ~/.config/Splitter/<identity>/
 Windows — %APPDATA%\Splitter\<identity>\
 
-REPL quick reference (full list: see CLI-REFERENCE.md):
+REPL quick reference (run `splitter-cli --help` for the full list):
 peers                     list mDNS-discovered peers
 connect <name|id>         open a TCP signaling link to a peer
 accept <n>                trust a pending HELLO from peer at index <n>

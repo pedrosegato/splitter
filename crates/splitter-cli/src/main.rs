@@ -273,7 +273,7 @@ enum Cmd {
           Linux   — ~/.config/Splitter/<identity>/\n\
           Windows — %APPDATA%\\Splitter\\<identity>\\\n\
         \n\
-        REPL quick reference (full list: see CLI-REFERENCE.md):\n\
+        REPL quick reference (run `splitter-cli --help` for the full list):\n\
           peers                     list mDNS-discovered peers\n\
           connect <name|id>         open a TCP signaling link to a peer\n\
           accept <n>                trust a pending HELLO from peer at index <n>\n\

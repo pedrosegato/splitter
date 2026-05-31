@@ -40,6 +40,34 @@ impl SessionManager {
         Arc::new(Self::default())
     }
 
+    async fn with_session_mut<R>(
+        &self,
+        id: &SessionId,
+        f: impl FnOnce(&mut Session) -> Result<R, NetError>,
+    ) -> Result<R, NetError> {
+        let mut guard = self.sessions.write().await;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
+        f(s)
+    }
+
+    async fn with_stream_mut<R>(
+        &self,
+        id: &SessionId,
+        stream_id: StreamId,
+        f: impl FnOnce(&mut Stream) -> Result<R, NetError>,
+    ) -> Result<R, NetError> {
+        let mut guard = self.sessions.write().await;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
+        let st = s
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(NetError::UnknownStream {
+                session: *id,
+                stream: stream_id,
+            })?;
+        f(st)
+    }
+
     pub async fn open_outgoing(&self, local: Uuid, remote: Uuid) -> SessionId {
         let session = Session::new_outgoing(local, remote);
         let id = session.id;
@@ -64,15 +92,11 @@ impl SessionManager {
     }
 
     pub async fn accept(&self, id: &SessionId) -> Result<(), NetError> {
-        let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
-        s.accept()
+        self.with_session_mut(id, |s| s.accept()).await
     }
 
     pub async fn add_stream(&self, id: &SessionId, stream: Stream) -> Result<(), NetError> {
-        let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
-        s.add_stream(stream)
+        self.with_session_mut(id, |s| s.add_stream(stream)).await
     }
 
     pub async fn activate_stream(
@@ -80,23 +104,16 @@ impl SessionManager {
         id: &SessionId,
         stream_id: StreamId,
     ) -> Result<(), NetError> {
-        let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
-        let st = s
-            .streams
-            .get_mut(&stream_id)
-            .ok_or(NetError::UnknownStream {
-                session: *id,
-                stream: stream_id,
-            })?;
-        st.activate()
+        self.with_stream_mut(id, stream_id, |st| st.activate())
+            .await
     }
 
     pub async fn close(&self, id: &SessionId) -> Result<(), NetError> {
-        let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
-        s.close();
-        Ok(())
+        self.with_session_mut(id, |s| {
+            s.close();
+            Ok(())
+        })
+        .await
     }
 
     pub async fn set_stream_muted(
@@ -105,31 +122,23 @@ impl SessionManager {
         stream_id: StreamId,
         muted: bool,
     ) -> Result<(), NetError> {
-        let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
-        let st = s
-            .streams
-            .get_mut(&stream_id)
-            .ok_or(NetError::UnknownStream {
-                session: *id,
-                stream: stream_id,
-            })?;
-        st.set_muted(muted);
-        Ok(())
+        self.with_stream_mut(id, stream_id, |st| {
+            st.set_muted(muted);
+            Ok(())
+        })
+        .await
     }
 
     pub async fn next_stream_id(&self, id: &SessionId) -> Result<StreamId, NetError> {
-        let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
-        Ok(s.next_stream_id())
+        self.with_session_mut(id, |s| Ok(s.next_stream_id())).await
     }
 
     pub async fn remove_stream(&self, id: &SessionId, stream_id: StreamId) -> Result<(), NetError> {
-        let mut guard = self.sessions.write().await;
-        if let Some(s) = guard.get_mut(id) {
+        self.with_session_mut(id, |s| {
             s.streams.remove(&stream_id);
-        }
-        Ok(())
+            Ok(())
+        })
+        .await
     }
 
     pub async fn snapshot(&self) -> Vec<SessionSnapshot> {
@@ -297,6 +306,17 @@ mod tests {
         assert!(
             matches!(err, NetError::SignalingProtocol { .. }),
             "duplicate session_id is a genuine protocol violation: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_stream_unknown_session_returns_unknown_session_error() {
+        let mgr = SessionManager::new();
+        let fake = Uuid::new_v4();
+        let err = mgr.remove_stream(&fake, 0).await.unwrap_err();
+        assert!(
+            matches!(err, NetError::UnknownSession(_)),
+            "remove_stream on unknown session must error consistently with sibling methods: {err:?}"
         );
     }
 }

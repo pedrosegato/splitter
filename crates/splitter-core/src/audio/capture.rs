@@ -23,13 +23,12 @@ impl CaptureHandle {
     }
 
     pub fn start(device_name: &str, producer: RingProducer) -> Result<Self, AudioError> {
-        let device = resolve_input_device(device_name)?;
-        Self::from_device(device, producer, Arc::new(Notify::new()))
+        Self::start_by_id(device_name, producer)
     }
 
     pub fn start_by_id(device_id: &str, producer: RingProducer) -> Result<Self, AudioError> {
-        let resolved = resolve_input_device(device_id)?;
-        Self::from_device(resolved, producer, Arc::new(Notify::new()))
+        let device = resolve_input_device(device_id)?;
+        Self::from_device(device, producer, Arc::new(Notify::new()))
     }
 
     pub fn start_loopback(producer: RingProducer) -> Result<Self, AudioError> {
@@ -138,81 +137,7 @@ impl CaptureHandle {
         producer: RingProducer,
         frame_notify: Arc<Notify>,
     ) -> Result<Self, AudioError> {
-        use cpal::traits::DeviceTrait;
-
-        let channels = supported.channels();
-        let sample_rate = supported.sample_rate().0;
-        let sample_format = supported.sample_format();
-        let config: cpal::StreamConfig = supported.into();
-
-        let producer = Arc::new(std::sync::Mutex::new(producer));
-        let notify = frame_notify.clone();
-        let err_fn = |e| tracing::error!("cpal loopback stream error: {e}");
-
-        let stream = match sample_format {
-            cpal::SampleFormat::F32 => {
-                let prod = producer.clone();
-                let n = notify.clone();
-                let mut router = SampleRouter::new(sample_rate, channels)?;
-                device
-                    .build_input_stream(
-                        &config,
-                        move |samples: &[f32], _| {
-                            router.push_f32(samples, &prod, &n);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            cpal::SampleFormat::I16 => {
-                let prod = producer.clone();
-                let n = notify.clone();
-                let mut router = SampleRouter::new(sample_rate, channels)?;
-                device
-                    .build_input_stream(
-                        &config,
-                        move |samples: &[i16], _| {
-                            router.push_i16(samples, &prod, &n);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            cpal::SampleFormat::U16 => {
-                let prod = producer.clone();
-                let n = notify.clone();
-                let mut router = SampleRouter::new(sample_rate, channels)?;
-                device
-                    .build_input_stream(
-                        &config,
-                        move |samples: &[u16], _| {
-                            router.push_u16(samples, &prod, &n);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            other => {
-                return Err(AudioError::BuildStream {
-                    source: Box::new(std::io::Error::other(format!(
-                        "unsupported loopback format: {other:?}"
-                    ))),
-                });
-            }
-        };
-
-        stream.play().map_err(|e| AudioError::PlayStream {
-            source: Box::new(e),
-        })?;
+        let stream = build_capture_stream(device, supported, producer, frame_notify.clone())?;
         Ok(Self {
             _stream: stream,
             frame_notify,
@@ -231,85 +156,94 @@ impl CaptureHandle {
                     source: Box::new(e),
                 })
         })?;
-        let channels = supported.channels();
-        let sample_rate = supported.sample_rate().0;
-        let sample_format = supported.sample_format();
-
-        let config: cpal::StreamConfig = supported.into();
-
-        let producer = Arc::new(Mutex::new(producer));
-        let notify = frame_notify.clone();
-        let err_fn = |e| tracing::error!("cpal capture stream error: {e}");
-
-        let stream = match sample_format {
-            cpal::SampleFormat::F32 => {
-                let prod = producer.clone();
-                let n = notify.clone();
-                let mut router = SampleRouter::new(sample_rate, channels)?;
-                device
-                    .build_input_stream(
-                        &config,
-                        move |samples: &[f32], _| {
-                            router.push_f32(samples, &prod, &n);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            cpal::SampleFormat::I16 => {
-                let prod = producer.clone();
-                let n = notify.clone();
-                let mut router = SampleRouter::new(sample_rate, channels)?;
-                device
-                    .build_input_stream(
-                        &config,
-                        move |samples: &[i16], _| {
-                            router.push_i16(samples, &prod, &n);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            cpal::SampleFormat::U16 => {
-                let prod = producer.clone();
-                let n = notify.clone();
-                let mut router = SampleRouter::new(sample_rate, channels)?;
-                device
-                    .build_input_stream(
-                        &config,
-                        move |samples: &[u16], _| {
-                            router.push_u16(samples, &prod, &n);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            other => {
-                return Err(AudioError::BuildStream {
-                    source: Box::new(std::io::Error::other(format!(
-                        "unsupported sample format: {other:?}"
-                    ))),
-                });
-            }
-        };
-
-        stream.play().map_err(|e| AudioError::PlayStream {
-            source: Box::new(e),
-        })?;
+        let stream = build_capture_stream(device, supported, producer, frame_notify.clone())?;
         Ok(Self {
             _stream: stream,
             frame_notify,
         })
     }
+}
+
+fn build_capture_stream(
+    device: cpal::Device,
+    supported: cpal::SupportedStreamConfig,
+    producer: RingProducer,
+    frame_notify: Arc<Notify>,
+) -> Result<cpal::Stream, AudioError> {
+    let channels = supported.channels();
+    let sample_rate = supported.sample_rate().0;
+    let sample_format = supported.sample_format();
+    let config: cpal::StreamConfig = supported.into();
+
+    let producer = Arc::new(Mutex::new(producer));
+    let notify = frame_notify.clone();
+    let err_fn = |e| tracing::error!("cpal capture stream error: {e}");
+
+    let stream = match sample_format {
+        cpal::SampleFormat::F32 => {
+            let prod = producer.clone();
+            let n = notify.clone();
+            let mut router = SampleRouter::new(sample_rate, channels)?;
+            device
+                .build_input_stream(
+                    &config,
+                    move |samples: &[f32], _| {
+                        router.push_f32(samples, &prod, &n);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?
+        }
+        cpal::SampleFormat::I16 => {
+            let prod = producer.clone();
+            let n = notify.clone();
+            let mut router = SampleRouter::new(sample_rate, channels)?;
+            device
+                .build_input_stream(
+                    &config,
+                    move |samples: &[i16], _| {
+                        router.push_i16(samples, &prod, &n);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?
+        }
+        cpal::SampleFormat::U16 => {
+            let prod = producer.clone();
+            let n = notify.clone();
+            let mut router = SampleRouter::new(sample_rate, channels)?;
+            device
+                .build_input_stream(
+                    &config,
+                    move |samples: &[u16], _| {
+                        router.push_u16(samples, &prod, &n);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?
+        }
+        other => {
+            return Err(AudioError::BuildStream {
+                source: Box::new(std::io::Error::other(format!(
+                    "unsupported sample format: {other:?}"
+                ))),
+            });
+        }
+    };
+
+    stream.play().map_err(|e| AudioError::PlayStream {
+        source: Box::new(e),
+    })?;
+    Ok(stream)
 }
 
 fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
@@ -343,6 +277,27 @@ fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
 // 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices).
 const RESAMPLE_CHUNK: usize = 441;
 
+fn make_resampler(input_rate: u32) -> Result<Resampler, AudioError> {
+    Resampler::new(input_rate, SAMPLE_RATE, RESAMPLE_CHUNK).map_err(|e| AudioError::BuildStream {
+        source: Box::new(e),
+    })
+}
+
+fn deinterleave_stereo_frame<T: Copy>(
+    interleaved: &[T],
+    base: usize,
+    channels: usize,
+    to_f32: &impl Fn(T) -> f32,
+) -> (f32, f32) {
+    let l = to_f32(interleaved[base]);
+    let r = if channels >= 2 {
+        to_f32(interleaved[base + 1])
+    } else {
+        l
+    };
+    (l, r)
+}
+
 /// Routes multi-channel interleaved samples -> stereo interleaved (L,R) -> optional resampler -> ring.
 /// Mono sources are upmixed to stereo by duplicating the channel.
 /// N>2 channel sources are downmixed to stereo using the first two channels.
@@ -362,16 +317,8 @@ struct SampleRouter {
 impl SampleRouter {
     fn new(sample_rate: u32, channels: u16) -> Result<Self, AudioError> {
         let (resampler_l, resampler_r) = if sample_rate != SAMPLE_RATE {
-            let l = Resampler::new(sample_rate, SAMPLE_RATE, RESAMPLE_CHUNK).map_err(|e| {
-                AudioError::BuildStream {
-                    source: Box::new(e),
-                }
-            })?;
-            let r = Resampler::new(sample_rate, SAMPLE_RATE, RESAMPLE_CHUNK).map_err(|e| {
-                AudioError::BuildStream {
-                    source: Box::new(e),
-                }
-            })?;
+            let l = make_resampler(sample_rate)?;
+            let r = make_resampler(sample_rate)?;
             (Some(l), Some(r))
         } else {
             (None, None)
@@ -422,13 +369,7 @@ impl SampleRouter {
             self.scratch.clear();
             self.scratch.reserve(frame_count * 2);
             for i in 0..frame_count {
-                let base = i * ch;
-                let l = to_f32(interleaved[base]);
-                let r = if ch >= 2 {
-                    to_f32(interleaved[base + 1])
-                } else {
-                    l
-                };
+                let (l, r) = deinterleave_stereo_frame(interleaved, i * ch, ch, &to_f32);
                 self.scratch.push(l);
                 self.scratch.push(r);
             }
@@ -441,13 +382,7 @@ impl SampleRouter {
         // Note: RESAMPLE_CHUNK is per-channel; scratch holds stereo pairs so
         // we flush when we have RESAMPLE_CHUNK frames = RESAMPLE_CHUNK*2 samples.
         for i in 0..frame_count {
-            let base = i * ch;
-            let l = to_f32(interleaved[base]);
-            let r = if ch >= 2 {
-                to_f32(interleaved[base + 1])
-            } else {
-                l
-            };
+            let (l, r) = deinterleave_stereo_frame(interleaved, i * ch, ch, &to_f32);
             self.scratch.push(l);
             self.scratch.push(r);
 
@@ -562,6 +497,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn make_resampler_returns_ok_for_valid_rate() {
+        assert!(make_resampler(44_100).is_ok());
+        assert!(make_resampler(22_050).is_ok());
+        assert!(make_resampler(96_000).is_ok());
+    }
+
+    #[test]
+    fn deinterleave_stereo_frame_mono_upmix() {
+        let samples = [0.5f32];
+        let (l, r) = deinterleave_stereo_frame(&samples, 0, 1, &|s| s);
+        assert!((l - 0.5).abs() < 1e-6);
+        assert!((r - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deinterleave_stereo_frame_stereo_passthrough() {
+        let samples = [0.3f32, 0.7f32];
+        let (l, r) = deinterleave_stereo_frame(&samples, 0, 2, &|s| s);
+        assert!((l - 0.3).abs() < 1e-6);
+        assert!((r - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deinterleave_stereo_frame_6ch_uses_first_two() {
+        let samples = [0.1f32, 0.2f32, 0.3f32, 0.4f32, 0.5f32, 0.6f32];
+        let (l, r) = deinterleave_stereo_frame(&samples, 0, 6, &|s| s);
+        assert!((l - 0.1).abs() < 1e-6);
+        assert!((r - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deinterleave_stereo_frame_6ch_nonzero_base() {
+        let samples = [
+            0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.9f32, 0.8f32, 0.7f32, 0.6f32, 0.5f32,
+            0.4f32,
+        ];
+        let (l, r) = deinterleave_stereo_frame(&samples, 6, 6, &|s| s);
+        assert!((l - 0.9).abs() < 1e-6);
+        assert!((r - 0.8).abs() < 1e-6);
+    }
+
     /// Verifies that SampleRouter at 48k (no resampler) correctly converts stereo to stereo
     /// and delivers interleaved L,R pairs to the ring.
     #[test]
@@ -614,7 +591,7 @@ mod tests {
             assert!(
                 (out[i * 2] - 0.5).abs() < 1e-5,
                 "L ch expected 0.5, got {}",
-                out[i * 2]
+                out[i * 2 + 1]
             );
             assert!(
                 (out[i * 2 + 1] - 0.5).abs() < 1e-5,

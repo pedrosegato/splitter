@@ -188,6 +188,28 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
             )
             .await;
         }
+        let remote = sess.remote_peer_id;
+        let tx = {
+            let g = core.server.connections.read().await;
+            g.get(&remote).map(|c| c.tx.clone())
+        };
+        let tx = match tx {
+            Some(t) => Some(t),
+            None => core
+                .outgoing
+                .read()
+                .await
+                .get(&remote)
+                .map(|c| c.tx.clone()),
+        };
+        if let Some(tx) = tx {
+            let _ = tx
+                .send(SignalingMessage::SessionResponse {
+                    session_id: sid.to_string(),
+                    accepted: false,
+                })
+                .await;
+        }
     }
     core.sessions.close(&sid).await.map_err(|e| e.to_string())
 }

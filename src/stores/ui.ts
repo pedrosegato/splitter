@@ -36,6 +36,7 @@ interface UiState {
   stats: StreamStat[];
   statsHistory: Record<number, StreamHistory>;
   incoming: Incoming;
+  knownNames: Record<string, string>;
   setTab: (t: UiState["activeTab"]) => void;
   selectStream: (id: number | null) => void;
   armSource: (peerId: string, deviceId: string) => void;
@@ -43,6 +44,7 @@ interface UiState {
   setStats: (s: StreamStat[]) => void;
   pushStats: (tick: StreamStat[]) => void;
   setIncoming: (i: Incoming) => void;
+  rememberNames: (names: Record<string, string>) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -52,6 +54,7 @@ export const useUiStore = create<UiState>((set) => ({
   stats: [],
   statsHistory: {},
   incoming: null,
+  knownNames: {},
   setTab: (activeTab) => set({ activeTab }),
   selectStream: (selectedStreamId) => set({ selectedStreamId }),
   armSource: (peerId, deviceId) => set({ arm: { peerId, deviceId } }),
@@ -63,4 +66,6 @@ export const useUiStore = create<UiState>((set) => ({
       statsHistory: pushStatsHistory(state.statsHistory, tick),
     })),
   setIncoming: (incoming) => set({ incoming }),
+  rememberNames: (names) =>
+    set((state) => ({ knownNames: { ...state.knownNames, ...names } })),
 }));

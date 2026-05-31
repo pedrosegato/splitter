@@ -30,10 +30,13 @@ pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     let menu = Menu::with_items(app, &[&abrir, &mute_all, &disconnect_all, &sep, &sair])?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .expect("app must have a window icon");
+    let icon = match app.default_window_icon().cloned() {
+        Some(i) => i,
+        None => {
+            tracing::warn!("no default window icon found; falling back to bundled tray icon");
+            tauri::image::Image::new_owned(ICON_IDLE.to_vec(), TRAY_ICON_SIZE, TRAY_ICON_SIZE)
+        }
+    };
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)

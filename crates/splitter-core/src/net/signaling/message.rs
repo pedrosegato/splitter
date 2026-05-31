@@ -108,6 +108,12 @@ pub enum SignalingMessage {
         peer_id: String,
         peer_name: String,
     },
+    StreamRequest {
+        session_id: String,
+        source_device: String,
+        source_is_system: bool,
+        sink_device: String,
+    },
 }
 
 impl SignalingMessage {

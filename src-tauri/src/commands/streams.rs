@@ -93,11 +93,10 @@ pub(crate) async fn notify_remote(
 }
 
 async fn wait_for_stream_open_ack(
-    events: &tokio::sync::broadcast::Sender<PeerEvent>,
+    rx: &mut tokio::sync::broadcast::Receiver<PeerEvent>,
     stream_id: u8,
     timeout: Duration,
 ) -> Result<u16, String> {
-    let mut rx = events.subscribe();
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -107,10 +106,18 @@ async fn wait_for_stream_open_ack(
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Ok(PeerEvent::Message(SignalingMessage::StreamOpenAck {
                 stream_id: id,
-                accepted: true,
-                udp_port: Some(port),
-            }))) if id == stream_id => return Ok(port),
+                accepted,
+                udp_port,
+            }))) if id == stream_id => {
+                return if accepted {
+                    udp_port
+                        .ok_or_else(|| "stream_open_ack accepted without a udp_port".to_string())
+                } else {
+                    Err("the other PC rejected the stream".to_string())
+                };
+            }
             Ok(Ok(_)) => continue,
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
             _ => return Err("timed out waiting for stream_open_ack".to_string()),
         }
     }
@@ -148,40 +155,31 @@ pub async fn open_session(
     Ok(sid.to_string())
 }
 
-#[tauri::command]
-#[specta::specta]
-pub async fn open_stream(
-    core: State<'_, Arc<AppCore>>,
-    session_id: String,
+pub(crate) async fn open_stream_core(
+    core: &AppCore,
+    sid: Uuid,
     source_device_id: String,
     source_is_system: bool,
-    sink_peer_id: String,
+    sink_peer: Uuid,
     sink_device_id: String,
-    bitrate: Option<i32>,
+    bitrate: i32,
 ) -> Result<u8, String> {
-    let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
-    let bitrate = bitrate.unwrap_or(64_000);
     let local_peer_id = core.identity.read().unwrap().peer_id;
 
-    let snap = core.sessions.snapshot().await;
-    let session = snap
+    let stream_id: u8 = core
+        .sessions
+        .snapshot()
+        .await
         .iter()
         .find(|s| s.id == sid)
+        .map(|s| s.streams.len() as u8)
         .ok_or_else(|| format!("session {sid} not found"))?;
-    let remote_peer_id = session.remote_peer_id;
-    let stream_id: u8 = session.streams.len() as u8;
 
-    let sink_uuid = Uuid::parse_str(&sink_peer_id).map_err(|e| e.to_string())?;
-    if sink_uuid != remote_peer_id {
-        return Err(format!(
-            "sink peer {sink_uuid} does not match session remote {remote_peer_id}"
-        ));
-    }
-
-    let (conn_tx, conn_remote_addr, conn_events) = find_peer_conn(&core, remote_peer_id)
+    let (conn_tx, conn_remote_addr, conn_events) = find_peer_conn(core, sink_peer)
         .await
         .ok_or_else(|| "no live signaling connection to remote peer".to_string())?;
 
+    let mut ack_rx = conn_events.subscribe();
     conn_tx
         .send(SignalingMessage::StreamOpen {
             session_id: sid.to_string(),
@@ -191,7 +189,7 @@ pub async fn open_stream(
                 device_id: source_device_id.clone(),
             },
             sink: Endpoint {
-                peer_id: remote_peer_id.to_string(),
+                peer_id: sink_peer.to_string(),
                 device_id: sink_device_id.clone(),
             },
             codec: CodecParams {
@@ -204,8 +202,7 @@ pub async fn open_stream(
         .await
         .map_err(|e| e.to_string())?;
 
-    let ack_port =
-        wait_for_stream_open_ack(&conn_events, stream_id, Duration::from_secs(5)).await?;
+    let ack_port = wait_for_stream_open_ack(&mut ack_rx, stream_id, Duration::from_secs(5)).await?;
     let remote: SocketAddr = SocketAddr::new(conn_remote_addr.ip(), ack_port);
 
     let route = StreamRoute {
@@ -214,7 +211,7 @@ pub async fn open_stream(
             device_id: source_device_id.clone(),
         },
         sink: Endpoint {
-            peer_id: remote_peer_id.to_string(),
+            peer_id: sink_peer.to_string(),
             device_id: sink_device_id,
         },
         codec: CodecParams {
@@ -249,6 +246,77 @@ pub async fn open_stream(
     let _ = core.sessions.activate_stream(&sid, stream_id).await;
     tracing::info!(%sid, stream_id, "stream now active");
     Ok(stream_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn open_stream(
+    core: State<'_, Arc<AppCore>>,
+    session_id: String,
+    source_device_id: String,
+    source_is_system: bool,
+    sink_peer_id: String,
+    sink_device_id: String,
+    bitrate: Option<i32>,
+) -> Result<u8, String> {
+    let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let bitrate = bitrate.unwrap_or(64_000);
+    let remote_peer_id = core
+        .sessions
+        .snapshot()
+        .await
+        .iter()
+        .find(|s| s.id == sid)
+        .map(|s| s.remote_peer_id)
+        .ok_or_else(|| format!("session {sid} not found"))?;
+    let sink_uuid = Uuid::parse_str(&sink_peer_id).map_err(|e| e.to_string())?;
+    if sink_uuid != remote_peer_id {
+        return Err(format!(
+            "sink peer {sink_uuid} does not match session remote {remote_peer_id}"
+        ));
+    }
+    open_stream_core(
+        &core,
+        sid,
+        source_device_id,
+        source_is_system,
+        remote_peer_id,
+        sink_device_id,
+        bitrate,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn request_stream(
+    core: State<'_, Arc<AppCore>>,
+    session_id: String,
+    source_device_id: String,
+    source_is_system: bool,
+    sink_device_id: String,
+) -> Result<(), String> {
+    let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let remote = core
+        .sessions
+        .snapshot()
+        .await
+        .iter()
+        .find(|s| s.id == sid)
+        .map(|s| s.remote_peer_id)
+        .ok_or_else(|| format!("session {sid} not found"))?;
+    let (tx, _, _) = find_peer_conn(&core, remote)
+        .await
+        .ok_or_else(|| "no live signaling connection to remote peer".to_string())?;
+    tx.send(SignalingMessage::StreamRequest {
+        session_id: sid.to_string(),
+        source_device: source_device_id,
+        source_is_system,
+        sink_device: sink_device_id,
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

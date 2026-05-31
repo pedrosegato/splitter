@@ -7,14 +7,19 @@ import { useUiStore } from "@/stores/ui";
 vi.mock("@/hooks/useSnapshot");
 vi.mock("@/hooks/useDevices");
 vi.mock("@/hooks/useStreams");
+vi.mock("@/hooks/useIdentity");
 
 import { useSnapshot } from "@/hooks/useSnapshot";
-import { useDevices } from "@/hooks/useDevices";
-import { useOpenStream } from "@/hooks/useStreams";
+import { useDevices, usePeerDevices } from "@/hooks/useDevices";
+import { useOpenStream, useRequestStream } from "@/hooks/useStreams";
+import { useIdentity } from "@/hooks/useIdentity";
 
 const mockedUseSnapshot = useSnapshot as ReturnType<typeof vi.fn>;
 const mockedUseDevices = useDevices as ReturnType<typeof vi.fn>;
+const mockedUsePeerDevices = usePeerDevices as ReturnType<typeof vi.fn>;
 const mockedUseOpenStream = useOpenStream as ReturnType<typeof vi.fn>;
+const mockedUseRequestStream = useRequestStream as ReturnType<typeof vi.fn>;
+const mockedUseIdentity = useIdentity as ReturnType<typeof vi.fn>;
 
 const SESSION = { id: "sess-1", remote_peer_id: "peer-b", state: "active", streams: [] };
 const DEVICES = [
@@ -47,7 +52,10 @@ describe("useWiring", () => {
     mutateSpy = vi.fn();
     mockedUseSnapshot.mockReturnValue({ data: [SESSION] });
     mockedUseDevices.mockReturnValue({ data: DEVICES });
+    mockedUsePeerDevices.mockReturnValue({ data: [] });
     mockedUseOpenStream.mockReturnValue({ mutate: mutateSpy });
+    mockedUseRequestStream.mockReturnValue({ mutate: vi.fn() });
+    mockedUseIdentity.mockReturnValue({ data: { peer_id: "peer-a", peer_name: "A" } });
   });
 
   it("sink-first yields hint 'comece por uma fonte'", () => {
@@ -57,7 +65,7 @@ describe("useWiring", () => {
       result.current.onPortActivate("peer-a:sink:mic-1", "sink", "peer-a", "mic-1");
     });
 
-    expect(result.current.hint).toBe("comece por uma fonte deste PC");
+    expect(result.current.hint).toBe("comece por uma fonte");
     expect(mutateSpy).not.toHaveBeenCalled();
   });
 
@@ -69,7 +77,7 @@ describe("useWiring", () => {
     });
 
     expect(result.current.arm).toEqual({ peerId: "peer-a", deviceId: "sys-1" });
-    expect(result.current.hint).toBe("clique num destino do outro PC");
+    expect(result.current.hint).toBe("agora clique num destino");
 
     act(() => {
       result.current.onPortActivate("peer-b:sink:spk-1", "sink", "peer-b", "spk-1");
@@ -163,7 +171,7 @@ describe("useWiring", () => {
         result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
       });
 
-      expect(result.current.hint).toBe("comece por uma fonte deste PC");
+      expect(result.current.hint).toBe("comece por uma fonte");
 
       act(() => {
         vi.advanceTimersByTime(2200);

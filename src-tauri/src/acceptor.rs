@@ -298,6 +298,36 @@ pub fn spawn_acceptor(
                         }
                         tracing::info!(peer = %peer_id, new_name = %peer_name, "peer renamed");
                     }
+                    SignalingMessage::StreamRequest {
+                        session_id,
+                        source_device,
+                        source_is_system,
+                        sink_device,
+                    } => {
+                        let Ok(req_sid) = Uuid::parse_str(&session_id) else {
+                            continue;
+                        };
+                        let core2 = core.clone();
+                        let sink_peer = peer_id;
+                        tauri::async_runtime::spawn(async move {
+                            match crate::commands::streams::open_stream_core(
+                                &core2,
+                                req_sid,
+                                source_device,
+                                source_is_system,
+                                sink_peer,
+                                sink_device,
+                                64_000,
+                            )
+                            .await
+                            {
+                                Ok(_) => core2.emit(SnapshotChanged),
+                                Err(e) => {
+                                    tracing::warn!(peer = %sink_peer, "stream request failed: {e}")
+                                }
+                            }
+                        });
+                    }
                     _ => {}
                 },
                 Ok(PeerEvent::Disconnected { reason }) => {

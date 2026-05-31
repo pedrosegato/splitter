@@ -130,6 +130,7 @@ impl SignalingServer {
                                 accepted: false,
                                 reason: Some("first message must be hello".into()),
                                 auth_token: None,
+                                peer_id: None,
                             })
                             .await;
                         return;
@@ -143,6 +144,7 @@ impl SignalingServer {
                                     "protocol_version mismatch: got {protocol_version}, expected {PROTOCOL_VERSION}"
                                 )),
                                 auth_token: None,
+                                peer_id: None,
                             })
                             .await;
                         return;
@@ -154,6 +156,7 @@ impl SignalingServer {
                                 accepted: false,
                                 reason: Some("invalid peer_id uuid".into()),
                                 auth_token: None,
+                                peer_id: None,
                             })
                             .await;
                         return;
@@ -171,6 +174,7 @@ impl SignalingServer {
                                     accepted: false,
                                     reason: Some("auth_token mismatch".into()),
                                     auth_token: None,
+                                    peer_id: None,
                                 })
                                 .await;
                             return;
@@ -183,10 +187,10 @@ impl SignalingServer {
                                     accepted: true,
                                     reason: None,
                                     auth_token: Some(auth_token.clone()),
+                                    peer_id: Some(id_inner.peer_id.to_string()),
                                 })
                                 .await;
                             c_inner.write().await.insert(peer_uuid, handle);
-                            let _ = id_inner;
                             let _ = conn_est_tx_inner.send(peer_uuid);
                             return;
                         }
@@ -228,6 +232,17 @@ pub async fn accept_pending(
     conn_established_tx: &broadcast::Sender<Uuid>,
     idx: usize,
 ) -> Result<(Uuid, String), NetError> {
+    accept_pending_as(pending, trust, connections, conn_established_tx, idx, None).await
+}
+
+pub async fn accept_pending_as(
+    pending: &PendingPeers,
+    trust: &Arc<RwLock<TrustStore>>,
+    connections: &Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    conn_established_tx: &broadcast::Sender<Uuid>,
+    idx: usize,
+    server_peer_id: Option<Uuid>,
+) -> Result<(Uuid, String), NetError> {
     let p = pending
         .take(idx)
         .await
@@ -251,6 +266,7 @@ pub async fn accept_pending(
                 accepted: true,
                 reason: None,
                 auth_token: Some(token.clone()),
+                peer_id: server_peer_id.map(|id| id.to_string()),
             })
             .await
             .map_err(|_| NetError::SignalingProtocol {

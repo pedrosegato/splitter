@@ -3,7 +3,7 @@ use super::{graceful_shutdown, ui};
 use crate::commands::stream_repl;
 use splitter_core::net::discovery::{Discovery, DiscoveryEvent};
 use splitter_core::net::signaling::client_ops::{find_conn_tx, notify_remote_control};
-use splitter_core::net::signaling::server::{accept_pending, SignalingServerHandle};
+use splitter_core::net::signaling::server::{accept_pending_as, SignalingServerHandle};
 use splitter_core::net::signaling::{connect_to_peer, SignalingMessage, StreamAction};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -221,12 +221,13 @@ async fn cmd_accept<'a>(
     parts: &mut impl Iterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
     let idx: usize = parts.next().unwrap_or("0").parse()?;
-    let (peer_id, _token) = accept_pending(
+    let (peer_id, _token) = accept_pending_as(
         &server.pending,
         &ctx.trust,
         &server.connections,
         &server.connection_established_tx,
         idx,
+        Some(ctx.local_peer_id),
     )
     .await?;
     #[allow(clippy::print_stdout)]

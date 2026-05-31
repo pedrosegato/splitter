@@ -65,8 +65,9 @@ pub async fn connect_to_peer(
                     accepted,
                     reason,
                     auth_token,
+                    peer_id,
                 })) => {
-                    return Ok((accepted, reason, auth_token));
+                    return Ok((accepted, reason, auth_token, peer_id));
                 }
                 Ok(PeerEvent::Disconnected { reason }) => {
                     return Err(NetError::SignalingProtocol { reason });
@@ -86,10 +87,16 @@ pub async fn connect_to_peer(
         millis: handshake_timeout.as_millis() as u64,
     })??;
 
-    let (accepted, reason, received_token) = ack;
+    let (accepted, reason, received_token, ack_peer_id_str) = ack;
+
+    let resolved_peer_id: Option<Uuid> = remote_peer_id_hint.or_else(|| {
+        ack_peer_id_str
+            .as_deref()
+            .and_then(|s| Uuid::parse_str(s).ok())
+    });
 
     if accepted {
-        if let (Some(token), Some(peer_id)) = (received_token, remote_peer_id_hint) {
+        if let (Some(token), Some(peer_id)) = (received_token, resolved_peer_id) {
             let mut t = trust.write().await;
             let peer_name = t
                 .peer_for(&peer_id)
@@ -105,7 +112,7 @@ pub async fn connect_to_peer(
     }
 
     Ok(ConnectOutcome {
-        remote_peer_id: remote_peer_id_hint,
+        remote_peer_id: resolved_peer_id,
         handle,
         accepted,
         reason,
@@ -469,6 +476,84 @@ mod tests {
         assert_eq!(
             stored.peer_name, known_name,
             "accept must not overwrite existing peer name with empty string"
+        );
+    }
+
+    #[tokio::test]
+    async fn dial_with_no_hint_accepted_persists_token_via_hello_ack_peer_id() {
+        use crate::net::signaling::server::accept_pending_as;
+        let dir = tempdir().unwrap();
+        let server_identity = make_identity("server");
+        let server_peer_id = server_identity.peer_id;
+        let server_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
+        ));
+        let sessions = SessionManager::new();
+        let settings = Arc::new(RwLock::new(Settings::default()));
+        let server = SignalingServer::start(
+            "127.0.0.1:0".parse().unwrap(),
+            server_identity,
+            server_trust.clone(),
+            sessions,
+            settings,
+        )
+        .await
+        .unwrap();
+
+        let client_identity = make_identity("client");
+        let client_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
+        ));
+
+        let dial = tokio::spawn({
+            let client_trust = client_trust.clone();
+            let bind_addr = server.bind_addr;
+            async move {
+                connect_to_peer(
+                    bind_addr,
+                    &client_identity,
+                    client_trust,
+                    None,
+                    Duration::from_secs(5),
+                )
+                .await
+            }
+        });
+
+        let acceptor = tokio::spawn({
+            let pending = server.pending.clone();
+            let conns = server.connections.clone();
+            let trust = server_trust.clone();
+            let tx = server.connection_established_tx.clone();
+            async move {
+                for _ in 0..50 {
+                    if !pending.list().await.is_empty() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                accept_pending_as(&pending, &trust, &conns, &tx, 0, Some(server_peer_id)).await
+            }
+        });
+
+        let (dial_res, accept_res) = tokio::join!(dial, acceptor);
+        let outcome = dial_res.unwrap().unwrap();
+        let (_, stored_token) = accept_res.unwrap().unwrap();
+        assert!(outcome.accepted, "connection must be accepted");
+        assert_eq!(
+            outcome.remote_peer_id,
+            Some(server_peer_id),
+            "ConnectOutcome must reflect the server peer_id learned from HelloAck"
+        );
+
+        let t = client_trust.read().await;
+        assert!(
+            t.contains(&server_peer_id),
+            "dialer trust store must contain server_peer_id after first contact with no hint"
+        );
+        assert!(
+            t.verify(&server_peer_id, &stored_token),
+            "stored token must match the server token"
         );
     }
 }

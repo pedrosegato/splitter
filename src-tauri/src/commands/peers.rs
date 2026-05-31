@@ -40,12 +40,14 @@ pub async fn pending_peers(core: State<'_, Arc<AppCore>>) -> Result<Vec<PendingP
 #[tauri::command]
 #[specta::specta]
 pub async fn accept_pending(core: State<'_, Arc<AppCore>>, index: u32) -> Result<String, String> {
-    let (peer_id, _token) = splitter_core::net::signaling::server::accept_pending(
+    let server_peer_id = core.identity.read().peer_id;
+    let (peer_id, _token) = splitter_core::net::signaling::server::accept_pending_as(
         &core.server.pending,
         &core.trust,
         &core.server.connections,
         &core.server.connection_established_tx,
         index as usize,
+        Some(server_peer_id),
     )
     .await
     .map_err(|e| e.to_string())?;

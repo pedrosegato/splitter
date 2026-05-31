@@ -40,6 +40,20 @@ export const useAcceptPending = () => {
   });
 };
 
+export const useRejectPending = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ index }: { index: number }) =>
+      unwrap(commands.rejectPending(index)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pending"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+};
+
 export const useDisconnect = () => {
   const queryClient = useQueryClient();
   return useMutation({

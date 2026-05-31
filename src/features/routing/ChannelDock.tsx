@@ -12,6 +12,10 @@ type Props = {
 export function ChannelDock({ sessionId, streams, isLoading }: Props) {
   const selectedStreamId = useUiStore((s) => s.selectedStreamId);
 
+  if (!isLoading && (streams.length === 0 || sessionId === null)) {
+    return null;
+  }
+
   return (
     <div className="flex flex-none items-stretch bg-elev-0 border-t border-line overflow-x-auto min-h-[96px]">
       {isLoading ? (
@@ -20,15 +24,11 @@ export function ChannelDock({ sessionId, streams, isLoading }: Props) {
             <Skeleton key={i} className="w-[72px] h-[64px] bg-line-2 rounded-[2px]" />
           ))}
         </div>
-      ) : streams.length === 0 || sessionId === null ? (
-        <div className="flex flex-1 items-center justify-center text-[11.5px] text-ink-3">
-          sem streams
-        </div>
       ) : (
         streams.map((stream) => (
           <ChannelStrip
             key={stream.id}
-            sessionId={sessionId}
+            sessionId={sessionId!}
             stream={stream}
             selected={selectedStreamId === stream.id}
           />

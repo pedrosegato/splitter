@@ -147,9 +147,9 @@ describe("RoutingBoard — no session", () => {
     expect(getByRole("button", { name: /Conectar máquina/i })).toBeDefined();
   });
 
-  it("ChannelDock shows 'sem streams'", () => {
-    const { getByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
-    expect(getByText("sem streams")).toBeDefined();
+  it("ChannelDock is collapsed when there is no session", () => {
+    const { queryByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
+    expect(queryByText("sem streams")).toBeNull();
   });
 });
 

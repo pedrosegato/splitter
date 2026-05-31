@@ -146,6 +146,52 @@ pub fn spawn_acceptor(
                         .await
                         {
                             Ok(port) => {
+                                let stream = splitter_core::net::stream::Stream::new_negotiating(
+                                    stream_id,
+                                    session_route,
+                                    port,
+                                );
+                                if let Err(e) = core.sessions.add_stream(&sid_uuid, stream).await {
+                                    tracing::warn!(
+                                        peer = %peer_id,
+                                        stream_id,
+                                        "add_stream failed — tearing down runtime: {e}"
+                                    );
+                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
+                                    send_to_peer(
+                                        &core,
+                                        peer_id,
+                                        SignalingMessage::StreamOpenAck {
+                                            stream_id,
+                                            accepted: false,
+                                            udp_port: None,
+                                        },
+                                    )
+                                    .await;
+                                    continue;
+                                }
+                                if let Err(e) =
+                                    core.sessions.activate_stream(&sid_uuid, stream_id).await
+                                {
+                                    tracing::warn!(
+                                        peer = %peer_id,
+                                        stream_id,
+                                        "activate_stream failed — tearing down runtime: {e}"
+                                    );
+                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
+                                    let _ = core.sessions.remove_stream(&sid_uuid, stream_id).await;
+                                    send_to_peer(
+                                        &core,
+                                        peer_id,
+                                        SignalingMessage::StreamOpenAck {
+                                            stream_id,
+                                            accepted: false,
+                                            udp_port: None,
+                                        },
+                                    )
+                                    .await;
+                                    continue;
+                                }
                                 send_to_peer(
                                     &core,
                                     peer_id,
@@ -163,32 +209,6 @@ pub fn spawn_acceptor(
                                     sink = %chosen_output,
                                     "opened stream as sink"
                                 );
-                                let stream = splitter_core::net::stream::Stream::new_negotiating(
-                                    stream_id,
-                                    session_route,
-                                    port,
-                                );
-                                if let Err(e) = core.sessions.add_stream(&sid_uuid, stream).await {
-                                    tracing::error!(
-                                        peer = %peer_id,
-                                        stream_id,
-                                        "add_stream failed after sink wired — tearing down runtime: {e}"
-                                    );
-                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
-                                    continue;
-                                }
-                                if let Err(e) =
-                                    core.sessions.activate_stream(&sid_uuid, stream_id).await
-                                {
-                                    tracing::error!(
-                                        peer = %peer_id,
-                                        stream_id,
-                                        "activate_stream failed after sink wired — tearing down runtime: {e}"
-                                    );
-                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
-                                    let _ = core.sessions.remove_stream(&sid_uuid, stream_id).await;
-                                    continue;
-                                }
                                 core.emit(SnapshotChanged);
                             }
                             Err(e) => {

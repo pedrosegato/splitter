@@ -156,6 +156,10 @@ pub fn run() {
                     use tauri_plugin_decorum::WebviewWindowExt;
                     let _ = win.set_traffic_lights_inset(15.0, 22.0);
                 }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = win.set_decorations(false);
+                }
                 let win_clone = win.clone();
                 win.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {

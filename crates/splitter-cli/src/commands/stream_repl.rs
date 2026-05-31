@@ -1,41 +1,16 @@
-use splitter_core::net::signaling::{
-    CodecParams, Endpoint, PeerConnectionHandle, SignalingMessage, StreamAction,
+use splitter_core::net::signaling::client_ops::{
+    build_stream_route, find_conn, notify_remote_control, stream_open_message,
+    wait_for_stream_open_ack, ConnectionMap,
 };
-use splitter_core::net::stream::StreamRoute;
+use splitter_core::net::signaling::StreamAction;
 use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
 use splitter_core::{PeerIdentity, SessionManager, StreamRegistry};
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
-type OutgoingConns = Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>;
-
-async fn find_conn(
-    server: &splitter_core::net::signaling::server::SignalingServerHandle,
-    outgoing: &OutgoingConns,
-    peer_id: Uuid,
-) -> Option<(
-    tokio::sync::mpsc::Sender<SignalingMessage>,
-    std::net::SocketAddr,
-    tokio::sync::broadcast::Sender<splitter_core::net::signaling::PeerEvent>,
-)> {
-    {
-        let g = server.connections.read().await;
-        if let Some(c) = g.get(&peer_id) {
-            return Some((c.tx.clone(), c.remote_addr, c.events.clone()));
-        }
-    }
-    {
-        let g = outgoing.read().await;
-        if let Some(c) = g.get(&peer_id) {
-            return Some((c.tx.clone(), c.remote_addr, c.events.clone()));
-        }
-    }
-    None
-}
+type OutgoingConns = ConnectionMap;
 
 pub(crate) async fn handle(
     parts: &[&str],
@@ -69,31 +44,6 @@ fn parse_session_stream(rest: &[&str]) -> anyhow::Result<(Uuid, u8)> {
         .split_once(':')
         .ok_or_else(|| anyhow::anyhow!("expected session_id:stream_id"))?;
     Ok((Uuid::parse_str(sid_str)?, stream_str.parse::<u8>()?))
-}
-
-async fn wait_for_stream_open_ack(
-    events: &tokio::sync::broadcast::Sender<splitter_core::net::signaling::PeerEvent>,
-    stream_id: u8,
-    timeout: Duration,
-) -> anyhow::Result<u16> {
-    use splitter_core::net::signaling::PeerEvent;
-    let mut rx = events.subscribe();
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            anyhow::bail!("timed out waiting for stream_open_ack");
-        }
-        match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(Ok(PeerEvent::Message(SignalingMessage::StreamOpenAck {
-                stream_id: id,
-                accepted: true,
-                udp_port: Some(port),
-            }))) if id == stream_id => return Ok(port),
-            Ok(Ok(_)) => continue,
-            _ => anyhow::bail!("timed out waiting for stream_open_ack"),
-        }
-    }
 }
 
 async fn stream_open(
@@ -141,7 +91,7 @@ async fn stream_open(
         .ok_or_else(|| anyhow::anyhow!("session {session_id} not found"))?;
     let remote_peer_id = session.remote_peer_id;
 
-    let (conn_tx, conn_remote_addr, conn_events) = find_conn(server, outgoing, remote_peer_id)
+    let conn = find_conn(&server.connections, outgoing, remote_peer_id)
         .await
         .ok_or_else(|| anyhow::anyhow!("no live signaling connection to remote peer"))?;
 
@@ -150,49 +100,30 @@ async fn stream_open(
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    conn_tx
-        .send(SignalingMessage::StreamOpen {
-            session_id: session_id.to_string(),
+    let mut ack_rx = conn.events.subscribe();
+    conn.tx
+        .send(stream_open_message(
+            session_id,
             stream_id,
-            source: Endpoint {
-                peer_id: identity.peer_id.to_string(),
-                device_id: from_dev.clone(),
-            },
-            sink: Endpoint {
-                peer_id: remote_peer_id.to_string(),
-                device_id: remote_device_id.clone(),
-            },
-            codec: CodecParams {
-                name: "opus".into(),
-                bitrate,
-                frame_ms: 20,
-            },
-            udp_port: 0,
-        })
+            identity.peer_id,
+            remote_peer_id,
+            &from_dev,
+            &remote_device_id,
+            bitrate,
+        ))
         .await
         .ok();
 
-    let ack_port =
-        wait_for_stream_open_ack(&conn_events, stream_id, Duration::from_secs(5)).await?;
-    let remote_ip = conn_remote_addr.ip();
-    let remote: SocketAddr = SocketAddr::new(remote_ip, ack_port);
+    let ack_port = wait_for_stream_open_ack(&mut ack_rx, stream_id, Duration::from_secs(5)).await?;
+    let remote: SocketAddr = SocketAddr::new(conn.remote_addr.ip(), ack_port);
 
-    let route = StreamRoute {
-        source: Endpoint {
-            peer_id: identity.peer_id.to_string(),
-            device_id: from_dev.clone(),
-        },
-        sink: Endpoint {
-            peer_id: remote_peer_id.to_string(),
-            device_id: remote_device_id,
-        },
-        codec: CodecParams {
-            name: "opus".into(),
-            bitrate,
-            frame_ms: 20,
-        },
-        volume: 1.0,
-    };
+    let route = build_stream_route(
+        identity.peer_id,
+        remote_peer_id,
+        &from_dev,
+        &remote_device_id,
+        bitrate,
+    );
     let source_kind = if from_dev == "system" {
         SourceKind::System
     } else {
@@ -227,14 +158,8 @@ async fn stream_close(
 
     registry.close(&sid, stream_id).await?;
     if let Some(remote) = remote {
-        if let Some((tx, _, _)) = find_conn(server, outgoing, remote).await {
-            tx.send(SignalingMessage::StreamControl {
-                stream_id,
-                action: StreamAction::Close,
-                volume: None,
-            })
-            .await
-            .ok();
+        if let Some(conn) = find_conn(&server.connections, outgoing, remote).await {
+            notify_remote_control(&conn.tx, stream_id, StreamAction::Close, None).await;
         }
     }
     #[allow(clippy::print_stdout)]
@@ -262,14 +187,8 @@ async fn stream_volume(
         .await?;
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
-        if let Some((tx, _, _)) = find_conn(server, outgoing, s.remote_peer_id).await {
-            tx.send(SignalingMessage::StreamControl {
-                stream_id,
-                action: StreamAction::SetVolume,
-                volume: Some(gain),
-            })
-            .await
-            .ok();
+        if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
+            notify_remote_control(&conn.tx, stream_id, StreamAction::SetVolume, Some(gain)).await;
         }
     }
     Ok(())
@@ -310,14 +229,8 @@ async fn stream_set_paused(
     };
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
-        if let Some((tx, _, _)) = find_conn(server, outgoing, s.remote_peer_id).await {
-            tx.send(SignalingMessage::StreamControl {
-                stream_id,
-                action,
-                volume: None,
-            })
-            .await
-            .ok();
+        if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
+            notify_remote_control(&conn.tx, stream_id, action, None).await;
         }
     }
     Ok(())
@@ -397,6 +310,7 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::RwLock;
 
     #[test]
     fn parse_session_stream_valid() {
@@ -427,7 +341,6 @@ mod tests {
         use splitter_core::net::signaling::server::SignalingServer;
         use splitter_core::net::trust::TrustStore;
         use splitter_core::settings::Settings;
-        use tokio::sync::RwLock;
 
         let path = std::env::temp_dir().join(format!("trust-{}.toml", Uuid::new_v4()));
         let trust = Arc::new(RwLock::new(TrustStore::load_or_create(&path).unwrap()));

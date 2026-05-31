@@ -2,6 +2,7 @@ use super::stream_repl;
 use splitter_core::audio::devices::{list_devices, DeviceKind};
 use splitter_core::net::device_watcher;
 use splitter_core::net::discovery::{DiscoveredPeer, Discovery, DiscoveryEvent};
+use splitter_core::net::signaling::client_ops::{find_conn_tx, notify_remote_control};
 use splitter_core::net::signaling::{
     connect_to_peer, server::accept_pending, server::SignalingServer, CodecParams, Endpoint,
     PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
@@ -369,23 +370,12 @@ async fn graceful_shutdown(
     let session_snap = sessions.snapshot().await;
 
     // 1. Notify peers: close streams then close sessions.
-    let outgoing_guard = outgoing.read().await;
     if let Some(srv) = server {
-        let conns = srv.connections.read().await;
         for sess in &session_snap {
-            let tx = conns
-                .get(&sess.remote_peer_id)
-                .map(|c| &c.tx)
-                .or_else(|| outgoing_guard.get(&sess.remote_peer_id).map(|c| &c.tx));
+            let tx = find_conn_tx(&srv.connections, outgoing, sess.remote_peer_id).await;
             if let Some(tx) = tx {
                 for stream in &sess.streams {
-                    let _ = tx
-                        .send(SignalingMessage::StreamControl {
-                            stream_id: stream.id,
-                            action: StreamAction::Close,
-                            volume: None,
-                        })
-                        .await;
+                    notify_remote_control(&tx, stream.id, StreamAction::Close, None).await;
                 }
                 let _ = tx
                     .send(SignalingMessage::SessionResponse {
@@ -396,7 +386,6 @@ async fn graceful_shutdown(
             }
         }
     }
-    drop(outgoing_guard);
 
     // 2. Close all local StreamRuntime pump tasks via the public registry API.
     let summaries = stream_registry.list().await;
@@ -666,15 +655,8 @@ async fn handle_line(
             let session_id = sessions.open_outgoing(identity.peer_id, remote_uuid).await;
             sessions.accept(&session_id).await?;
             println!(">> opened session {session_id} with {}", target.peer_name);
-            let conn_tx = {
-                let inbound = server.connections.read().await;
-                if let Some(h) = inbound.get(&remote_uuid) {
-                    Some(h.tx.clone())
-                } else {
-                    let outbound = outgoing_connections.read().await;
-                    outbound.get(&remote_uuid).map(|h| h.tx.clone())
-                }
-            };
+            let conn_tx =
+                find_conn_tx(&server.connections, outgoing_connections, remote_uuid).await;
             if let Some(tx) = conn_tx {
                 tx.send(SignalingMessage::SessionRequest {
                     session_id: session_id.to_string(),
@@ -721,25 +703,16 @@ async fn handle_line(
             // Close all local stream runtimes for this session and notify the remote peer.
             let snap = sessions.snapshot().await;
             if let Some(sess) = snap.iter().find(|s| s.id == id) {
-                let conn_tx = {
-                    let inbound = server.connections.read().await;
-                    if let Some(h) = inbound.get(&sess.remote_peer_id) {
-                        Some(h.tx.clone())
-                    } else {
-                        let outbound = outgoing_connections.read().await;
-                        outbound.get(&sess.remote_peer_id).map(|h| h.tx.clone())
-                    }
-                };
+                let conn_tx = find_conn_tx(
+                    &server.connections,
+                    outgoing_connections,
+                    sess.remote_peer_id,
+                )
+                .await;
                 for stream in &sess.streams {
                     let _ = stream_registry.close(&id, stream.id).await;
                     if let Some(ref tx) = conn_tx {
-                        let _ = tx
-                            .send(SignalingMessage::StreamControl {
-                                stream_id: stream.id,
-                                action: StreamAction::Close,
-                                volume: None,
-                            })
-                            .await;
+                        notify_remote_control(tx, stream.id, StreamAction::Close, None).await;
                     }
                 }
             }

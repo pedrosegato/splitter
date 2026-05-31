@@ -613,11 +613,18 @@ async fn handle_line(
                 tokio::spawn(async move {
                     loop {
                         match events_rx.recv().await {
-                            Ok(PeerEvent::Disconnected { .. }) | Err(_) => {
+                            Ok(PeerEvent::Disconnected { .. }) => {
                                 map.write().await.remove(&peer_uuid);
                                 break;
                             }
                             Ok(_) => {}
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!(skipped = n, "peer event stream lagged; continuing");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                map.write().await.remove(&peer_uuid);
+                                break;
+                            }
                         }
                     }
                 });
@@ -1031,7 +1038,10 @@ fn spawn_stream_open_acceptor(
                     break;
                 }
                 Ok(PeerEvent::Connected { .. }) => {}
-                Err(_) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "peer event stream lagged; continuing");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     });
@@ -1122,11 +1132,21 @@ pub(crate) fn spawn_reconnect_loop(args: ReconnectArgs) {
                         tokio::spawn(async move {
                             loop {
                                 match ev_rx.recv().await {
-                                    Ok(PeerEvent::Disconnected { .. }) | Err(_) => {
+                                    Ok(PeerEvent::Disconnected { .. }) => {
                                         map.write().await.remove(&pid);
                                         break;
                                     }
                                     Ok(_) => {}
+                                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                        tracing::warn!(
+                                            skipped = n,
+                                            "peer event stream lagged; continuing"
+                                        );
+                                    }
+                                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                        map.write().await.remove(&pid);
+                                        break;
+                                    }
                                 }
                             }
                         });
@@ -1294,5 +1314,33 @@ mod tests {
             .find(|s| s.remote_peer_id == remote && s.state == SessionState::Active);
         assert!(existing.is_some(), "should find existing active session");
         assert_eq!(existing.unwrap().id, sid);
+    }
+
+    #[tokio::test]
+    async fn lagged_does_not_terminate_event_loop() {
+        let (tx, mut rx) = tokio::sync::broadcast::channel::<u8>(2);
+        for i in 0..10 {
+            let _ = tx.send(i);
+        }
+        let mut sender = Some(tx);
+        let mut got_lagged = false;
+        let closed_normally;
+        loop {
+            match rx.recv().await {
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    got_lagged = true;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    closed_normally = true;
+                    break;
+                }
+            }
+            if got_lagged {
+                drop(sender.take());
+            }
+        }
+        assert!(got_lagged);
+        assert!(closed_normally);
     }
 }

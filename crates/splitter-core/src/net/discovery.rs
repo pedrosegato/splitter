@@ -155,8 +155,7 @@ impl Discovery {
 
 impl Drop for Discovery {
     fn drop(&mut self) {
-        let _ = self.daemon.unregister(&self.fullname);
-        let _ = self.daemon.shutdown();
+        self.shutdown();
     }
 }
 

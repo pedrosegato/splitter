@@ -16,7 +16,7 @@ pub struct TrustedPeer {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TrustStoreFile {
     #[serde(default)]
-    pub trusted: HashMap<String, TrustedPeer>,
+    pub trusted: Vec<TrustedPeer>,
 }
 
 #[derive(Debug)]
@@ -32,11 +32,18 @@ impl TrustStore {
                 .map_err(|e| NetError::ConfigIo(format!("read {}: {e}", path.display())))?;
             let parsed: TrustStoreFile = toml::from_str(&raw)
                 .map_err(|e| NetError::ConfigIo(format!("parse {}: {e}", path.display())))?;
-            parsed
-                .trusted
-                .into_iter()
-                .filter_map(|(k, v)| Uuid::parse_str(&k).ok().map(|id| (id, v)))
-                .collect()
+            let mut map = HashMap::new();
+            for entry in parsed.trusted {
+                if map.contains_key(&entry.peer_id) {
+                    tracing::warn!(
+                        peer_id = %entry.peer_id,
+                        "trust store: duplicate peer_id entry; keeping first"
+                    );
+                    continue;
+                }
+                map.insert(entry.peer_id, entry);
+            }
+            map
         } else {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)
@@ -81,13 +88,8 @@ impl TrustStore {
     }
 
     fn flush(&self) -> Result<(), NetError> {
-        let serializable: HashMap<String, TrustedPeer> = self
-            .trusted
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
         let file = TrustStoreFile {
-            trusted: serializable,
+            trusted: self.trusted.values().cloned().collect(),
         };
         let raw = toml::to_string_pretty(&file)
             .map_err(|e| NetError::ConfigIo(format!("serialize trust: {e}")))?;

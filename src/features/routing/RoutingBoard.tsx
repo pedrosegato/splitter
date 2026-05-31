@@ -18,9 +18,20 @@ import type { StreamSnapshot, DeviceDescriptor } from "@/bindings";
 
 function useRemoteName(remotePeerId: string | undefined): string {
   const { data: peers } = usePeers();
+  const knownNames = useUiStore((s) => s.knownNames);
+  const rememberNames = useUiStore((s) => s.rememberNames);
+  const match = remotePeerId
+    ? peers?.find((p) => p.peer_id === remotePeerId)
+    : undefined;
+  const matchName = match?.peer_name;
+
+  useEffect(() => {
+    if (remotePeerId && matchName) rememberNames({ [remotePeerId]: matchName });
+  }, [remotePeerId, matchName, rememberNames]);
+
   if (!remotePeerId) return "Remoto";
-  const match = peers?.find((p) => p.peer_id === remotePeerId);
-  if (match) return match.peer_name;
+  if (matchName) return matchName;
+  if (knownNames[remotePeerId]) return knownNames[remotePeerId];
   return remotePeerId.slice(0, 8);
 }
 

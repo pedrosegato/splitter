@@ -4,12 +4,18 @@ import { useUiStore } from "@/stores/ui";
 
 export async function mountEventBridge(qc: QueryClient): Promise<() => void> {
   const unlisten = await Promise.all([
-    events.peersChanged.listen(() => qc.invalidateQueries({ queryKey: ["peers"] })),
+    events.peersChanged.listen((e) => {
+      const names: Record<string, string> = {};
+      for (const p of e.payload) names[p.peer_id] = p.peer_name;
+      useUiStore.getState().rememberNames(names);
+      qc.invalidateQueries({ queryKey: ["peers"] });
+    }),
     events.incomingSession.listen((e) => {
       useUiStore.getState().setIncoming({
         peerId: e.payload.peer_id,
         peerName: e.payload.peer_name,
       });
+      useUiStore.getState().rememberNames({ [e.payload.peer_id]: e.payload.peer_name });
       qc.invalidateQueries({ queryKey: ["snapshot"] });
       qc.invalidateQueries({ queryKey: ["pending"] });
     }),

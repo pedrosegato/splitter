@@ -42,7 +42,6 @@ export function useWiring() {
       void portId;
 
       if (!session) {
-        setHint("conecte uma máquina primeiro");
         return;
       }
 

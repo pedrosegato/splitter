@@ -17,6 +17,12 @@ use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
+const SEQ_MASK: u32 = 0x00FF_FFFF;
+
+fn seq_gap(expected: u32, got: u32) -> u32 {
+    got.wrapping_sub(expected) & SEQ_MASK
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StreamControlSignal {
     SetVolume(f32),
@@ -425,6 +431,25 @@ mod tests {
     }
 
     #[test]
+    fn seq_gap_normal_advance() {
+        assert_eq!(seq_gap(5, 8), 3);
+        assert_eq!(seq_gap(0, 1), 1);
+        assert_eq!(seq_gap(10, 10), 0);
+    }
+
+    #[test]
+    fn seq_gap_wraps_at_24_bit_boundary() {
+        assert_eq!(seq_gap(SEQ_MASK - 1, 1), 3);
+        assert_eq!(seq_gap(SEQ_MASK, 0), 1);
+        assert_eq!(seq_gap(SEQ_MASK, 1), 2);
+    }
+
+    #[test]
+    fn seq_gap_old_or_out_of_order_packet_gives_large_value() {
+        assert!(seq_gap(10, 5) >= 100, "old packet should yield gap >= 100");
+    }
+
+    #[test]
     fn snapshot_reads_rtt_atomically() {
         let stats = StreamStats::default();
         stats.last_rtt_ms.store(42, Ordering::Relaxed);
@@ -500,7 +525,7 @@ pub async fn spawn_source_pump_inner(
                     }
                     let pkt = Packet {
                         stream_id,
-                        seq: seq & 0x00FF_FFFF,
+                        seq: seq & SEQ_MASK,
                         timestamp_ms: start.elapsed().as_millis() as u32,
                         payload: Bytes::copy_from_slice(&payload[..]),
                     };
@@ -577,13 +602,9 @@ pub async fn spawn_sink_pump_inner(
                 stats.last_seq_received.store(pkt.seq, Ordering::Relaxed);
 
                 if let Some(prev) = last_seq {
-                    let expected = prev.wrapping_add(1) & 0x00FF_FFFF;
+                    let expected = prev.wrapping_add(1) & SEQ_MASK;
                     if pkt.seq != expected {
-                        let lost = if pkt.seq > expected {
-                            (pkt.seq - expected) as u64
-                        } else {
-                            0
-                        };
+                        let lost = seq_gap(expected, pkt.seq) as u64;
                         if lost > 0 && lost < 100 {
                             for _ in 0..lost {
                                 if decoder.decode(None, &mut decoded).is_ok() {

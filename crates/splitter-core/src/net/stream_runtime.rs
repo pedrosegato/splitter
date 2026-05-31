@@ -23,6 +23,38 @@ fn seq_gap(expected: u32, got: u32) -> u32 {
     got.wrapping_sub(expected) & SEQ_MASK
 }
 
+enum ControlOutcome {
+    Continue,
+    Stop,
+}
+
+fn apply_control(
+    sig: StreamControlSignal,
+    gain: &mut f32,
+    muted: &Arc<AtomicBool>,
+    paused: &mut bool,
+) -> ControlOutcome {
+    match sig {
+        StreamControlSignal::Close => ControlOutcome::Stop,
+        StreamControlSignal::SetVolume(v) => {
+            *gain = v.clamp(0.0, 2.0);
+            ControlOutcome::Continue
+        }
+        StreamControlSignal::SetMuted(m) => {
+            muted.store(m, Ordering::Relaxed);
+            ControlOutcome::Continue
+        }
+        StreamControlSignal::Pause => {
+            *paused = true;
+            ControlOutcome::Continue
+        }
+        StreamControlSignal::Resume => {
+            *paused = false;
+            ControlOutcome::Continue
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StreamControlSignal {
     SetVolume(f32),
@@ -47,11 +79,10 @@ pub enum DeviceGuard {
 // the one that creates the StreamRuntime.  The only cross-thread operation is Drop:
 //
 //   - DeviceGuard is stored in StreamRuntime, which is inserted into StreamRegistry at
-//     construction time (stream_runtime.rs:154 `registry.register(rt)`) and removed by
-//     StreamRegistry::close (stream_runtime.rs:201-211) or StreamRuntime::abort
-//     (stream_runtime.rs:55-58), both of which call `rt.join.abort()` and then let `rt`
-//     drop on the tokio executor thread pool — potentially a different thread than the
-//     audio thread that called CaptureHandle::from_device or PlaybackHandle::start_by_id.
+//     construction time and removed by StreamRegistry::close or StreamRuntime::abort,
+//     both of which call `rt.join.abort()` and then let `rt` drop on the tokio executor
+//     thread pool — potentially a different thread than the audio thread that called
+//     CaptureHandle::from_device or PlaybackHandle::start_by_id.
 //
 //   - All methods on the wrapped cpal::Stream (play/pause) are only called inside
 //     CaptureHandle::from_device and PlaybackHandle::start_by_id, both of which run on
@@ -97,7 +128,7 @@ pub struct StreamStats {
     pub last_heartbeat_echo_ms: AtomicU64,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct StreamStatsSnapshot {
     pub packets_sent: u64,
     pub packets_received: u64,
@@ -265,16 +296,7 @@ impl StreamRegistry {
         let mut prev = self.prev_snapshots.write().await;
         let mut out = Vec::with_capacity(guard.len());
         for (&key, rt) in guard.iter() {
-            let last = prev.get(&key).cloned().unwrap_or(StreamStatsSnapshot {
-                packets_sent: 0,
-                packets_received: 0,
-                packets_lost: 0,
-                bytes_sent: 0,
-                bytes_received: 0,
-                last_rtt_ms: 0,
-                bitrate_kbps_sent: 0,
-                bitrate_kbps_received: 0,
-            });
+            let last = prev.get(&key).cloned().unwrap_or_default();
             let snap = rt.stats.snapshot(window_ms, &last);
             prev.insert(key, snap.clone());
             out.push((key.0, key.1, snap));
@@ -397,16 +419,7 @@ mod tests {
     #[test]
     fn fresh_stats_snapshot_is_all_zero() {
         let stats = StreamStats::default();
-        let prev = StreamStatsSnapshot {
-            packets_sent: 0,
-            packets_received: 0,
-            packets_lost: 0,
-            bytes_sent: 0,
-            bytes_received: 0,
-            last_rtt_ms: 0,
-            bitrate_kbps_sent: 0,
-            bitrate_kbps_received: 0,
-        };
+        let prev = StreamStatsSnapshot::default();
         let snap = stats.snapshot(5_000, &prev);
         assert_eq!(snap, prev);
     }
@@ -415,17 +428,7 @@ mod tests {
     fn snapshot_computes_bitrate_from_window() {
         let stats = StreamStats::default();
         stats.bytes_sent.store(8_000, Ordering::Relaxed);
-        let prev = StreamStatsSnapshot {
-            packets_sent: 0,
-            packets_received: 0,
-            packets_lost: 0,
-            bytes_sent: 0,
-            bytes_received: 0,
-            last_rtt_ms: 0,
-            bitrate_kbps_sent: 0,
-            bitrate_kbps_received: 0,
-        };
-        let snap = stats.snapshot(1_000, &prev);
+        let snap = stats.snapshot(1_000, &StreamStatsSnapshot::default());
         assert_eq!(snap.bitrate_kbps_sent, 64);
     }
 
@@ -452,18 +455,83 @@ mod tests {
     fn snapshot_reads_rtt_atomically() {
         let stats = StreamStats::default();
         stats.last_rtt_ms.store(42, Ordering::Relaxed);
-        let prev = StreamStatsSnapshot {
-            packets_sent: 0,
-            packets_received: 0,
-            packets_lost: 0,
-            bytes_sent: 0,
-            bytes_received: 0,
-            last_rtt_ms: 0,
-            bitrate_kbps_sent: 0,
-            bitrate_kbps_received: 0,
-        };
-        let snap = stats.snapshot(1_000, &prev);
+        let snap = stats.snapshot(1_000, &StreamStatsSnapshot::default());
         assert_eq!(snap.last_rtt_ms, 42);
+    }
+
+    #[test]
+    fn stats_snapshot_default_is_all_zeros() {
+        let s = StreamStatsSnapshot::default();
+        assert_eq!(s.packets_sent, 0);
+        assert_eq!(s.packets_received, 0);
+        assert_eq!(s.packets_lost, 0);
+        assert_eq!(s.bytes_sent, 0);
+        assert_eq!(s.bytes_received, 0);
+        assert_eq!(s.last_rtt_ms, 0);
+        assert_eq!(s.bitrate_kbps_sent, 0);
+        assert_eq!(s.bitrate_kbps_received, 0);
+    }
+
+    #[test]
+    fn apply_control_close_returns_stop() {
+        let muted = Arc::new(AtomicBool::new(false));
+        let mut gain = 1.0f32;
+        let mut paused = false;
+        let outcome = apply_control(StreamControlSignal::Close, &mut gain, &muted, &mut paused);
+        assert!(matches!(outcome, ControlOutcome::Stop));
+    }
+
+    #[test]
+    fn apply_control_set_volume_mutates_gain_and_continues() {
+        let muted = Arc::new(AtomicBool::new(false));
+        let mut gain = 1.0f32;
+        let mut paused = false;
+        let outcome = apply_control(
+            StreamControlSignal::SetVolume(0.5),
+            &mut gain,
+            &muted,
+            &mut paused,
+        );
+        assert!(matches!(outcome, ControlOutcome::Continue));
+        assert!((gain - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn apply_control_set_muted_toggles_flag_and_continues() {
+        let muted = Arc::new(AtomicBool::new(false));
+        let mut gain = 1.0f32;
+        let mut paused = false;
+        let outcome = apply_control(
+            StreamControlSignal::SetMuted(true),
+            &mut gain,
+            &muted,
+            &mut paused,
+        );
+        assert!(matches!(outcome, ControlOutcome::Continue));
+        assert!(muted.load(Ordering::Relaxed));
+
+        let outcome2 = apply_control(
+            StreamControlSignal::SetMuted(false),
+            &mut gain,
+            &muted,
+            &mut paused,
+        );
+        assert!(matches!(outcome2, ControlOutcome::Continue));
+        assert!(!muted.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn apply_control_pause_resume_toggles_paused_and_continues() {
+        let muted = Arc::new(AtomicBool::new(false));
+        let mut gain = 1.0f32;
+        let mut paused = false;
+        let outcome = apply_control(StreamControlSignal::Pause, &mut gain, &muted, &mut paused);
+        assert!(matches!(outcome, ControlOutcome::Continue));
+        assert!(paused);
+
+        let outcome2 = apply_control(StreamControlSignal::Resume, &mut gain, &muted, &mut paused);
+        assert!(matches!(outcome2, ControlOutcome::Continue));
+        assert!(!paused);
     }
 }
 
@@ -499,11 +567,8 @@ pub async fn spawn_source_pump_inner(
             biased;
             maybe_sig = control_rx.recv() => {
                 match maybe_sig {
-                    Some(StreamControlSignal::Close) | None => return,
-                    Some(StreamControlSignal::SetVolume(v)) => gain = v.clamp(0.0, 2.0),
-                    Some(StreamControlSignal::SetMuted(m)) => muted.store(m, Ordering::Relaxed),
-                    Some(StreamControlSignal::Pause) => paused = true,
-                    Some(StreamControlSignal::Resume) => paused = false,
+                    None => return,
+                    Some(sig) => if matches!(apply_control(sig, &mut gain, &muted, &mut paused), ControlOutcome::Stop) { return; },
                 }
             }
             _ = frame_ready.notified() => {
@@ -574,11 +639,8 @@ pub async fn spawn_sink_pump_inner(
             biased;
             maybe_sig = control_rx.recv() => {
                 match maybe_sig {
-                    Some(StreamControlSignal::Close) | None => return,
-                    Some(StreamControlSignal::SetVolume(v)) => gain = v.clamp(0.0, 2.0),
-                    Some(StreamControlSignal::SetMuted(m)) => muted.store(m, Ordering::Relaxed),
-                    Some(StreamControlSignal::Pause) => paused = true,
-                    Some(StreamControlSignal::Resume) => paused = false,
+                    None => return,
+                    Some(sig) => if matches!(apply_control(sig, &mut gain, &muted, &mut paused), ControlOutcome::Stop) { return; },
                 }
             }
             recv_res = socket.recv(&mut buf) => {
@@ -861,44 +923,75 @@ mod source_pump_tests {
 use crate::audio::ring::AudioRing;
 use crate::net::stream::StreamRoute;
 
+async fn bind_and_connect_udp(remote: Option<SocketAddr>) -> Result<UdpSocket, NetError> {
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| NetError::UdpBind(format!("bind udp: {e}")))?;
+    let _ = socket
+        .local_addr()
+        .map_err(|e| NetError::UdpBind(format!("local_addr: {e}")))?;
+    if let Some(addr) = remote {
+        socket
+            .connect(addr)
+            .await
+            .map_err(|e| NetError::UdpBind(format!("connect udp to {addr}: {e}")))?;
+    }
+    Ok(socket)
+}
+
+fn build_runtime(
+    session_id: SessionId,
+    stream_id: StreamId,
+    stats: Arc<StreamStats>,
+    control_tx: mpsc::Sender<StreamControlSignal>,
+    bound_device_id: Option<String>,
+    join: tokio::task::JoinHandle<()>,
+    device_guard: DeviceGuard,
+) -> StreamRuntime {
+    StreamRuntime {
+        session_id,
+        stream_id,
+        stats,
+        control_tx,
+        bound_device_id,
+        join,
+        device_guard,
+    }
+}
+
 pub async fn open_stream_as_sink_inproc(
     registry: Arc<StreamRegistry>,
     session_id: SessionId,
     stream_id: StreamId,
     route: StreamRoute,
 ) -> Result<u16, NetError> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| NetError::UdpBind(format!("bind sink udp: {e}")))?;
+    let socket = bind_and_connect_udp(None).await?;
     let port = socket
         .local_addr()
         .map_err(|e| NetError::UdpBind(format!("query sink udp local_addr: {e}")))?
         .port();
 
     let (producer, _consumer) = AudioRing::new(FRAME_SAMPLES * 20);
-
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
-    let stats_clone = stats.clone();
-
     let join = tokio::spawn(spawn_sink_pump_inner(
         session_id,
         stream_id,
         socket,
         producer,
         control_rx,
-        stats_clone,
+        stats.clone(),
     ));
 
-    let rt = StreamRuntime {
+    let rt = build_runtime(
         session_id,
         stream_id,
         stats,
         control_tx,
-        bound_device_id: Some(route.sink.device_id.clone()),
+        Some(route.sink.device_id.clone()),
         join,
-        device_guard: DeviceGuard::None,
-    };
+        DeviceGuard::None,
+    );
     registry.register(rt).await?;
     Ok(port)
 }
@@ -912,42 +1005,33 @@ pub async fn open_stream_as_source_inproc(
 ) -> Result<(), NetError> {
     let (_producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);
     let notify = Arc::new(Notify::new());
-
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| NetError::UdpBind(format!("bind source udp: {e}")))?;
-    socket
-        .connect(remote)
-        .await
-        .map_err(|e| NetError::UdpBind(format!("connect source udp to {remote}: {e}")))?;
+    let socket = bind_and_connect_udp(Some(remote)).await?;
 
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
-    let stats_clone = stats.clone();
-    let notify_clone = notify.clone();
     let bitrate = route.codec.bitrate;
-
     let join = tokio::spawn(spawn_source_pump_inner(
         session_id,
         stream_id,
         consumer,
-        notify_clone,
+        notify.clone(),
         socket,
         control_rx,
-        stats_clone,
+        stats.clone(),
         bitrate,
     ));
 
-    let rt = StreamRuntime {
-        session_id,
-        stream_id,
-        stats,
-        control_tx,
-        bound_device_id: Some(route.source.device_id.clone()),
-        join,
-        device_guard: DeviceGuard::None,
-    };
-    registry.register(rt).await
+    registry
+        .register(build_runtime(
+            session_id,
+            stream_id,
+            stats,
+            control_tx,
+            Some(route.source.device_id.clone()),
+            join,
+            DeviceGuard::None,
+        ))
+        .await
 }
 
 #[derive(Debug, Clone)]
@@ -1005,17 +1089,9 @@ pub async fn open_stream_as_source(
         }
     };
 
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| NetError::UdpBind(format!("bind source udp: {e}")))?;
-    socket
-        .connect(remote)
-        .await
-        .map_err(|e| NetError::UdpBind(format!("connect source udp: {e}")))?;
-
+    let socket = bind_and_connect_udp(Some(remote)).await?;
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
-    let stats_clone = stats.clone();
     let join = tokio::spawn(spawn_source_pump_inner(
         session_id,
         stream_id,
@@ -1023,20 +1099,20 @@ pub async fn open_stream_as_source(
         frame_ready,
         socket,
         control_rx,
-        stats_clone,
+        stats.clone(),
         route.codec.bitrate,
     ));
 
     registry
-        .register(StreamRuntime {
+        .register(build_runtime(
             session_id,
             stream_id,
             stats,
             control_tx,
-            bound_device_id: Some(route.source.device_id.clone()),
+            Some(route.source.device_id.clone()),
             join,
             device_guard,
-        })
+        ))
         .await
 }
 
@@ -1047,9 +1123,7 @@ pub async fn open_stream_as_sink(
     _route: StreamRoute,
     output_device_id: String,
 ) -> Result<u16, NetError> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| NetError::UdpBind(format!("bind sink udp: {e}")))?;
+    let socket = bind_and_connect_udp(None).await?;
     let port = socket
         .local_addr()
         .map_err(|e| NetError::UdpBind(format!("local_addr: {e}")))?
@@ -1063,26 +1137,25 @@ pub async fn open_stream_as_sink(
 
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
-    let stats_clone = stats.clone();
     let join = tokio::spawn(spawn_sink_pump_inner(
         session_id,
         stream_id,
         socket,
         producer,
         control_rx,
-        stats_clone,
+        stats.clone(),
     ));
 
     registry
-        .register(StreamRuntime {
+        .register(build_runtime(
             session_id,
             stream_id,
             stats,
             control_tx,
-            bound_device_id: Some(output_device_id.clone()),
+            Some(output_device_id.clone()),
             join,
-            device_guard: DeviceGuard::Playback(playback),
-        })
+            DeviceGuard::Playback(playback),
+        ))
         .await?;
     Ok(port)
 }

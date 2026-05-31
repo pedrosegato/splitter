@@ -132,7 +132,7 @@ export function RoutingBoard() {
   const wiredPortIds = buildWiredPortIds(streams);
   const portColor = portColorFromStreams(streams);
 
-  const { onPortActivate, hint } = useWiring();
+  const { onPortActivate } = useWiring();
 
   useTrayHealth(snapshots);
 
@@ -208,12 +208,6 @@ export function RoutingBoard() {
             selectedId={selectedStreamId}
             onSelect={selectStream}
           />
-
-          {hint && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 bg-surface border border-line-2 rounded-[2px] px-3 py-[5px] text-[11.5px] text-ink-2 pointer-events-none">
-              {hint}
-            </div>
-          )}
         </div>
 
         <ChannelDock sessionId={session?.id ?? null} streams={streams} />

@@ -101,7 +101,6 @@ describe("useWiring", () => {
       bitrate: undefined,
     });
     expect(result.current.arm).toBeNull();
-    expect(result.current.hint).toBeNull();
   });
 
   it("arm a mic src then a sink on another peer calls openStream with sourceIsSystem=false", async () => {
@@ -146,7 +145,6 @@ describe("useWiring", () => {
       result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
     });
 
-    expect(result.current.hint).toBeNull();
     expect(result.current.arm).toBeNull();
     expect(mutateSpy).not.toHaveBeenCalled();
   });
@@ -165,7 +163,6 @@ describe("useWiring", () => {
     });
 
     expect(result.current.arm).toBeNull();
-    expect(result.current.hint).toBeNull();
   });
 
 });

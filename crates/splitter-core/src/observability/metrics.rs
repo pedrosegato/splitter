@@ -58,19 +58,27 @@ impl MetricsRegistry {
                 .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
         let sessions_active = prometheus::Gauge::new("splitter_sessions_active", "active sessions")
             .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
-        registry.register(Box::new(packets_sent.clone())).unwrap();
+        registry
+            .register(Box::new(packets_sent.clone()))
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
         registry
             .register(Box::new(packets_received.clone()))
-            .unwrap();
-        registry.register(Box::new(packets_lost.clone())).unwrap();
-        registry.register(Box::new(rtt_ms.clone())).unwrap();
-        registry.register(Box::new(bitrate_kbps.clone())).unwrap();
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
+        registry
+            .register(Box::new(packets_lost.clone()))
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
+        registry
+            .register(Box::new(rtt_ms.clone()))
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
+        registry
+            .register(Box::new(bitrate_kbps.clone()))
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
         registry
             .register(Box::new(peers_connected.clone()))
-            .unwrap();
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
         registry
             .register(Box::new(sessions_active.clone()))
-            .unwrap();
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
         Ok(Self {
             registry,
             packets_sent,
@@ -146,5 +154,21 @@ mod tests {
         m.packets_sent.with_label_values(&["3"]).inc_by(7);
         let raw = m.render().unwrap();
         assert!(raw.contains("splitter_stream_packets_sent_total{stream_id=\"3\"} 7"));
+    }
+
+    #[test]
+    fn duplicate_registration_returns_err_not_panic() {
+        let registry = Registry::new();
+        let g1 = prometheus::Gauge::new("dup_metric", "first").unwrap();
+        let g2 = prometheus::Gauge::new("dup_metric", "second").unwrap();
+        registry.register(Box::new(g1)).unwrap();
+        let result = registry
+            .register(Box::new(g2))
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")));
+        assert!(
+            matches!(result, Err(NetError::ConfigIo(ref s)) if s.starts_with("prom: ")),
+            "expected Err(NetError::ConfigIo(...)) got {:?}",
+            result
+        );
     }
 }

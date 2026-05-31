@@ -7,8 +7,12 @@ import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
-import { AudioLines, Settings } from "lucide-react";
+import { AudioLines, Settings, Minus, Square, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Toaster } from "@/components/ui/sonner";
+
+const isMac =
+  typeof navigator !== "undefined" && /Macintosh|Mac OS X/i.test(navigator.userAgent);
 
 export function App() {
   const activeTab = useUiStore((s) => s.activeTab);
@@ -28,7 +32,9 @@ export function App() {
     <div className="h-full flex flex-col font-sans">
       <header
         data-tauri-drag-region
-        className="h-11 flex items-center pl-[82px] pr-4 border-b border-line shrink-0 bg-elev-0"
+        className={`h-11 flex items-center border-b border-line shrink-0 bg-elev-0 ${
+          isMac ? "pl-[82px] pr-4" : "pl-3 pr-0"
+        }`}
       >
         <div data-tauri-drag-region className="flex items-center gap-1.5">
           <AudioLines size={18} className="text-gold shrink-0" />
@@ -65,6 +71,34 @@ export function App() {
             <Settings size={16} />
           </button>
         </div>
+        {!isMac && (
+          <div className="flex items-stretch h-full ml-2">
+            <button
+              type="button"
+              aria-label="Minimizar"
+              onClick={() => getCurrentWindow().minimize()}
+              className="w-[46px] flex items-center justify-center text-ink-2 hover:bg-elev-2 hover:text-ink"
+            >
+              <Minus size={15} />
+            </button>
+            <button
+              type="button"
+              aria-label="Maximizar"
+              onClick={() => getCurrentWindow().toggleMaximize()}
+              className="w-[46px] flex items-center justify-center text-ink-2 hover:bg-elev-2 hover:text-ink"
+            >
+              <Square size={12} />
+            </button>
+            <button
+              type="button"
+              aria-label="Fechar"
+              onClick={() => getCurrentWindow().close()}
+              className="w-[46px] flex items-center justify-center text-ink-2 hover:bg-[#e81123] hover:text-white"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
       </header>
       <main className="flex-1 overflow-auto bg-board">
         {activeTab === "routing" ? <RoutingBoard /> : <StatsView />}

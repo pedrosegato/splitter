@@ -1,5 +1,5 @@
 use crate::events::{PeersChanged, StatsTick, StreamStat};
-use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
+use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent, SERVICE_TYPE};
 use splitter_core::net::signaling::connection::PeerConnectionHandle;
 use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
 use splitter_core::net::signaling::DeviceDescriptor;
@@ -19,7 +19,7 @@ pub fn apply_discovery_event(map: &mut HashMap<String, DiscoveredPeer>, ev: Disc
             map.insert(p.peer_id.clone(), p);
         }
         DiscoveryEvent::Removed(fullname) => {
-            map.retain(|peer_id, _| !fullname.contains(peer_id.as_str()));
+            map.retain(|peer_id, _| format!("{peer_id}.{SERVICE_TYPE}") != fullname);
         }
     }
 }
@@ -256,5 +256,59 @@ mod tests {
             DiscoveryEvent::Removed("id1._splitter._tcp.local.".into()),
         );
         assert_eq!(map.len(), 0);
+    }
+
+    #[test]
+    fn removal_empty_fullname_does_not_remove_valid_peers() {
+        use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "id1".to_string(),
+            DiscoveredPeer {
+                peer_id: "id1".into(),
+                peer_name: "Peer".into(),
+                host: "10.0.0.1".into(),
+                port: 7000,
+                version: "0.1.0".into(),
+            },
+        );
+        apply_discovery_event(&mut map, DiscoveryEvent::Removed("".into()));
+        assert_eq!(
+            map.len(),
+            1,
+            "empty fullname must not remove existing peers"
+        );
+    }
+
+    #[test]
+    fn removal_keys_on_exact_fullname_not_substring() {
+        use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "abc".to_string(),
+            DiscoveredPeer {
+                peer_id: "abc".into(),
+                peer_name: "Keep".into(),
+                host: "10.0.0.2".into(),
+                port: 7001,
+                version: "0.1.0".into(),
+            },
+        );
+        map.insert(
+            "abcdef".to_string(),
+            DiscoveredPeer {
+                peer_id: "abcdef".into(),
+                peer_name: "Remove".into(),
+                host: "10.0.0.3".into(),
+                port: 7002,
+                version: "0.1.0".into(),
+            },
+        );
+        apply_discovery_event(
+            &mut map,
+            DiscoveryEvent::Removed("abcdef._splitter._tcp.local.".into()),
+        );
+        assert_eq!(map.len(), 1, "only the exact peer should be removed");
+        assert!(map.contains_key("abc"), "non-target peer must survive");
     }
 }

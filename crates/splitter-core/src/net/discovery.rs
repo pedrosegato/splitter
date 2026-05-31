@@ -56,6 +56,28 @@ fn build_service_info(
     Ok(info)
 }
 
+pub(crate) fn map_resolved(
+    peer_id: Option<&str>,
+    peer_name: Option<&str>,
+    version: Option<&str>,
+    addrs: &[std::net::IpAddr],
+    port: u16,
+) -> Option<DiscoveryEvent> {
+    let peer_id = peer_id.filter(|s| !s.is_empty())?.to_string();
+    let host = addrs
+        .iter()
+        .next()
+        .map(|a| a.to_string())
+        .filter(|s| !s.is_empty())?;
+    Some(DiscoveryEvent::Found(DiscoveredPeer {
+        peer_id,
+        peer_name: peer_name.unwrap_or_default().to_string(),
+        host,
+        port,
+        version: version.unwrap_or_default().to_string(),
+    }))
+}
+
 impl Discovery {
     pub fn start(identity: &PeerIdentity, signaling_port: u16) -> Result<Self, NetError> {
         let daemon = ServiceDaemon::new().map_err(|e| NetError::Mdns {
@@ -83,31 +105,12 @@ impl Discovery {
                             continue;
                         }
                         let props = info.get_properties();
-                        let peer_id = props
-                            .get("peer_id")
-                            .map(|p| p.val_str().to_string())
-                            .unwrap_or_default();
-                        let peer_name = props
-                            .get("peer_name")
-                            .map(|p| p.val_str().to_string())
-                            .unwrap_or_default();
-                        let version = props
-                            .get("version")
-                            .map(|p| p.val_str().to_string())
-                            .unwrap_or_default();
-                        let host = info
-                            .get_addresses()
-                            .iter()
-                            .next()
-                            .map(|a| a.to_string())
-                            .unwrap_or_default();
-                        Some(DiscoveryEvent::Found(DiscoveredPeer {
-                            peer_id,
-                            peer_name,
-                            host,
-                            port: info.get_port(),
-                            version,
-                        }))
+                        let peer_id = props.get("peer_id").map(|p| p.val_str());
+                        let peer_name = props.get("peer_name").map(|p| p.val_str());
+                        let version = props.get("version").map(|p| p.val_str());
+                        let addrs: Vec<std::net::IpAddr> =
+                            info.get_addresses().iter().copied().collect();
+                        map_resolved(peer_id, peer_name, version, &addrs, info.get_port())
                     }
                     ServiceEvent::ServiceRemoved(_, fullname) => {
                         Some(DiscoveryEvent::Removed(fullname))
@@ -183,6 +186,56 @@ mod tests {
         PeerIdentity {
             peer_id: Uuid::new_v4(),
             peer_name: name.into(),
+        }
+    }
+
+    fn addr(octets: [u8; 4]) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::from(octets))
+    }
+
+    #[test]
+    fn map_resolved_missing_peer_id_yields_none() {
+        let addrs = vec![addr([10, 0, 0, 1])];
+        assert!(map_resolved(None, None, None, &addrs, 7000).is_none());
+    }
+
+    #[test]
+    fn map_resolved_empty_peer_id_yields_none() {
+        let addrs = vec![addr([10, 0, 0, 1])];
+        assert!(map_resolved(Some(""), None, None, &addrs, 7000).is_none());
+    }
+
+    #[test]
+    fn map_resolved_no_addrs_yields_none() {
+        assert!(map_resolved(Some("abc-id"), None, None, &[], 7000).is_none());
+    }
+
+    #[test]
+    fn map_resolved_valid_record_yields_found_event() {
+        let addrs = vec![addr([192, 168, 0, 10])];
+        let ev = map_resolved(Some("my-peer"), Some("Studio"), Some("0.1.0"), &addrs, 7777);
+        match ev {
+            Some(DiscoveryEvent::Found(p)) => {
+                assert_eq!(p.peer_id, "my-peer");
+                assert_eq!(p.peer_name, "Studio");
+                assert_eq!(p.host, "192.168.0.10");
+                assert_eq!(p.port, 7777);
+                assert_eq!(p.version, "0.1.0");
+            }
+            _ => panic!("expected DiscoveryEvent::Found"),
+        }
+    }
+
+    #[test]
+    fn map_resolved_missing_cosmetic_fields_uses_defaults() {
+        let addrs = vec![addr([10, 1, 2, 3])];
+        let ev = map_resolved(Some("peer-x"), None, None, &addrs, 1234);
+        match ev {
+            Some(DiscoveryEvent::Found(p)) => {
+                assert_eq!(p.peer_name, "");
+                assert_eq!(p.version, "");
+            }
+            _ => panic!("expected DiscoveryEvent::Found"),
         }
     }
 

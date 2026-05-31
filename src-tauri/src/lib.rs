@@ -50,6 +50,12 @@ fn build() -> Builder<tauri::Wry> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _logs_guard = splitter_core::observability::logs::log_dir()
+        .and_then(|dir| {
+            splitter_core::observability::logs::init(splitter_core::LogLevel::Info, &dir)
+        })
+        .ok();
+
     let builder = build();
 
     #[cfg(debug_assertions)]

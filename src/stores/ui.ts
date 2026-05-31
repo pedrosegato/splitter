@@ -4,7 +4,6 @@ import type { StreamStat } from "@/bindings";
 const HISTORY_CAP = 60;
 
 type Arm = { peerId: string; deviceId: string; kind: "src" | "sink" } | null;
-type Incoming = { peerId: string; peerName: string } | null;
 
 export type StreamHistory = { rtt: number[]; loss: number[]; kbps: number[] };
 
@@ -35,15 +34,12 @@ interface UiState {
   arm: Arm;
   stats: StreamStat[];
   statsHistory: Record<number, StreamHistory>;
-  incoming: Incoming;
   knownNames: Record<string, string>;
   setTab: (t: UiState["activeTab"]) => void;
   selectStream: (id: number | null) => void;
   armSource: (peerId: string, deviceId: string, kind: "src" | "sink") => void;
   clearArm: () => void;
-  setStats: (s: StreamStat[]) => void;
   pushStats: (tick: StreamStat[]) => void;
-  setIncoming: (i: Incoming) => void;
   rememberNames: (names: Record<string, string>) => void;
 }
 
@@ -53,19 +49,16 @@ export const useUiStore = create<UiState>((set) => ({
   arm: null,
   stats: [],
   statsHistory: {},
-  incoming: null,
   knownNames: {},
   setTab: (activeTab) => set({ activeTab }),
   selectStream: (selectedStreamId) => set({ selectedStreamId }),
   armSource: (peerId, deviceId, kind) => set({ arm: { peerId, deviceId, kind } }),
   clearArm: () => set({ arm: null }),
-  setStats: (stats) => set({ stats }),
   pushStats: (tick) =>
     set((state) => ({
       stats: tick,
       statsHistory: pushStatsHistory(state.statsHistory, tick),
     })),
-  setIncoming: (incoming) => set({ incoming }),
   rememberNames: (names) =>
     set((state) => ({ knownNames: { ...state.knownNames, ...names } })),
 }));

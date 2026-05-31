@@ -21,24 +21,6 @@ describe("useThemeStore", () => {
     useThemeStore.getState().setTheme("dark");
     expect(useThemeStore.getState().theme).toBe("dark");
   });
-
-  it("toggle flips dark to light", () => {
-    useThemeStore.getState().toggle();
-    expect(useThemeStore.getState().theme).toBe("light");
-  });
-
-  it("toggle flips light to dark", () => {
-    useThemeStore.setState({ theme: "light" });
-    useThemeStore.getState().toggle();
-    expect(useThemeStore.getState().theme).toBe("dark");
-  });
-
-  it("toggle alternates on repeated calls", () => {
-    useThemeStore.getState().toggle();
-    expect(useThemeStore.getState().theme).toBe("light");
-    useThemeStore.getState().toggle();
-    expect(useThemeStore.getState().theme).toBe("dark");
-  });
 });
 
 describe("applyTheme", () => {

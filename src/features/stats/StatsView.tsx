@@ -139,7 +139,6 @@ export function StatsView() {
           unit="kbps"
           label="banda total"
         />
-        <MetricCard value="48" unit="kHz" label="sample rate" />
       </div>
 
       <p className="text-[9px] text-ink-3 uppercase tracking-widest mb-3">

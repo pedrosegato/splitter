@@ -11,10 +11,6 @@ export async function mountEventBridge(qc: QueryClient): Promise<() => void> {
       qc.invalidateQueries({ queryKey: ["peers"] });
     }),
     events.incomingSession.listen((e) => {
-      useUiStore.getState().setIncoming({
-        peerId: e.payload.peer_id,
-        peerName: e.payload.peer_name,
-      });
       useUiStore.getState().rememberNames({ [e.payload.peer_id]: e.payload.peer_name });
       qc.invalidateQueries({ queryKey: ["snapshot"] });
       qc.invalidateQueries({ queryKey: ["pending"] });

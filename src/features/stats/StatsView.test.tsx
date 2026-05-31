@@ -158,13 +158,6 @@ describe("StatsView", () => {
     expect(getByText("430")).toBeDefined();
   });
 
-  it("renders sample rate card with static 48 kHz", () => {
-    setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
-    const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
-    expect(getByText("sample rate")).toBeDefined();
-    expect(getByText("48")).toBeDefined();
-  });
-
   it("renders one row per stat entry with source_device → sink_device label", () => {
     setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });

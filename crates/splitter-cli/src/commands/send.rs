@@ -75,26 +75,3 @@ pub(crate) async fn run(
         }
     }
 }
-
-#[allow(dead_code)]
-type RunSignature =
-    fn(
-        &str,
-        &str,
-        u8,
-        i32,
-        crate::Source,
-        crate::SendFecMode,
-        u8,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn run_signature_accepts_fec_args() {
-        fn _check(_f: RunSignature) {}
-        let _ = run;
-    }
-}

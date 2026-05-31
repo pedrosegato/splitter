@@ -46,7 +46,6 @@ describe("useWiring", () => {
       selectedStreamId: null,
       arm: null,
       stats: [],
-      incoming: null,
     });
 
     mutateSpy = vi.fn();

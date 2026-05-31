@@ -50,7 +50,5 @@ export function useUpdater() {
     }
   }, []);
 
-  const reset = useCallback(() => setState({ status: "idle" }), []);
-
-  return { state, checkForUpdates, reset };
+  return { state, checkForUpdates };
 }

@@ -21,7 +21,6 @@ type MachinePanelProps = {
   connected: boolean;
   sinks: Dev[];
   sources: Dev[];
-  latencyMs?: number | null;
   wiredPortIds?: Set<string>;
   portColor?: (portId: string) => string | undefined;
   onPortActivate?: (
@@ -94,7 +93,6 @@ export function MachinePanel({
   connected,
   sinks,
   sources,
-  latencyMs,
   wiredPortIds,
   portColor,
   onPortActivate,
@@ -136,11 +134,6 @@ export function MachinePanel({
         </span>
         {!isSelf && (
           <div className="ml-auto flex items-center gap-2 shrink-0">
-            {connected && latencyMs != null && (
-              <span className="font-sans text-[10px] text-gold tabular-nums">
-                {latencyMs} ms
-              </span>
-            )}
             <button
               type="button"
               title="desconectar"

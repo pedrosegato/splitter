@@ -100,22 +100,6 @@ describe("MachinePanel", () => {
     expect(clicked).toBe(true);
   });
 
-  it("shows latency for connected remote panel", () => {
-    const { getByText } = wrap(
-      <MachinePanel
-        peerId="remote"
-        name="Studio PC"
-        side="right"
-        connected
-        sinks={sinks}
-        sources={sources}
-        latencyMs={4}
-      />,
-    );
-
-    expect(getByText("4 ms")).toBeTruthy();
-  });
-
   it("shows disconnect button for remote panel and calls onDisconnect", () => {
     let disconnected = false;
     const { getByTitle } = wrap(

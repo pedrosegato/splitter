@@ -1,7 +1,7 @@
 import { useSettings, useSetSetting, useSetAutostart } from "@/hooks/useSettings";
 import type { JitterMode } from "@/bindings";
 
-function toBackendString(key: string, value: string | number | boolean): string {
+function toBackendString(value: string | number | boolean): string {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return String(value);
   return value;
@@ -24,7 +24,7 @@ export function useSettingsForm() {
     } else if (key === "jitter_mode" && typeof value === "string") {
       stringValue = value;
     } else {
-      stringValue = toBackendString(key, value);
+      stringValue = toBackendString(value);
     }
     mutation.mutate({ key, value: stringValue });
   }

@@ -6,15 +6,13 @@ type Theme = "dark" | "light";
 interface ThemeState {
   theme: Theme;
   setTheme: (t: Theme) => void;
-  toggle: () => void;
 }
 
 export const useThemeStore = create<ThemeState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       theme: "dark",
       setTheme: (theme) => set({ theme }),
-      toggle: () => set({ theme: get().theme === "dark" ? "light" : "dark" }),
     }),
     { name: "splitter-theme" }
   )

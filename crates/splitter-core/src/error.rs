@@ -14,12 +14,6 @@ pub enum CoreError {
 pub enum AudioError {
     #[error("device not found: {0}")]
     DeviceNotFound(String),
-    #[error("device unavailable: {0}")]
-    DeviceUnavailable(String),
-    #[error("unsupported sample rate {requested} on device {device}")]
-    UnsupportedSampleRate { device: String, requested: u32 },
-    #[error("unsupported channel count {requested} on device {device}")]
-    UnsupportedChannels { device: String, requested: u16 },
     #[error("loopback not available on this platform")]
     LoopbackUnsupported,
     #[error("Screen Recording permission denied; enable in System Settings → Privacy & Security → Screen Recording, then relaunch")]

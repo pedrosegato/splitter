@@ -9,7 +9,6 @@ beforeEach(() => {
     arm: null,
     stats: [],
     statsHistory: {},
-    incoming: null,
   });
 });
 
@@ -21,7 +20,6 @@ describe("useUiStore", () => {
     expect(s.arm).toBeNull();
     expect(s.stats).toEqual([]);
     expect(s.statsHistory).toEqual({});
-    expect(s.incoming).toBeNull();
   });
 
   it("setTab switches the active tab", () => {
@@ -58,22 +56,6 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().arm).toBeNull();
   });
 
-  it("setStats replaces stats array", () => {
-    const first = [
-      { session_id: "s1", stream_id: 1, rtt_ms: 10, loss_pct: 0, kbps_sent: 100, kbps_received: 50 },
-    ];
-    useUiStore.getState().setStats(first);
-    expect(useUiStore.getState().stats).toEqual(first);
-
-    const second = [
-      { session_id: "s2", stream_id: 2, rtt_ms: 20, loss_pct: 1, kbps_sent: 200, kbps_received: 100 },
-      { session_id: "s3", stream_id: 3, rtt_ms: 30, loss_pct: 2, kbps_sent: 300, kbps_received: 150 },
-    ];
-    useUiStore.getState().setStats(second);
-    expect(useUiStore.getState().stats).toEqual(second);
-    expect(useUiStore.getState().stats).toHaveLength(2);
-  });
-
   it("pushStats updates stats and statsHistory", () => {
     const tick: StreamStat[] = [
       { session_id: "s1", stream_id: 1, rtt_ms: 10, loss_pct: 0.5, kbps_sent: 100, kbps_received: 50 },
@@ -83,17 +65,6 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().statsHistory[1].rtt).toEqual([10]);
     expect(useUiStore.getState().statsHistory[1].loss).toEqual([0.5]);
     expect(useUiStore.getState().statsHistory[1].kbps).toEqual([150]);
-  });
-
-  it("setIncoming stores incoming session", () => {
-    useUiStore.getState().setIncoming({ peerId: "p1", peerName: "Alice" });
-    expect(useUiStore.getState().incoming).toEqual({ peerId: "p1", peerName: "Alice" });
-  });
-
-  it("setIncoming with null clears incoming", () => {
-    useUiStore.getState().setIncoming({ peerId: "p1", peerName: "Alice" });
-    useUiStore.getState().setIncoming(null);
-    expect(useUiStore.getState().incoming).toBeNull();
   });
 });
 

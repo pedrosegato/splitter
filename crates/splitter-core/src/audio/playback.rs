@@ -156,13 +156,15 @@ const RESAMPLE_CHUNK: usize = 441;
 /// All buffers are pre-allocated; no heap work inside the cpal callback.
 struct PlaybackFiller {
     channels: usize,
-    // Separate resamplers for L and R to keep per-channel state independent.
     resampler_l: Option<Resampler>,
     resampler_r: Option<Resampler>,
-    // reservoir: holds already-resampled stereo-interleaved samples waiting for the next fill.
     reservoir: Vec<f32>,
-    // src_scratch: accumulates 48k stereo-interleaved samples to feed into resampler chunks.
     src_scratch: Vec<f32>,
+    l_in: Vec<f32>,
+    r_in: Vec<f32>,
+    l_out: Vec<f32>,
+    r_out: Vec<f32>,
+    stereo_buf: Vec<f32>,
 }
 
 impl PlaybackFiller {
@@ -190,16 +192,21 @@ impl PlaybackFiller {
             resampler_r,
             reservoir: Vec::with_capacity(4096),
             src_scratch: Vec::with_capacity(RESAMPLE_CHUNK * 8),
+            l_in: Vec::with_capacity(RESAMPLE_CHUNK),
+            r_in: Vec::with_capacity(RESAMPLE_CHUNK),
+            l_out: Vec::with_capacity(RESAMPLE_CHUNK * 2),
+            r_out: Vec::with_capacity(RESAMPLE_CHUNK * 2),
+            stereo_buf: Vec::with_capacity(4096),
         })
     }
 
     fn fill_f32(&mut self, out: &mut [f32], cons: &Mutex<RingConsumer>, notify: &Notify) {
         let ch = self.channels.max(1);
         let frames = out.len() / ch;
-        let stereo = self.produce_stereo(frames, cons, notify);
+        self.produce_stereo(frames, cons, notify);
         for i in 0..frames {
-            let (l, r) = if i < stereo.len() / 2 {
-                (stereo[i * 2], stereo[i * 2 + 1])
+            let (l, r) = if i < self.stereo_buf.len() / 2 {
+                (self.stereo_buf[i * 2], self.stereo_buf[i * 2 + 1])
             } else {
                 (0.0, 0.0)
             };
@@ -210,10 +217,10 @@ impl PlaybackFiller {
     fn fill_i16(&mut self, out: &mut [i16], cons: &Mutex<RingConsumer>, notify: &Notify) {
         let ch = self.channels.max(1);
         let frames = out.len() / ch;
-        let stereo = self.produce_stereo(frames, cons, notify);
+        self.produce_stereo(frames, cons, notify);
         for i in 0..frames {
-            let (l, r) = if i < stereo.len() / 2 {
-                (stereo[i * 2], stereo[i * 2 + 1])
+            let (l, r) = if i < self.stereo_buf.len() / 2 {
+                (self.stereo_buf[i * 2], self.stereo_buf[i * 2 + 1])
             } else {
                 (0.0, 0.0)
             };
@@ -226,10 +233,10 @@ impl PlaybackFiller {
     fn fill_u16(&mut self, out: &mut [u16], cons: &Mutex<RingConsumer>, notify: &Notify) {
         let ch = self.channels.max(1);
         let frames = out.len() / ch;
-        let stereo = self.produce_stereo(frames, cons, notify);
+        self.produce_stereo(frames, cons, notify);
         for i in 0..frames {
-            let (l, r) = if i < stereo.len() / 2 {
-                (stereo[i * 2], stereo[i * 2 + 1])
+            let (l, r) = if i < self.stereo_buf.len() / 2 {
+                (self.stereo_buf[i * 2], self.stereo_buf[i * 2 + 1])
             } else {
                 (0.0, 0.0)
             };
@@ -239,34 +246,24 @@ impl PlaybackFiller {
         }
     }
 
-    /// Returns a vec of interleaved stereo samples at the device's sample rate.
-    /// The returned vec has `frames * 2` entries (L,R pairs); underrun positions are 0.
-    fn produce_stereo(
-        &mut self,
-        frames: usize,
-        cons: &Mutex<RingConsumer>,
-        notify: &Notify,
-    ) -> Vec<f32> {
+    fn produce_stereo(&mut self, frames: usize, cons: &Mutex<RingConsumer>, notify: &Notify) {
         let stereo_needed = frames * 2;
+        self.stereo_buf.clear();
+        self.stereo_buf.resize(stereo_needed, 0.0);
 
         if self.resampler_l.is_none() {
-            // Pass-through: pull stereo_needed samples directly.
-            let mut stereo = vec![0.0f32; stereo_needed];
             if let Ok(mut c) = cons.try_lock() {
-                let popped = c.pop_slice(&mut stereo);
+                let popped = c.pop_slice(&mut self.stereo_buf);
                 if popped > 0 {
                     notify.notify_one();
                 }
-                for s in stereo[popped..].iter_mut() {
+                for s in self.stereo_buf[popped..].iter_mut() {
                     *s = 0.0;
                 }
             }
-            return stereo;
+            return;
         }
 
-        // Resampling path. We need `frames` output frames at device_rate.
-        // Ring holds stereo at 48k, so we pull RESAMPLE_CHUNK*2 at a time (stereo pairs),
-        // resample each channel separately (independent state), then re-interleave.
         while self.reservoir.len() < stereo_needed {
             self.src_scratch.resize(RESAMPLE_CHUNK * 2, 0.0);
             let popped = if let Ok(mut c) = cons.try_lock() {
@@ -287,36 +284,39 @@ impl PlaybackFiller {
                 *s = 0.0;
             }
 
-            let l_in: Vec<f32> = self.src_scratch[..RESAMPLE_CHUNK * 2]
-                .iter()
-                .step_by(2)
-                .copied()
-                .collect();
-            let r_in: Vec<f32> = self.src_scratch[..RESAMPLE_CHUNK * 2]
-                .iter()
-                .skip(1)
-                .step_by(2)
-                .copied()
-                .collect();
+            self.l_in.clear();
+            self.r_in.clear();
+            self.l_in.extend(
+                self.src_scratch[..RESAMPLE_CHUNK * 2]
+                    .iter()
+                    .step_by(2)
+                    .copied(),
+            );
+            self.r_in.extend(
+                self.src_scratch[..RESAMPLE_CHUNK * 2]
+                    .iter()
+                    .skip(1)
+                    .step_by(2)
+                    .copied(),
+            );
 
-            let mut l_out = Vec::new();
-            let mut r_out = Vec::new();
             let rl = self.resampler_l.as_mut().unwrap();
             let rr = self.resampler_r.as_mut().unwrap();
-            if rl.process(&l_in, &mut l_out).is_ok() && rr.process(&r_in, &mut r_out).is_ok() {
-                let stereo_out: Vec<f32> = l_out
-                    .iter()
-                    .zip(r_out.iter())
-                    .flat_map(|(&lv, &rv)| [lv, rv])
-                    .collect();
-                self.reservoir.extend_from_slice(&stereo_out);
+            if rl.process(&self.l_in, &mut self.l_out).is_ok()
+                && rr.process(&self.r_in, &mut self.r_out).is_ok()
+            {
+                self.reservoir.extend(
+                    self.l_out
+                        .iter()
+                        .zip(self.r_out.iter())
+                        .flat_map(|(&lv, &rv)| [lv, rv]),
+                );
             }
         }
 
         let available = self.reservoir.len().min(stereo_needed);
-        let mut stereo: Vec<f32> = self.reservoir.drain(..available).collect();
-        stereo.resize(stereo_needed, 0.0);
-        stereo
+        self.stereo_buf[..available].copy_from_slice(&self.reservoir[..available]);
+        self.reservoir.drain(..available);
     }
 }
 
@@ -483,7 +483,6 @@ mod tests {
     /// Resampler from 48k to 44.1k produces the right approximate stereo sample count.
     #[test]
     fn playback_filler_44100_resamples_from_48k() {
-        // Feed 4800 stereo frames (9600 samples) at 48k; request 4410 frames (8820 samples) at 44100.
         let (mut prod, cons) = AudioRing::new(32768);
         prod.push_slice(&vec![0.5f32; 9600]);
 
@@ -491,13 +490,51 @@ mod tests {
         let notify = Arc::new(Notify::new());
         let mut filler = PlaybackFiller::new(44_100, 2).expect("filler init");
 
-        let mut out = vec![0.0f32; 8820]; // 4410 stereo frames
+        let mut out = vec![0.0f32; 8820];
         filler.fill_f32(&mut out, &cons, &notify);
 
         let non_zero = out.iter().filter(|&&s| s.abs() > 0.01).count();
         assert!(
             non_zero > 8000,
             "expected most samples to be non-zero after resampling 48k->44.1k stereo, got {non_zero}"
+        );
+    }
+
+    #[test]
+    fn playback_filler_resampler_buffers_reused_produce_identical_output() {
+        let (mut prod1, cons1) = AudioRing::new(32768);
+        let (mut prod2, cons2) = AudioRing::new(32768);
+        prod1.push_slice(&vec![0.5f32; 9600]);
+        prod2.push_slice(&vec![0.5f32; 9600]);
+
+        let cons1 = Arc::new(Mutex::new(cons1));
+        let cons2 = Arc::new(Mutex::new(cons2));
+        let notify1 = Arc::new(Notify::new());
+        let notify2 = Arc::new(Notify::new());
+
+        let mut filler1 = PlaybackFiller::new(44_100, 2).expect("filler init");
+        let mut filler2 = PlaybackFiller::new(44_100, 2).expect("filler init");
+
+        let mut out1 = vec![0.0f32; 8820];
+        let mut out2 = vec![0.0f32; 8820];
+        filler1.fill_f32(&mut out1, &cons1, &notify1);
+        filler2.fill_f32(&mut out2, &cons2, &notify2);
+
+        for (i, (&a, &b)) in out1.iter().zip(out2.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-6, "sample {i} mismatch: {a} vs {b}");
+        }
+
+        let (mut prod3, cons3) = AudioRing::new(32768);
+        prod3.push_slice(&vec![0.5f32; 9600]);
+        let cons3 = Arc::new(Mutex::new(cons3));
+        let notify3 = Arc::new(Notify::new());
+        let mut out3 = vec![0.0f32; 8820];
+        filler1.fill_f32(&mut out3, &cons3, &notify3);
+
+        let non_zero = out3.iter().filter(|&&s| s.abs() > 0.01).count();
+        assert!(
+            non_zero > 8000,
+            "second call must still produce output (buffers correctly reused); non-zero: {non_zero}"
         );
     }
 }

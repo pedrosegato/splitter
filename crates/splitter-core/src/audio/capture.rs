@@ -349,12 +349,14 @@ const RESAMPLE_CHUNK: usize = 441;
 /// Pre-allocated; no heap activity inside the cpal callback.
 struct SampleRouter {
     channels: usize,
-    // Separate resamplers for L and R to keep per-channel state independent.
     resampler_l: Option<Resampler>,
     resampler_r: Option<Resampler>,
-    // scratch: accumulates stereo-interleaved samples before feeding the resamplers
     scratch: Vec<f32>,
     resampled: Vec<f32>,
+    l_in: Vec<f32>,
+    r_in: Vec<f32>,
+    l_out: Vec<f32>,
+    r_out: Vec<f32>,
 }
 
 impl SampleRouter {
@@ -387,6 +389,10 @@ impl SampleRouter {
             resampler_r,
             scratch: Vec::with_capacity(scratch_cap),
             resampled: Vec::with_capacity(scratch_cap * 2),
+            l_in: Vec::with_capacity(RESAMPLE_CHUNK),
+            r_in: Vec::with_capacity(RESAMPLE_CHUNK),
+            l_out: Vec::with_capacity(RESAMPLE_CHUNK * 2),
+            r_out: Vec::with_capacity(RESAMPLE_CHUNK * 2),
         })
     }
 
@@ -413,12 +419,9 @@ impl SampleRouter {
         let frame_count = interleaved.len() / ch;
 
         if self.resampler_l.is_none() {
-            // Fast path: no resampling, convert to stereo directly into a stack buffer.
-            // Output is 2 * frame_count f32 values.
-            let mut tmp = [0f32; 2048];
-            let stereo_count = (frame_count * 2).min(tmp.len());
-            let frames = stereo_count / 2;
-            for i in 0..frames {
+            self.scratch.clear();
+            self.scratch.reserve(frame_count * 2);
+            for i in 0..frame_count {
                 let base = i * ch;
                 let l = to_f32(interleaved[base]);
                 let r = if ch >= 2 {
@@ -426,10 +429,10 @@ impl SampleRouter {
                 } else {
                     l
                 };
-                tmp[i * 2] = l;
-                tmp[i * 2 + 1] = r;
+                self.scratch.push(l);
+                self.scratch.push(r);
             }
-            flush_to_ring(&tmp[..frames * 2], prod, notify);
+            flush_to_ring(&self.scratch, prod, notify);
             return;
         }
 
@@ -449,21 +452,33 @@ impl SampleRouter {
             self.scratch.push(r);
 
             while self.scratch.len() >= RESAMPLE_CHUNK * 2 {
-                let chunk: Vec<f32> = self.scratch.drain(..RESAMPLE_CHUNK * 2).collect();
-                // Resampler operates on mono; run L and R channels separately then interleave.
-                let l_in: Vec<f32> = chunk.iter().step_by(2).copied().collect();
-                let r_in: Vec<f32> = chunk.iter().skip(1).step_by(2).copied().collect();
-                let mut l_out = Vec::new();
-                let mut r_out = Vec::new();
+                self.l_in.clear();
+                self.r_in.clear();
+                self.l_in.extend(
+                    self.scratch[..RESAMPLE_CHUNK * 2]
+                        .iter()
+                        .step_by(2)
+                        .copied(),
+                );
+                self.r_in.extend(
+                    self.scratch[..RESAMPLE_CHUNK * 2]
+                        .iter()
+                        .skip(1)
+                        .step_by(2)
+                        .copied(),
+                );
+                self.scratch.drain(..RESAMPLE_CHUNK * 2);
                 let rl = self.resampler_l.as_mut().unwrap();
                 let rr = self.resampler_r.as_mut().unwrap();
-                if rl.process(&l_in, &mut l_out).is_ok() && rr.process(&r_in, &mut r_out).is_ok() {
-                    let stereo: Vec<f32> = l_out
-                        .iter()
-                        .zip(r_out.iter())
-                        .flat_map(|(&lv, &rv)| [lv, rv])
-                        .collect();
-                    self.resampled.extend_from_slice(&stereo);
+                if rl.process(&self.l_in, &mut self.l_out).is_ok()
+                    && rr.process(&self.r_in, &mut self.r_out).is_ok()
+                {
+                    self.resampled.extend(
+                        self.l_out
+                            .iter()
+                            .zip(self.r_out.iter())
+                            .flat_map(|(&lv, &rv)| [lv, rv]),
+                    );
                     flush_to_ring(&self.resampled, prod, notify);
                     self.resampled.clear();
                 }
@@ -647,5 +662,87 @@ mod tests {
         let result =
             tokio::time::timeout(std::time::Duration::from_millis(100), notify.notified()).await;
         assert!(result.is_ok(), "notify must fire on a non-empty push");
+    }
+
+    #[test]
+    fn sample_router_resampler_buffers_reused_produce_identical_output() {
+        let ring_cap = 65536;
+        let (prod1, mut cons1) = AudioRing::new(ring_cap);
+        let (prod2, mut cons2) = AudioRing::new(ring_cap);
+        let prod1 = Arc::new(Mutex::new(prod1));
+        let prod2 = Arc::new(Mutex::new(prod2));
+        let notify1 = Arc::new(Notify::new());
+        let notify2 = Arc::new(Notify::new());
+
+        let mut router = SampleRouter::new(44_100, 1).expect("router init");
+
+        let input = vec![0.6f32; 4410];
+        router.push_f32(&input, &prod1, &notify1);
+
+        let mut router2 = SampleRouter::new(44_100, 1).expect("router init");
+        router2.push_f32(&input, &prod2, &notify2);
+
+        let avail1 = cons1.occupied();
+        let avail2 = cons2.occupied();
+        assert_eq!(
+            avail1, avail2,
+            "both routers must produce the same sample count"
+        );
+        assert!(avail1 > 0, "must produce output");
+
+        let mut out1 = vec![0.0f32; avail1];
+        let mut out2 = vec![0.0f32; avail2];
+        cons1.pop_slice(&mut out1);
+        cons2.pop_slice(&mut out2);
+
+        for (i, (&a, &b)) in out1.iter().zip(out2.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-6, "sample {i} mismatch: {a} vs {b}");
+        }
+
+        let (prod3, cons3) = AudioRing::new(ring_cap);
+        let prod3 = Arc::new(Mutex::new(prod3));
+        let notify3 = Arc::new(Notify::new());
+        router.push_f32(&input, &prod3, &notify3);
+        let avail3 = cons3.occupied();
+        assert!(
+            avail3 > 0,
+            "second call must also produce output (buffers correctly reused)"
+        );
+    }
+
+    #[test]
+    fn sample_router_fast_path_no_truncation_large_callback() {
+        let frame_count = 4096;
+        let ring_cap = frame_count * 2 * 2;
+        let (prod, mut cons) = AudioRing::new(ring_cap);
+        let prod = Arc::new(Mutex::new(prod));
+        let notify = Arc::new(Notify::new());
+
+        let mut router = SampleRouter::new(48_000, 2).expect("router init");
+
+        let input: Vec<f32> = (0..frame_count).flat_map(|_| [0.3f32, 0.7f32]).collect();
+        router.push_f32(&input, &prod, &notify);
+
+        let available = cons.occupied();
+        assert_eq!(
+            available,
+            frame_count * 2,
+            "all {frame_count} stereo frames must reach the ring; got {available} samples"
+        );
+
+        let mut out = vec![0.0f32; frame_count * 2];
+        cons.pop_slice(&mut out);
+        for i in 0..frame_count {
+            assert!(
+                (out[i * 2] - 0.3).abs() < 1e-5,
+                "L ch at frame {i}: expected 0.3, got {}",
+                out[i * 2]
+            );
+            assert!(
+                (out[i * 2 + 1] - 0.7).abs() < 1e-5,
+                "R ch at frame {i}: expected 0.7, got {}",
+                out[i * 2 + 1]
+            );
+        }
     }
 }

@@ -42,6 +42,30 @@ impl MacosLoopbackHandle {
     }
 }
 
+pub(crate) fn deinterleave_to_stereo(samples: &[f32], channels: usize, out: &mut Vec<f32>) {
+    match channels {
+        1 => {
+            out.reserve(samples.len() * 2);
+            for &s in samples {
+                out.push(s);
+                out.push(s);
+            }
+        }
+        2 => {
+            out.extend_from_slice(samples);
+        }
+        n => {
+            let frame_count = samples.len() / n;
+            out.reserve(frame_count * 2);
+            for frame_idx in 0..frame_count {
+                let base = frame_idx * n;
+                out.push(samples[base]);
+                out.push(samples[base + 1]);
+            }
+        }
+    }
+}
+
 struct AudioHandler {
     producer: Arc<Mutex<RingProducer>>,
     frame_notify: Arc<Notify>,
@@ -57,8 +81,7 @@ impl SCStreamOutputTrait for AudioHandler {
             return;
         };
 
-        let mut stereo_buf = [0f32; 4096];
-        let mut stereo_len = 0usize;
+        let mut stereo: Vec<f32> = Vec::new();
 
         for buf in abl.iter() {
             let channels = buf.number_channels as usize;
@@ -76,45 +99,15 @@ impl SCStreamOutputTrait for AudioHandler {
             let samples: &[f32] =
                 unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), sample_count) };
 
-            match channels {
-                1 => {
-                    for &s in samples {
-                        if stereo_len + 2 > stereo_buf.len() {
-                            break;
-                        }
-                        stereo_buf[stereo_len] = s;
-                        stereo_buf[stereo_len + 1] = s;
-                        stereo_len += 2;
-                    }
-                }
-                2 => {
-                    let available = stereo_buf.len() - stereo_len;
-                    let to_copy = samples.len().min(available);
-                    stereo_buf[stereo_len..stereo_len + to_copy]
-                        .copy_from_slice(&samples[..to_copy]);
-                    stereo_len += to_copy;
-                }
-                n => {
-                    let frame_count = samples.len() / n;
-                    for frame_idx in 0..frame_count {
-                        if stereo_len + 2 > stereo_buf.len() {
-                            break;
-                        }
-                        let base = frame_idx * n;
-                        stereo_buf[stereo_len] = samples[base];
-                        stereo_buf[stereo_len + 1] = samples[base + 1];
-                        stereo_len += 2;
-                    }
-                }
-            }
+            deinterleave_to_stereo(samples, channels, &mut stereo);
         }
 
-        if stereo_len == 0 {
+        if stereo.is_empty() {
             return;
         }
 
         if let Ok(mut p) = self.producer.try_lock() {
-            let pushed = p.push_slice(&stereo_buf[..stereo_len]);
+            let pushed = p.push_slice(&stereo);
             if pushed > 0 {
                 self.frame_notify.notify_one();
             }
@@ -221,6 +214,66 @@ mod tests {
             Err(AudioError::ScreenRecordingPermissionDenied) => {}
             Err(AudioError::BuildStream { .. }) => {}
             Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn deinterleave_stereo_passthrough_large_input() {
+        let frame_count = 8192;
+        let input: Vec<f32> = (0..frame_count * 2)
+            .map(|i| if i % 2 == 0 { 0.3f32 } else { 0.7f32 })
+            .collect();
+        let mut out = Vec::new();
+        deinterleave_to_stereo(&input, 2, &mut out);
+        assert_eq!(
+            out.len(),
+            frame_count * 2,
+            "all {frame_count} stereo frames must be copied without truncation"
+        );
+        for i in 0..frame_count {
+            assert!(
+                (out[i * 2] - 0.3).abs() < 1e-6,
+                "L at frame {i}: expected 0.3, got {}",
+                out[i * 2]
+            );
+            assert!(
+                (out[i * 2 + 1] - 0.7).abs() < 1e-6,
+                "R at frame {i}: expected 0.7, got {}",
+                out[i * 2 + 1]
+            );
+        }
+    }
+
+    #[test]
+    fn deinterleave_mono_upmix_large_input() {
+        let frame_count = 8192;
+        let input = vec![0.5f32; frame_count];
+        let mut out = Vec::new();
+        deinterleave_to_stereo(&input, 1, &mut out);
+        assert_eq!(out.len(), frame_count * 2);
+        for i in 0..frame_count {
+            assert!((out[i * 2] - 0.5).abs() < 1e-6);
+            assert!((out[i * 2 + 1] - 0.5).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn deinterleave_multichannel_large_input_no_truncation() {
+        let frame_count = 8192;
+        let channels = 6usize;
+        let input: Vec<f32> = (0..frame_count * channels)
+            .map(|i| (i % channels) as f32 * 0.1)
+            .collect();
+        let mut out = Vec::new();
+        deinterleave_to_stereo(&input, channels, &mut out);
+        assert_eq!(
+            out.len(),
+            frame_count * 2,
+            "multichannel: all {frame_count} frames must be extracted"
+        );
+        for i in 0..frame_count {
+            assert!((out[i * 2] - 0.0).abs() < 1e-6, "L channel 0");
+            assert!((out[i * 2 + 1] - 0.1).abs() < 1e-6, "R channel 1");
         }
     }
 }

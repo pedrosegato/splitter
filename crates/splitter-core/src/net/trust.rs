@@ -1,4 +1,5 @@
 use crate::error::NetError;
+use crate::net::fs_util::write_atomic;
 use constant_time_eq::constant_time_eq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -90,7 +91,7 @@ impl TrustStore {
         };
         let raw = toml::to_string_pretty(&file)
             .map_err(|e| NetError::ConfigIo(format!("serialize trust: {e}")))?;
-        std::fs::write(&self.path, raw)
+        write_atomic(&self.path, raw.as_bytes())
             .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", self.path.display())))?;
         Ok(())
     }
@@ -135,6 +136,19 @@ mod tests {
 
         let reloaded = TrustStore::load_or_create(&path).expect("reload");
         assert!(reloaded.verify(&peer_id, "tok-xyz"));
+    }
+
+    #[test]
+    fn add_leaves_no_tmp_file_and_content_round_trips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("trusted_peers.toml");
+        let mut store = TrustStore::load_or_create(&path).expect("create");
+        let peer_id = Uuid::new_v4();
+        store.add(sample(peer_id, "tok-abc")).unwrap();
+        let tmp = path.with_extension("toml.tmp");
+        assert!(!tmp.exists(), "no tmp file after flush");
+        let reloaded = TrustStore::load_or_create(&path).expect("reload");
+        assert!(reloaded.verify(&peer_id, "tok-abc"));
     }
 
     #[test]

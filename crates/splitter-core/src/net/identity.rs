@@ -1,4 +1,5 @@
 use crate::error::NetError;
+use crate::net::fs_util::write_atomic;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -17,17 +18,8 @@ impl PeerIdentity {
         }
         let raw = toml::to_string_pretty(self)
             .map_err(|e| NetError::ConfigIo(format!("serialize identity: {e}")))?;
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, raw)
-            .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", tmp.display())))?;
-        std::fs::rename(&tmp, path).map_err(|e| {
-            NetError::ConfigIo(format!(
-                "rename {} -> {}: {e}",
-                tmp.display(),
-                path.display()
-            ))
-        })?;
-        Ok(())
+        write_atomic(path, raw.as_bytes())
+            .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", path.display())))
     }
 
     pub fn load_or_create(path: &Path) -> Result<Self, NetError> {
@@ -54,7 +46,7 @@ impl PeerIdentity {
         };
         let serialized = toml::to_string_pretty(&identity)
             .map_err(|e| NetError::ConfigIo(format!("serialize: {e}")))?;
-        std::fs::write(path, serialized)
+        write_atomic(path, serialized.as_bytes())
             .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", path.display())))?;
         Ok(identity)
     }
@@ -108,6 +100,17 @@ mod tests {
         let id_a = PeerIdentity::load_or_create(&path_a).expect("create a");
         let id_b = PeerIdentity::load_or_create(&path_b).expect("create b");
         assert_ne!(id_a.peer_id, id_b.peer_id);
+    }
+
+    #[test]
+    fn load_or_create_leaves_no_tmp_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identity.toml");
+        let id = PeerIdentity::load_or_create(&path).expect("create");
+        let tmp = path.with_extension("toml.tmp");
+        assert!(!tmp.exists(), "no tmp file after create");
+        let reloaded = PeerIdentity::load_or_create(&path).expect("reload");
+        assert_eq!(id, reloaded);
     }
 
     #[test]

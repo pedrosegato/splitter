@@ -210,18 +210,16 @@ impl StreamRegistry {
         signal: StreamControlSignal,
     ) -> Result<(), NetError> {
         let guard = self.inner.read().await;
-        let rt =
-            guard
-                .get(&(*session_id, stream_id))
-                .ok_or_else(|| NetError::SignalingProtocol {
-                    reason: format!("no runtime for stream {stream_id} on session {session_id}"),
-                })?;
+        let rt = guard
+            .get(&(*session_id, stream_id))
+            .ok_or(NetError::UnknownStream {
+                session: *session_id,
+                stream: stream_id,
+            })?;
         rt.control_tx
             .send(signal)
             .await
-            .map_err(|_| NetError::SignalingProtocol {
-                reason: format!("control channel closed for stream {stream_id}"),
-            })
+            .map_err(|_| NetError::ChannelClosed)
     }
 
     pub async fn close(&self, session_id: &SessionId, stream_id: StreamId) -> Result<(), NetError> {
@@ -231,8 +229,9 @@ impl StreamRegistry {
             rt.join.abort();
             Ok(())
         } else {
-            Err(NetError::SignalingProtocol {
-                reason: format!("no runtime for stream {stream_id}"),
+            Err(NetError::UnknownStream {
+                session: *session_id,
+                stream: stream_id,
             })
         }
     }
@@ -870,14 +869,10 @@ pub async fn open_stream_as_sink_inproc(
 ) -> Result<u16, NetError> {
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("bind sink udp: {e}"),
-        })?;
+        .map_err(|e| NetError::UdpBind(format!("bind sink udp: {e}")))?;
     let port = socket
         .local_addr()
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("query sink udp local_addr: {e}"),
-        })?
+        .map_err(|e| NetError::UdpBind(format!("query sink udp local_addr: {e}")))?
         .port();
 
     let (producer, _consumer) = AudioRing::new(FRAME_SAMPLES * 20);
@@ -920,15 +915,11 @@ pub async fn open_stream_as_source_inproc(
 
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("bind source udp: {e}"),
-        })?;
+        .map_err(|e| NetError::UdpBind(format!("bind source udp: {e}")))?;
     socket
         .connect(remote)
         .await
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("connect source udp to {remote}: {e}"),
-        })?;
+        .map_err(|e| NetError::UdpBind(format!("connect source udp to {remote}: {e}")))?;
 
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
@@ -1016,15 +1007,11 @@ pub async fn open_stream_as_source(
 
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("bind source udp: {e}"),
-        })?;
+        .map_err(|e| NetError::UdpBind(format!("bind source udp: {e}")))?;
     socket
         .connect(remote)
         .await
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("connect source udp: {e}"),
-        })?;
+        .map_err(|e| NetError::UdpBind(format!("connect source udp: {e}")))?;
 
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
@@ -1062,14 +1049,10 @@ pub async fn open_stream_as_sink(
 ) -> Result<u16, NetError> {
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("bind sink udp: {e}"),
-        })?;
+        .map_err(|e| NetError::UdpBind(format!("bind sink udp: {e}")))?;
     let port = socket
         .local_addr()
-        .map_err(|e| NetError::SignalingProtocol {
-            reason: format!("local_addr: {e}"),
-        })?
+        .map_err(|e| NetError::UdpBind(format!("local_addr: {e}")))?
         .port();
 
     let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);

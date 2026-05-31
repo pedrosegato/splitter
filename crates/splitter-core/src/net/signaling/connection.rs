@@ -215,9 +215,7 @@ pub async fn send_with_timeout(
             what: "signaling send".into(),
             millis: timeout.as_millis() as u64,
         })?
-        .map_err(|_| NetError::SignalingProtocol {
-            reason: "peer connection closed".into(),
-        })?;
+        .map_err(|_| NetError::ChannelClosed)?;
     Ok(())
 }
 

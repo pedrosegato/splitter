@@ -75,6 +75,20 @@ pub enum NetError {
 
     #[error("config io: {0}")]
     ConfigIo(String),
+
+    /// Session lookup failed; session_id is a Uuid (alias SessionId avoids a dep cycle).
+    #[error("unknown session {0}")]
+    UnknownSession(uuid::Uuid),
+
+    /// Stream lookup failed within a known session.
+    #[error("unknown stream {stream} in session {session}")]
+    UnknownStream { session: uuid::Uuid, stream: u8 },
+
+    #[error("channel closed")]
+    ChannelClosed,
+
+    #[error("udp bind failed: {0}")]
+    UdpBind(String),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -229,5 +243,33 @@ mod tests {
             Err(NetError::from(std::io::Error::other("disk full")))
         }
         assert!(matches!(inner().unwrap_err(), NetError::UdpIo(_)));
+    }
+
+    #[test]
+    fn net_error_unknown_session_display() {
+        let id = uuid::Uuid::nil();
+        let e = NetError::UnknownSession(id);
+        assert!(e.to_string().contains("unknown session"));
+        assert!(e.to_string().contains(&id.to_string()));
+    }
+
+    #[test]
+    fn net_error_unknown_stream_display() {
+        let session = uuid::Uuid::nil();
+        let e = NetError::UnknownStream { session, stream: 3 };
+        assert!(e.to_string().contains("unknown stream 3 in session"));
+    }
+
+    #[test]
+    fn net_error_channel_closed_display() {
+        let e = NetError::ChannelClosed;
+        assert_eq!(e.to_string(), "channel closed");
+    }
+
+    #[test]
+    fn net_error_udp_bind_display() {
+        let e = NetError::UdpBind("address in use".into());
+        assert!(e.to_string().contains("udp bind failed"));
+        assert!(e.to_string().contains("address in use"));
     }
 }

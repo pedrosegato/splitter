@@ -65,21 +65,13 @@ impl SessionManager {
 
     pub async fn accept(&self, id: &SessionId) -> Result<(), NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard
-            .get_mut(id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown session {id}"),
-            })?;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
         s.accept()
     }
 
     pub async fn add_stream(&self, id: &SessionId, stream: Stream) -> Result<(), NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard
-            .get_mut(id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown session {id}"),
-            })?;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
         s.add_stream(stream)
     }
 
@@ -89,27 +81,20 @@ impl SessionManager {
         stream_id: StreamId,
     ) -> Result<(), NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard
-            .get_mut(id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown session {id}"),
-            })?;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
         let st = s
             .streams
             .get_mut(&stream_id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown stream {stream_id} in session {id}"),
+            .ok_or(NetError::UnknownStream {
+                session: *id,
+                stream: stream_id,
             })?;
         st.activate()
     }
 
     pub async fn close(&self, id: &SessionId) -> Result<(), NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard
-            .get_mut(id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown session {id}"),
-            })?;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
         s.close();
         Ok(())
     }
@@ -121,16 +106,13 @@ impl SessionManager {
         muted: bool,
     ) -> Result<(), NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard
-            .get_mut(id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown session {id}"),
-            })?;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
         let st = s
             .streams
             .get_mut(&stream_id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown stream {stream_id} in session {id}"),
+            .ok_or(NetError::UnknownStream {
+                session: *id,
+                stream: stream_id,
             })?;
         st.set_muted(muted);
         Ok(())
@@ -138,11 +120,7 @@ impl SessionManager {
 
     pub async fn next_stream_id(&self, id: &SessionId) -> Result<StreamId, NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard
-            .get_mut(id)
-            .ok_or_else(|| NetError::SignalingProtocol {
-                reason: format!("unknown session {id}"),
-            })?;
+        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
         Ok(s.next_stream_id())
     }
 
@@ -238,7 +216,7 @@ mod tests {
             .add_stream(&fake, Stream::new_negotiating(0, route(), 5004))
             .await
             .unwrap_err();
-        assert!(matches!(err, NetError::SignalingProtocol { .. }));
+        assert!(matches!(err, NetError::UnknownSession(_)));
     }
 
     #[tokio::test]
@@ -281,7 +259,31 @@ mod tests {
         let mgr = SessionManager::new();
         let fake = Uuid::new_v4();
         let err = mgr.set_stream_muted(&fake, 0, true).await.unwrap_err();
-        assert!(matches!(err, NetError::SignalingProtocol { .. }));
+        assert!(matches!(err, NetError::UnknownSession(_)));
+    }
+
+    #[tokio::test]
+    async fn activate_stream_unknown_stream_returns_unknown_stream_error() {
+        let mgr = SessionManager::new();
+        let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
+        mgr.accept(&id).await.unwrap();
+        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+            .await
+            .unwrap();
+        let err = mgr.activate_stream(&id, 99).await.unwrap_err();
+        assert!(matches!(err, NetError::UnknownStream { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn set_stream_muted_unknown_stream_returns_unknown_stream_error() {
+        let mgr = SessionManager::new();
+        let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
+        mgr.accept(&id).await.unwrap();
+        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+            .await
+            .unwrap();
+        let err = mgr.set_stream_muted(&id, 99, true).await.unwrap_err();
+        assert!(matches!(err, NetError::UnknownStream { .. }), "got {err:?}");
     }
 
     #[tokio::test]
@@ -294,7 +296,7 @@ mod tests {
         let err = mgr.register_incoming(id, local, remote).await.unwrap_err();
         assert!(
             matches!(err, NetError::SignalingProtocol { .. }),
-            "duplicate session_id must return SignalingProtocol error"
+            "duplicate session_id is a genuine protocol violation: {err}"
         );
     }
 }

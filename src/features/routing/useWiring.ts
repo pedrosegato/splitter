@@ -47,45 +47,48 @@ export function useWiring() {
       }
 
       if (!arm) {
-        if (kind !== "src") {
-          setHint("comece por uma fonte");
-          return;
+        armSource(peerId, deviceId, kind);
+        return;
+      }
+
+      // Second click must be the opposite kind on the other machine.
+      // Invalid targets are visually disabled, so just ignore stray clicks.
+      if (kind === arm.kind) {
+        if (peerId === arm.peerId && deviceId === arm.deviceId) {
+          clearArm();
         }
-        armSource(peerId, deviceId);
-        setHint("agora clique num destino");
         return;
       }
-
-      if (kind !== "sink") {
-        setHint("termine num destino");
-        return;
-      }
-
       if (peerId === arm.peerId) {
-        setHint("não pode rotear pra mesma máquina");
-        clearArm();
         return;
       }
 
-      const sourceIsSelf = arm.peerId === selfPeerId;
+      const src =
+        arm.kind === "src"
+          ? { peer: arm.peerId, dev: arm.deviceId }
+          : { peer: peerId, dev: deviceId };
+      const sink =
+        arm.kind === "sink"
+          ? { peer: arm.peerId, dev: arm.deviceId }
+          : { peer: peerId, dev: deviceId };
 
-      if (sourceIsSelf) {
-        const armedDevice = devices?.find((d) => d.id === arm.deviceId);
+      if (src.peer === selfPeerId) {
+        const armedDevice = devices?.find((d) => d.id === src.dev);
         openStream.mutate({
           sessionId: session.id,
-          sourceDeviceId: arm.deviceId,
+          sourceDeviceId: src.dev,
           sourceIsSystem: armedDevice?.kind === "SystemAudio",
-          sinkPeerId: peerId,
-          sinkDeviceId: deviceId,
+          sinkPeerId: sink.peer,
+          sinkDeviceId: sink.dev,
           bitrate: undefined,
         });
       } else {
-        const remoteDevice = peerDevices?.find((d) => d.id === arm.deviceId);
+        const remoteDevice = peerDevices?.find((d) => d.id === src.dev);
         requestStream.mutate({
           sessionId: session.id,
-          sourceDeviceId: arm.deviceId,
+          sourceDeviceId: src.dev,
           sourceIsSystem: remoteDevice?.kind === "SystemAudio",
-          sinkDeviceId: deviceId,
+          sinkDeviceId: sink.dev,
         });
       }
 

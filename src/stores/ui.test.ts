@@ -47,8 +47,12 @@ describe("useUiStore", () => {
   });
 
   it("armSource sets arm and clearArm removes it", () => {
-    useUiStore.getState().armSource("peer-1", "device-abc");
-    expect(useUiStore.getState().arm).toEqual({ peerId: "peer-1", deviceId: "device-abc" });
+    useUiStore.getState().armSource("peer-1", "device-abc", "src");
+    expect(useUiStore.getState().arm).toEqual({
+      peerId: "peer-1",
+      deviceId: "device-abc",
+      kind: "src",
+    });
 
     useUiStore.getState().clearArm();
     expect(useUiStore.getState().arm).toBeNull();

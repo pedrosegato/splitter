@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { StreamSnapshot } from "@/bindings";
 import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
 import { useUiStore } from "@/stores/ui";
@@ -18,7 +18,6 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
   const closeStream = useCloseStream();
 
   const [muted, setMuted] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const color = streamColor(stream.id);
   const initialVolume = Math.round(stream.volume * 100);
@@ -40,16 +39,12 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
 
   const handleVolumeChange = useCallback(
     (values: number[]) => {
-      const v = values[0];
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        streamControl.mutate({
-          sessionId,
-          streamId: stream.id,
-          action: "set_volume",
-          value: v / 100,
-        });
-      }, 150);
+      streamControl.mutate({
+        sessionId,
+        streamId: stream.id,
+        action: "set_volume",
+        value: values[0] / 100,
+      });
     },
     [sessionId, stream.id, streamControl],
   );

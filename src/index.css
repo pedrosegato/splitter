@@ -86,18 +86,19 @@ body {
 }
 
 :root {
-  --bg: #f4f4f5;
-  --board: #ececee;
+  --bg: #e7e7ec;
+  --board: #d6d6dd;
   --surface: #ffffff;
-  --surface-2: #f3f3f5;
-  --line: #e2e2e4;
-  --line-2: #d3d3d6;
-  --ink: #1c1c1f;
-  --ink-2: #5a5a60;
-  --ink-3: #8a8a90;
-  --elev-0: #e4e4e6;
-  --elev-1: #d6d6d8;
-  --elev-2: #dcdcde;
+  --surface-2: #eceef2;
+  --line: #c4c4ce;
+  --line-2: #aeaeba;
+  --ink: #17171a;
+  --ink-2: #44444c;
+  --ink-3: #72727c;
+  --elev-0: #dedee4;
+  --elev-1: #d0d0d8;
+  --elev-2: #c6c6d0;
+  --grid-line: rgba(0, 0, 0, 0.05);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -145,6 +146,7 @@ body {
   --elev-0: #161618;
   --elev-1: #2a2a2d;
   --elev-2: #242426;
+  --grid-line: rgba(255, 255, 255, 0.025);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);

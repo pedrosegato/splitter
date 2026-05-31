@@ -1,74 +1,30 @@
-use crate::Source;
+use crate::commands::audio_pipeline::{
+    make_udp_socket, map_fec_mode, reeval_fec, start_capture, UdpDirection, FEC_REEVAL_FRAMES,
+};
 use bytes::{Bytes, BytesMut};
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use splitter_core::audio::capture::CaptureHandle;
 use splitter_core::audio::codec::OpusEncoder;
 use splitter_core::audio::ring::AudioRing;
 use splitter_core::net::packet::Packet;
 use splitter_core::FRAME_STEREO_SAMPLES;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Instant;
-use tokio::net::UdpSocket;
-use tokio::sync::Notify;
 use tokio::time::Duration;
-
-#[cfg(all(target_os = "macos", feature = "sck"))]
-use splitter_core::MacosLoopbackHandle;
-
-#[allow(dead_code)]
-enum CaptureGuard {
-    Mic(CaptureHandle),
-    #[cfg(all(target_os = "macos", feature = "sck"))]
-    MacSystem(MacosLoopbackHandle),
-    #[cfg(not(target_os = "macos"))]
-    Loopback(CaptureHandle),
-}
-
-impl CaptureGuard {
-    fn frame_ready(&self) -> Arc<Notify> {
-        match self {
-            CaptureGuard::Mic(h) => h.frame_ready(),
-            #[cfg(all(target_os = "macos", feature = "sck"))]
-            CaptureGuard::MacSystem(h) => h.frame_ready(),
-            #[cfg(not(target_os = "macos"))]
-            CaptureGuard::Loopback(h) => h.frame_ready(),
-        }
-    }
-}
 
 pub(crate) async fn run(
     input: &str,
     addr: &str,
     stream_id: u8,
     bitrate: i32,
-    source: Source,
+    source: crate::Source,
     fec_mode: crate::SendFecMode,
     simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
     let dest: SocketAddr = SocketAddr::from_str(addr)?;
     let (producer, mut consumer) = AudioRing::new(7_680);
-    let _capture: CaptureGuard = match source {
-        Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, producer)?),
-        Source::System => {
-            #[cfg(all(target_os = "macos", feature = "sck"))]
-            {
-                CaptureGuard::MacSystem(MacosLoopbackHandle::start(producer)?)
-            }
-            #[cfg(all(target_os = "macos", not(feature = "sck")))]
-            {
-                anyhow::bail!("system audio capture requires the sck feature (use BlackHole 2ch as an input device instead)");
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                CaptureGuard::Loopback(CaptureHandle::start_loopback(producer)?)
-            }
-        }
-    };
-
+    let _capture = start_capture(source, input, producer)?;
     let frame_notify = _capture.frame_ready();
-    let sock = make_udp_socket(SocketAddr::from(([0, 0, 0, 0], 0)))?;
+    let sock = make_udp_socket(SocketAddr::from(([0, 0, 0, 0], 0)), UdpDirection::Send)?;
     tracing::info!(
         "sending stream_id={stream_id} to {dest} at {bitrate} bps fec_mode={fec_mode:?} simulated_loss_pct={simulated_loss_pct}"
     );
@@ -101,20 +57,9 @@ pub(crate) async fn run(
                 continue;
             }
 
-            // Every 100 frames: inject simulated loss samples and re-evaluate FEC.
             frame_count = frame_count.wrapping_add(1);
-            if frame_count.is_multiple_of(100) {
-                let now = Instant::now();
-                let lost = simulated_loss_pct as usize;
-                let ok = 100usize.saturating_sub(lost);
-                for _ in 0..lost {
-                    fec.record(now, true);
-                }
-                for _ in 0..ok {
-                    fec.record(now, false);
-                }
-                let setting = fec.evaluate(now);
-                encoder.set_fec(setting.enable, setting.packet_loss_perc)?;
+            if frame_count.is_multiple_of(FEC_REEVAL_FRAMES) {
+                reeval_fec(&mut fec, &mut encoder, simulated_loss_pct)?;
             }
 
             encoder.encode(&frame, &mut payload_buf)?;
@@ -129,23 +74,6 @@ pub(crate) async fn run(
             seq = seq.wrapping_add(1);
         }
     }
-}
-
-fn map_fec_mode(m: crate::SendFecMode) -> splitter_core::FecMode {
-    match m {
-        crate::SendFecMode::Auto => splitter_core::FecMode::Auto,
-        crate::SendFecMode::Always => splitter_core::FecMode::Always,
-        crate::SendFecMode::Never => splitter_core::FecMode::Never,
-    }
-}
-
-fn make_udp_socket(bind: SocketAddr) -> anyhow::Result<UdpSocket> {
-    let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    sock.set_send_buffer_size(1 << 20)?;
-    sock.bind(&SockAddr::from(bind))?;
-    sock.set_nonblocking(true)?;
-    let std_sock: std::net::UdpSocket = sock.into();
-    Ok(UdpSocket::from_std(std_sock)?)
 }
 
 #[allow(dead_code)]
@@ -165,15 +93,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capture_guard_variants_compile() {
-        fn _accept(_g: CaptureGuard) {}
-    }
-
-    #[test]
     fn run_signature_accepts_fec_args() {
-        // Compile-time check: run() must accept (fec_mode, simulated_loss_pct).
-        // If the signature changes this test fails to compile.
         fn _check(_f: RunSignature) {}
-        let _ = run; // ensure `run` is in scope — actual signature check at compile time
+        let _ = run;
     }
 }

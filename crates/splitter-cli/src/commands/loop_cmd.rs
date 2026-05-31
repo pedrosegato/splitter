@@ -1,67 +1,23 @@
-use crate::Source;
+use crate::commands::audio_pipeline::{map_fec_mode, reeval_fec, start_capture, FEC_REEVAL_FRAMES};
 use bytes::BytesMut;
-use splitter_core::audio::capture::CaptureHandle;
 use splitter_core::audio::codec::{OpusDecoder, OpusEncoder};
 use splitter_core::audio::playback::PlaybackHandle;
 use splitter_core::audio::ring::AudioRing;
 use splitter_core::FRAME_STEREO_SAMPLES;
-use std::sync::Arc;
-use tokio::sync::Notify;
 use tokio::time::Duration;
-
-#[cfg(all(target_os = "macos", feature = "sck"))]
-use splitter_core::MacosLoopbackHandle;
-
-#[allow(dead_code)]
-enum CaptureGuard {
-    Mic(CaptureHandle),
-    #[cfg(all(target_os = "macos", feature = "sck"))]
-    MacSystem(MacosLoopbackHandle),
-    #[cfg(not(target_os = "macos"))]
-    Loopback(CaptureHandle),
-}
-
-impl CaptureGuard {
-    fn frame_ready(&self) -> Arc<Notify> {
-        match self {
-            CaptureGuard::Mic(h) => h.frame_ready(),
-            #[cfg(all(target_os = "macos", feature = "sck"))]
-            CaptureGuard::MacSystem(h) => h.frame_ready(),
-            #[cfg(not(target_os = "macos"))]
-            CaptureGuard::Loopback(h) => h.frame_ready(),
-        }
-    }
-}
 
 pub(crate) async fn run(
     input: &str,
     output: &str,
     bitrate: i32,
-    source: Source,
+    source: crate::Source,
     fec_mode: crate::SendFecMode,
     simulated_loss_pct: u8,
 ) -> anyhow::Result<()> {
     let (cap_prod, mut cap_cons) = AudioRing::new(7_680);
     let (mut play_prod, play_cons) = AudioRing::new(7_680);
 
-    let _capture: CaptureGuard = match source {
-        Source::Mic => CaptureGuard::Mic(CaptureHandle::start(input, cap_prod)?),
-        Source::System => {
-            #[cfg(all(target_os = "macos", feature = "sck"))]
-            {
-                CaptureGuard::MacSystem(MacosLoopbackHandle::start(cap_prod)?)
-            }
-            #[cfg(all(target_os = "macos", not(feature = "sck")))]
-            {
-                anyhow::bail!("system audio capture requires the sck feature (use BlackHole 2ch as an input device instead)");
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                CaptureGuard::Loopback(CaptureHandle::start_loopback(cap_prod)?)
-            }
-        }
-    };
-
+    let _capture = start_capture(source, input, cap_prod)?;
     let _playback = PlaybackHandle::start(output, play_cons)?;
     tracing::info!(
         "loopback running: source={source:?} input={input} output={output} @ {bitrate}bps fec_mode={fec_mode:?} simulated_loss_pct={simulated_loss_pct}"
@@ -89,20 +45,9 @@ pub(crate) async fn run(
         while cap_cons.occupied() >= FRAME_STEREO_SAMPLES {
             cap_cons.pop_slice(&mut frame);
 
-            // Every 100 frames: inject simulated loss samples and re-evaluate FEC.
             frame_count = frame_count.wrapping_add(1);
-            if frame_count.is_multiple_of(100) {
-                let now = std::time::Instant::now();
-                let lost = simulated_loss_pct as usize;
-                let ok = 100usize.saturating_sub(lost);
-                for _ in 0..lost {
-                    fec.record(now, true);
-                }
-                for _ in 0..ok {
-                    fec.record(now, false);
-                }
-                let setting = fec.evaluate(now);
-                enc.set_fec(setting.enable, setting.packet_loss_perc)?;
+            if frame_count.is_multiple_of(FEC_REEVAL_FRAMES) {
+                reeval_fec(&mut fec, &mut enc, simulated_loss_pct)?;
             }
 
             enc.encode(&frame, &mut payload)?;
@@ -112,19 +57,11 @@ pub(crate) async fn run(
     }
 }
 
-fn map_fec_mode(m: crate::SendFecMode) -> splitter_core::FecMode {
-    match m {
-        crate::SendFecMode::Auto => splitter_core::FecMode::Auto,
-        crate::SendFecMode::Always => splitter_core::FecMode::Always,
-        crate::SendFecMode::Never => splitter_core::FecMode::Never,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     #[test]
-    fn capture_guard_variants_compile() {
+    fn loop_cmd_uses_shared_capture_guard() {
+        use crate::commands::audio_pipeline::CaptureGuard;
         fn _accept(_g: CaptureGuard) {}
     }
 }

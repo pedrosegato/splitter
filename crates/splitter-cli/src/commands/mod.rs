@@ -1,3 +1,4 @@
+pub(crate) mod audio_pipeline;
 pub(crate) mod autostart;
 pub(crate) mod daemon;
 pub(crate) mod devices;

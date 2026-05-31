@@ -69,25 +69,21 @@ pub fn run() {
     let pause_id = pause_shortcut.id();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_decorum::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
                 let _ = win.set_focus();
             }
         }))
+        .plugin(tauri_plugin_decorum::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcut(mute_shortcut)
-                .expect("valid mute shortcut")
-                .with_shortcut(pause_shortcut)
-                .expect("valid pause shortcut")
                 .with_handler(move |app, shortcut, event| {
                     if event.state != ShortcutState::Pressed {
                         return;
@@ -140,6 +136,17 @@ pub fn run() {
                     tracing::error!("fatal: AppCore init failed: {e}");
                     eprintln!("fatal: Splitter failed to start: {e}");
                     std::process::exit(1);
+                }
+            }
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                let gs = app.global_shortcut();
+                if let Err(e) = gs.register(mute_shortcut) {
+                    tracing::warn!("global shortcut Ctrl+Shift+M unavailable: {e}");
+                }
+                if let Err(e) = gs.register(pause_shortcut) {
+                    tracing::warn!("global shortcut Ctrl+Shift+P unavailable: {e}");
                 }
             }
             tray::build_tray(app.handle())?;

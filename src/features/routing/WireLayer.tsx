@@ -2,6 +2,7 @@ import { useLayoutEffect, useState, useRef, useCallback } from "react";
 import type { StreamSnapshot } from "@/bindings";
 import { usePortRegistry } from "./usePortRegistry";
 import { curve, streamColor } from "./useWireGeometry";
+import { useUiStore } from "@/stores/ui";
 
 type WireLayerProps = {
   boardRef: React.RefObject<HTMLDivElement | null>;
@@ -19,7 +20,9 @@ type ComputedWire = {
 
 export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayerProps) {
   const registry = usePortRegistry();
+  const arm = useUiStore((s) => s.arm);
   const [wires, setWires] = useState<ComputedWire[]>([]);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const tickRef = useRef(0);
 
   const measure = useCallback(() => {
@@ -78,10 +81,51 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
     };
   }, [boardRef, measure]);
 
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board || !arm) {
+      setCursor(null);
+      return;
+    }
+    const onMove = (e: PointerEvent) => {
+      const br = board.getBoundingClientRect();
+      setCursor({ x: e.clientX - br.left, y: e.clientY - br.top });
+    };
+    board.addEventListener("pointermove", onMove);
+    return () => board.removeEventListener("pointermove", onMove);
+  }, [boardRef, arm]);
+
+  let previewPath: string | null = null;
+  if (arm && cursor) {
+    const board = boardRef.current;
+    const el = registry.get(`${arm.peerId}:src:${arm.deviceId}`);
+    if (board && el) {
+      const br = board.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      const a = {
+        x: r.left + r.width / 2 - br.left,
+        y: r.top + r.height / 2 - br.top,
+      };
+      previewPath = curve(a, cursor, board.clientWidth / 2);
+    }
+  }
+
   const hasSelection = selectedId !== null;
 
   return (
     <svg className="absolute inset-0 w-full h-full pointer-events-none z-[1]">
+      {previewPath && (
+        <path
+          d={previewPath}
+          fill="none"
+          stroke="var(--color-gold)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray="5 6"
+          opacity="0.75"
+          style={{ pointerEvents: "none" }}
+        />
+      )}
       {wires.map((wire) => {
         const isSelected = selectedId === wire.id;
         const strokeWidth = isSelected ? "4" : "2.8";

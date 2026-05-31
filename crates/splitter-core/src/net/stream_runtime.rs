@@ -1124,6 +1124,170 @@ mod open_source_tests {
     }
 }
 
+#[cfg(test)]
+mod session_registration_failure_tests {
+    use super::*;
+    use crate::net::manager::SessionManager;
+    use crate::net::signaling::{CodecParams, Endpoint};
+    use crate::net::stream::StreamRoute;
+    use std::net::SocketAddr;
+    use tokio::net::UdpSocket;
+    use uuid::Uuid;
+
+    fn test_route() -> StreamRoute {
+        StreamRoute {
+            source: Endpoint {
+                peer_id: "a".into(),
+                device_id: "src-dev".into(),
+            },
+            sink: Endpoint {
+                peer_id: "b".into(),
+                device_id: "sink-dev".into(),
+            },
+            codec: CodecParams {
+                name: "opus".into(),
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            volume: 1.0,
+        }
+    }
+
+    #[tokio::test]
+    async fn sink_session_add_stream_failure_tears_down_registry_entry() {
+        let registry = StreamRegistry::new();
+        let sessions = SessionManager::new();
+        let unknown_sid = Uuid::new_v4();
+        let stream_id: u8 = 0;
+
+        let port =
+            open_stream_as_sink_inproc(registry.clone(), unknown_sid, stream_id, test_route())
+                .await
+                .expect("inproc sink open must succeed");
+        assert!(port > 0);
+
+        assert_eq!(
+            registry.list().await.len(),
+            1,
+            "runtime registered before add_stream"
+        );
+
+        let add_result = sessions
+            .add_stream(
+                &unknown_sid,
+                crate::net::stream::Stream::new_negotiating(stream_id, test_route(), port),
+            )
+            .await;
+
+        assert!(
+            add_result.is_err(),
+            "add_stream on unknown session must fail"
+        );
+
+        registry
+            .close(&unknown_sid, stream_id)
+            .await
+            .expect("teardown must remove the registered runtime");
+
+        assert!(
+            registry.list().await.is_empty(),
+            "registry must be empty after teardown on add_stream failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn source_session_add_stream_failure_tears_down_registry_entry() {
+        let registry = StreamRegistry::new();
+        let sessions = SessionManager::new();
+        let unknown_sid = Uuid::new_v4();
+        let stream_id: u8 = 1;
+
+        let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote: SocketAddr = sink_socket.local_addr().unwrap();
+
+        open_stream_as_source_inproc(
+            registry.clone(),
+            unknown_sid,
+            stream_id,
+            test_route(),
+            remote,
+        )
+        .await
+        .expect("inproc source open must succeed");
+
+        assert_eq!(
+            registry.list().await.len(),
+            1,
+            "runtime registered before add_stream"
+        );
+
+        let add_result = sessions
+            .add_stream(
+                &unknown_sid,
+                crate::net::stream::Stream::new_negotiating(stream_id, test_route(), 5004),
+            )
+            .await;
+
+        assert!(
+            add_result.is_err(),
+            "add_stream on unknown session must fail"
+        );
+
+        registry
+            .close(&unknown_sid, stream_id)
+            .await
+            .expect("teardown must remove the registered runtime");
+
+        assert!(
+            registry.list().await.is_empty(),
+            "registry must be empty after teardown on add_stream failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn activate_stream_failure_after_add_tears_down_registry_entry() {
+        let registry = StreamRegistry::new();
+        let sessions = SessionManager::new();
+        let local = Uuid::new_v4();
+        let remote_peer = Uuid::new_v4();
+        let sid = sessions.open_outgoing(local, remote_peer).await;
+        sessions.accept(&sid).await.unwrap();
+
+        let stream_id: u8 = 2;
+
+        let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote_addr: SocketAddr = sink_socket.local_addr().unwrap();
+
+        open_stream_as_source_inproc(registry.clone(), sid, stream_id, test_route(), remote_addr)
+            .await
+            .expect("inproc source open must succeed");
+
+        sessions
+            .add_stream(
+                &sid,
+                crate::net::stream::Stream::new_negotiating(stream_id, test_route(), 5004),
+            )
+            .await
+            .unwrap();
+
+        let activate_result = sessions.activate_stream(&sid, 99).await;
+        assert!(
+            activate_result.is_err(),
+            "activate_stream on wrong stream_id must fail"
+        );
+
+        registry
+            .close(&sid, stream_id)
+            .await
+            .expect("teardown on activate failure must remove runtime");
+
+        assert!(
+            registry.list().await.is_empty(),
+            "registry must be empty after teardown on activate_stream failure"
+        );
+    }
+}
+
 use crate::net::device_watcher::DeviceEvent;
 use tokio::sync::broadcast;
 

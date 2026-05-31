@@ -152,8 +152,27 @@ pub fn spawn_acceptor(
                                     session_route,
                                     port,
                                 );
-                                let _ = core.sessions.add_stream(&sid_uuid, stream).await;
-                                let _ = core.sessions.activate_stream(&sid_uuid, stream_id).await;
+                                if let Err(e) = core.sessions.add_stream(&sid_uuid, stream).await {
+                                    tracing::error!(
+                                        peer = %peer_id,
+                                        stream_id,
+                                        "add_stream failed after sink wired — tearing down runtime: {e}"
+                                    );
+                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
+                                    continue;
+                                }
+                                if let Err(e) =
+                                    core.sessions.activate_stream(&sid_uuid, stream_id).await
+                                {
+                                    tracing::error!(
+                                        peer = %peer_id,
+                                        stream_id,
+                                        "activate_stream failed after sink wired — tearing down runtime: {e}"
+                                    );
+                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
+                                    let _ = core.sessions.remove_stream(&sid_uuid, stream_id).await;
+                                    continue;
+                                }
                                 core.emit(SnapshotChanged);
                             }
                             Err(e) => {

@@ -246,11 +246,15 @@ pub(crate) async fn open_stream_core(
     .map_err(|e| e.to_string())?;
     let stream =
         splitter_core::net::stream::Stream::new_negotiating(stream_id, session_route, ack_port);
-    core.sessions
-        .add_stream(&sid, stream)
-        .await
-        .map_err(|e| e.to_string())?;
-    let _ = core.sessions.activate_stream(&sid, stream_id).await;
+    if let Err(e) = core.sessions.add_stream(&sid, stream).await {
+        let _ = core.stream_registry.close(&sid, stream_id).await;
+        return Err(e.to_string());
+    }
+    if let Err(e) = core.sessions.activate_stream(&sid, stream_id).await {
+        let _ = core.stream_registry.close(&sid, stream_id).await;
+        let _ = core.sessions.remove_stream(&sid, stream_id).await;
+        return Err(e.to_string());
+    }
     tracing::info!(%sid, stream_id, "stream now active");
     Ok(stream_id)
 }

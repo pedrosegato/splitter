@@ -43,6 +43,7 @@ assert_cmd = "2"
 insta = { version = "1", features = ["yaml"] }
 tempfile = "3"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+parking_lot = "0.12"
 
 [profile.release]
 opt-level = 3

@@ -1,4 +1,5 @@
 use crate::events::{PeersChanged, StatsTick, StreamStat};
+use parking_lot::RwLock as ParkingRwLock;
 use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent, SERVICE_TYPE};
 use splitter_core::net::signaling::connection::PeerConnectionHandle;
 use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
@@ -38,7 +39,7 @@ pub fn apply_peer_rename(
 }
 
 pub struct AppCore {
-    pub identity: std::sync::RwLock<PeerIdentity>,
+    pub identity: ParkingRwLock<PeerIdentity>,
     pub settings: SettingsHandle,
     pub trust: Arc<RwLock<TrustStore>>,
     pub sessions: Arc<SessionManager>,
@@ -91,7 +92,7 @@ impl AppCore {
             }
         };
         Ok(Arc::new(Self {
-            identity: std::sync::RwLock::new(identity),
+            identity: ParkingRwLock::new(identity),
             settings,
             trust,
             sessions,
@@ -120,7 +121,7 @@ impl AppCore {
 impl AppCore {
     pub fn spawn_discovery(self: &Arc<Self>) -> Result<(), String> {
         let signaling_port = self.server.bind_addr.port();
-        let identity = self.identity.read().unwrap().clone();
+        let identity = self.identity.read().clone();
         let discovery = splitter_core::net::discovery::Discovery::start(&identity, signaling_port)
             .map_err(e2s)?;
         let _ = self.discovery.set(discovery.handle());
@@ -214,8 +215,24 @@ mod tests {
     async fn identity_is_readable_through_lock() {
         let dir = tempdir().unwrap();
         let core = AppCore::init(dir.path()).await.expect("init");
-        let name = core.identity.read().unwrap().peer_name.clone();
+        let name = core.identity.read().peer_name.clone();
         assert!(!name.is_empty());
+    }
+
+    #[test]
+    fn identity_lock_not_poisoned_by_panic() {
+        use parking_lot::RwLock as ParkingRwLock;
+        use splitter_core::PeerIdentity;
+        use uuid::Uuid;
+        let lock = ParkingRwLock::new(PeerIdentity {
+            peer_id: Uuid::new_v4(),
+            peer_name: "test".into(),
+        });
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _g = lock.write();
+            panic!("boom");
+        }));
+        let _g = lock.read();
     }
 
     #[test]

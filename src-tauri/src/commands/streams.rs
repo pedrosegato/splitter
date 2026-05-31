@@ -136,7 +136,7 @@ pub async fn open_session(
     remote_peer_id: String,
 ) -> Result<String, String> {
     let remote = Uuid::parse_str(&remote_peer_id).map_err(|e| e.to_string())?;
-    let local_peer_id = core.identity.read().unwrap().peer_id;
+    let local_peer_id = core.identity.read().peer_id;
     let sid = core.sessions.open_outgoing(local_peer_id, remote).await;
     core.sessions
         .accept(&sid)
@@ -164,7 +164,7 @@ pub(crate) async fn open_stream_core(
     sink_device_id: String,
     bitrate: i32,
 ) -> Result<u8, String> {
-    let local_peer_id = core.identity.read().unwrap().peer_id;
+    let local_peer_id = core.identity.read().peer_id;
 
     let session = core
         .sessions

@@ -9,7 +9,7 @@ use tauri::State;
 #[tauri::command]
 #[specta::specta]
 pub async fn identity(core: State<'_, Arc<AppCore>>) -> Result<IdentityDto, String> {
-    let id = core.identity.read().unwrap().clone();
+    let id = core.identity.read().clone();
     Ok(IdentityDto {
         peer_id: id.peer_id.to_string(),
         peer_name: id.peer_name,
@@ -74,7 +74,7 @@ pub async fn connect_peer(
         Some(s) => Some(uuid::Uuid::parse_str(&s).map_err(|e| e.to_string())?),
         None => None,
     };
-    let identity = core.identity.read().unwrap().clone();
+    let identity = core.identity.read().clone();
     let outcome = splitter_core::net::signaling::client::connect_to_peer(
         addr,
         &identity,
@@ -153,7 +153,7 @@ pub async fn set_device_name(
 ) -> Result<IdentityDto, String> {
     let validated = validate_device_name(&name)?;
     let (peer_id, snapshot) = {
-        let mut id = core.identity.write().unwrap();
+        let mut id = core.identity.write();
         id.peer_name = validated.clone();
         (id.peer_id.to_string(), id.clone())
     };

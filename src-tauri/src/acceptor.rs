@@ -27,7 +27,7 @@ pub fn spawn_acceptor(
     addr: SocketAddr,
 ) {
     let default_output = pick_default_output_device_id();
-    let local_peer_id = core.identity.read().unwrap().peer_id;
+    let local_peer_id = core.identity.read().peer_id;
     tokio::spawn(async move {
         loop {
             match events.recv().await {

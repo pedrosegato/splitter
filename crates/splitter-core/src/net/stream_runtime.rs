@@ -508,36 +508,38 @@ pub async fn spawn_source_pump_inner(
                 }
             }
             _ = frame_ready.notified() => {
-                while consumer.occupied() >= FRAME_STEREO_SAMPLES {
+                if consumer.occupied() >= FRAME_STEREO_SAMPLES {
                     consumer.pop_slice(&mut frame);
-                    if paused {
-                        continue;
-                    }
-                    let effective_gain = if muted.load(Ordering::Relaxed) { 0.0 } else { gain };
-                    if (effective_gain - 1.0).abs() > f32::EPSILON {
-                        for s in frame.iter_mut() {
-                            *s *= effective_gain;
-                        }
-                    }
-                    if let Err(e) = encoder.encode(&frame, &mut payload) {
-                        tracing::warn!("opus encode failed: {e}");
-                        continue;
-                    }
-                    let pkt = Packet {
-                        stream_id,
-                        seq: seq & SEQ_MASK,
-                        timestamp_ms: start.elapsed().as_millis() as u32,
-                        payload: Bytes::copy_from_slice(&payload[..]),
-                    };
-                    if pkt.encode(&mut packet_buf).is_ok() {
-                        match socket.send(&packet_buf[..]).await {
-                            Ok(n) => {
-                                stats.packets_sent.fetch_add(1, Ordering::Relaxed);
-                                stats.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
-                                seq = seq.wrapping_add(1);
+                    if !paused {
+                        let effective_gain = if muted.load(Ordering::Relaxed) { 0.0 } else { gain };
+                        if (effective_gain - 1.0).abs() > f32::EPSILON {
+                            for s in frame.iter_mut() {
+                                *s *= effective_gain;
                             }
-                            Err(e) => tracing::warn!("udp send failed: {e}"),
                         }
+                        if let Err(e) = encoder.encode(&frame, &mut payload) {
+                            tracing::warn!("opus encode failed: {e}");
+                        } else {
+                            let pkt = Packet {
+                                stream_id,
+                                seq: seq & SEQ_MASK,
+                                timestamp_ms: start.elapsed().as_millis() as u32,
+                                payload: Bytes::copy_from_slice(&payload[..]),
+                            };
+                            if pkt.encode(&mut packet_buf).is_ok() {
+                                match socket.send(&packet_buf[..]).await {
+                                    Ok(n) => {
+                                        stats.packets_sent.fetch_add(1, Ordering::Relaxed);
+                                        stats.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
+                                        seq = seq.wrapping_add(1);
+                                    }
+                                    Err(e) => tracing::warn!("udp send failed: {e}"),
+                                }
+                            }
+                        }
+                    }
+                    if consumer.occupied() >= FRAME_STEREO_SAMPLES {
+                        frame_ready.notify_one();
                     }
                 }
             }
@@ -812,6 +814,48 @@ mod source_pump_tests {
         let _ = pump.await;
 
         assert!(stats.packets_sent.load(Ordering::Relaxed) >= 1);
+    }
+
+    #[tokio::test]
+    async fn source_pump_observes_close_while_ring_is_backed_up() {
+        let (mut prod, cons) = AudioRing::new(FRAME_SAMPLES * 200);
+        let notify = Arc::new(Notify::new());
+        let stats = Arc::new(StreamStats::default());
+
+        let recv_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let remote = recv_socket.local_addr().unwrap();
+        let send_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        send_socket.connect(remote).await.unwrap();
+
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+        let notify_clone = notify.clone();
+
+        let frame = vec![0.25f32; FRAME_STEREO_SAMPLES];
+        for _ in 0..100 {
+            prod.push_slice(&frame);
+        }
+        notify.notify_one();
+
+        let pump = tokio::spawn(spawn_source_pump_inner(
+            Uuid::new_v4(),
+            3u8,
+            cons,
+            notify_clone,
+            send_socket,
+            ctrl_rx,
+            stats.clone(),
+            64_000,
+        ));
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        ctrl_tx.send(StreamControlSignal::Close).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), pump).await;
+
+        assert!(
+            result.is_ok(),
+            "pump did not stop within 500ms after Close — it blocked draining the full ring"
+        );
     }
 }
 

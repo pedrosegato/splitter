@@ -9,9 +9,8 @@ trust. No cloud. No account. Sub-200 ms end-to-end latency on a typical LAN.
 ## A note on how this was built
 
 This project was built fast, with heavy AI assistance. I reviewed the code, did
-the security-sensitive parts by hand, and I stand behind the architecture. My
-own depth is in the product vision and the networking / peer model — more than
-in Rust or Tauri specifically. Audits and PRs are very welcome.
+the security-sensitive parts by hand, and I stand behind the architecture.
+Audits and PRs are very welcome.
 
 > Este projeto foi desenvolvido rapidamente com assistência de IA. Revisei o
 > código, fiz manualmente os ajustes de segurança e respondo pela arquitetura.

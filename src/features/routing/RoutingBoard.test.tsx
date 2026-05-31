@@ -155,20 +155,3 @@ describe("RoutingBoard — no session", () => {
   });
 });
 
-describe("RoutingBoard — hint toast", () => {
-  it("renders the hint toast when useWiring returns a hint", () => {
-    mockedUseWiring.mockReturnValue({
-      onPortActivate: vi.fn(),
-      hint: "clique num destino do outro PC",
-      arm: null,
-    });
-
-    const { getByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
-    expect(getByText("clique num destino do outro PC")).toBeDefined();
-  });
-
-  it("does not render a hint element when hint is null", () => {
-    const { queryByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
-    expect(queryByText("clique num destino do outro PC")).toBeNull();
-  });
-});

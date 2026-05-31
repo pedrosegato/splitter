@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { useUiStore } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { useDevices, usePeerDevices } from "@/hooks/useDevices";
@@ -14,24 +14,14 @@ export function useWiring() {
   const { data: identity } = useIdentity();
   const openStream = useOpenStream();
   const requestStream = useRequestStream();
-  const [hint, setHint] = useState<string | null>(null);
   const selfPeerId = identity?.peer_id;
 
   const session = (snap ?? []).find((s) => s.state === "active") ?? null;
   const { data: peerDevices } = usePeerDevices(session?.remote_peer_id);
 
   useEffect(() => {
-    if (!hint) return;
-    const timer = setTimeout(() => setHint(null), 2200);
-    return () => clearTimeout(timer);
-  }, [hint]);
-
-  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        clearArm();
-        setHint(null);
-      }
+      if (e.key === "Escape") clearArm();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -41,9 +31,7 @@ export function useWiring() {
     (portId: string, kind: "src" | "sink", peerId: string, deviceId: string) => {
       void portId;
 
-      if (!session) {
-        return;
-      }
+      if (!session) return;
 
       if (!arm) {
         armSource(peerId, deviceId, kind);
@@ -58,9 +46,7 @@ export function useWiring() {
         }
         return;
       }
-      if (peerId === arm.peerId) {
-        return;
-      }
+      if (peerId === arm.peerId) return;
 
       const src =
         arm.kind === "src"
@@ -92,7 +78,6 @@ export function useWiring() {
       }
 
       clearArm();
-      setHint(null);
     },
     [
       arm,
@@ -107,5 +92,5 @@ export function useWiring() {
     ],
   );
 
-  return { arm, hint, onPortActivate };
+  return { arm, onPortActivate };
 }

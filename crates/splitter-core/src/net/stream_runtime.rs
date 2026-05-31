@@ -243,6 +243,15 @@ impl StreamRegistry {
             .map(|rt| rt.stats.clone())
     }
 
+    pub async fn current_stats(&self) -> Vec<(SessionId, StreamId, Arc<StreamStats>)> {
+        self.inner
+            .read()
+            .await
+            .iter()
+            .map(|(&(sid, stream_id), rt)| (sid, stream_id, rt.stats.clone()))
+            .collect()
+    }
+
     pub async fn snapshot_stats(
         &self,
         window_ms: u32,
@@ -336,6 +345,43 @@ mod registry_tests {
         let snap = reg.snapshot_stats(1_000).await;
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].2.packets_sent, 123);
+    }
+
+    #[tokio::test]
+    async fn current_stats_does_not_mutate_prev_snapshots() {
+        let reg = StreamRegistry::new();
+        let sid = Uuid::new_v4();
+        let rt = fake_runtime(sid, 3);
+        rt.stats.bytes_sent.store(8_000, Ordering::Relaxed);
+        reg.register(rt).await.unwrap();
+
+        let before = reg.snapshot_stats(1_000).await;
+        assert_eq!(before.len(), 1);
+        let bitrate_after_first_snapshot = before[0].2.bitrate_kbps_sent;
+
+        reg.inner
+            .read()
+            .await
+            .values()
+            .next()
+            .unwrap()
+            .stats
+            .bytes_sent
+            .store(16_000, Ordering::Relaxed);
+
+        let _ = reg.current_stats().await;
+        let _ = reg.current_stats().await;
+
+        let after = reg.snapshot_stats(1_000).await;
+        assert_eq!(after.len(), 1);
+        let bitrate_after_current_stats = after[0].2.bitrate_kbps_sent;
+
+        assert_eq!(
+            bitrate_after_current_stats,
+            ((16_000u64 - 8_000) * 8 / 1_000) as u32,
+            "current_stats must not have advanced prev_snapshots: expected delta from first snapshot baseline, not from current_stats call"
+        );
+        let _ = bitrate_after_first_snapshot;
     }
 }
 

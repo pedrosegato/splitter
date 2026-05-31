@@ -92,16 +92,13 @@ pub fn spawn_peer_connection(
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .map(|d| d.as_millis() as u64)
                                         .unwrap_or(0);
-                                    let snaps = reg.snapshot_stats(0).await;
-                                    for (sid, stream_id, _) in &snaps {
-                                        if let Some(rt) = reg.get_stats(sid, *stream_id).await {
-                                            let echo_ms = rt.last_heartbeat_echo_ms.load(Ordering::Relaxed);
-                                            if echo_ms > 0 && now_ms >= echo_ms {
-                                                let rtt = (now_ms - echo_ms) as u32;
-                                                rt.last_rtt_ms.store(rtt, Ordering::Relaxed);
-                                            }
-                                            rt.last_heartbeat_echo_ms.store(*remote_ts, Ordering::Relaxed);
+                                    for (_, _, stats) in reg.current_stats().await {
+                                        let echo_ms = stats.last_heartbeat_echo_ms.load(Ordering::Relaxed);
+                                        if echo_ms > 0 && now_ms >= echo_ms {
+                                            let rtt = (now_ms - echo_ms) as u32;
+                                            stats.last_rtt_ms.store(rtt, Ordering::Relaxed);
                                         }
+                                        stats.last_heartbeat_echo_ms.store(*remote_ts, Ordering::Relaxed);
                                     }
                                 }
                                 let _ = event_tx_task.send(PeerEvent::Message(msg));

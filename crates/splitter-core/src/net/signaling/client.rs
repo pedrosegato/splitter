@@ -94,6 +94,7 @@ pub async fn connect_to_peer(
             let peer_name = t
                 .peer_for(&peer_id)
                 .map(|p| p.peer_name.clone())
+                .filter(|n| !n.is_empty())
                 .unwrap_or_default();
             let _ = t.add(TrustedPeer {
                 peer_id,
@@ -334,5 +335,140 @@ mod tests {
         .await
         .unwrap();
         assert!(outcome.accepted);
+    }
+
+    #[tokio::test]
+    async fn connect_with_no_hint_and_accepted_does_not_panic() {
+        let dir = tempdir().unwrap();
+        let server_identity = make_identity("server");
+        let server_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
+        ));
+        let sessions = SessionManager::new();
+        let settings = Arc::new(RwLock::new(Settings::default()));
+        let server = SignalingServer::start(
+            "127.0.0.1:0".parse().unwrap(),
+            server_identity,
+            server_trust.clone(),
+            sessions,
+            settings,
+        )
+        .await
+        .unwrap();
+
+        let client_identity = make_identity("client");
+        let client_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
+        ));
+
+        let dial = tokio::spawn({
+            let client_trust = client_trust.clone();
+            let bind_addr = server.bind_addr;
+            async move {
+                connect_to_peer(
+                    bind_addr,
+                    &client_identity,
+                    client_trust,
+                    None,
+                    Duration::from_secs(5),
+                )
+                .await
+            }
+        });
+
+        let acceptor = tokio::spawn({
+            let pending = server.pending.clone();
+            let conns = server.connections.clone();
+            let trust = server_trust.clone();
+            let tx = server.connection_established_tx.clone();
+            async move {
+                for _ in 0..50 {
+                    if !pending.list().await.is_empty() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                accept_pending(&pending, &trust, &conns, &tx, 0).await
+            }
+        });
+
+        let (dial_res, accept_res) = tokio::join!(dial, acceptor);
+        let outcome = dial_res.unwrap().unwrap();
+        accept_res.unwrap().unwrap();
+        assert!(
+            outcome.accepted,
+            "connection must be accepted even with no hint"
+        );
+    }
+
+    #[tokio::test]
+    async fn accept_does_not_overwrite_stored_peer_name_with_empty() {
+        let dir = tempdir().unwrap();
+        let server_identity = make_identity("server");
+        let server_peer_id = server_identity.peer_id;
+        let server_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
+        ));
+        let sessions = SessionManager::new();
+        let settings = Arc::new(RwLock::new(Settings {
+            auto_accept_trusted: true,
+            ..Settings::default()
+        }));
+        let server = SignalingServer::start(
+            "127.0.0.1:0".parse().unwrap(),
+            server_identity,
+            server_trust.clone(),
+            sessions,
+            settings,
+        )
+        .await
+        .unwrap();
+
+        let client_identity = make_identity("client");
+        let client_trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
+        ));
+
+        let known_name = "My Server";
+        let shared_token = "shared-tok".to_string();
+
+        server_trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id: client_identity.peer_id,
+                peer_name: client_identity.peer_name.clone(),
+                auth_token: shared_token.clone(),
+            })
+            .unwrap();
+        client_trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id: server_peer_id,
+                peer_name: known_name.into(),
+                auth_token: shared_token,
+            })
+            .unwrap();
+
+        let outcome = connect_to_peer(
+            server.bind_addr,
+            &client_identity,
+            client_trust.clone(),
+            Some(server_peer_id),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        assert!(outcome.accepted);
+
+        let t = client_trust.read().await;
+        let stored = t
+            .peer_for(&server_peer_id)
+            .expect("server must be in trust store");
+        assert_eq!(
+            stored.peer_name, known_name,
+            "accept must not overwrite existing peer name with empty string"
+        );
     }
 }

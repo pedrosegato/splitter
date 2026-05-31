@@ -94,7 +94,7 @@ fn device_info(d: &cpal::Device, kind: DeviceKind, idx: usize) -> Option<DeviceI
     let cfg = match kind {
         DeviceKind::Input => d.default_input_config().ok()?,
         DeviceKind::Output => d.default_output_config().ok()?,
-        DeviceKind::SystemAudio => unreachable!("device_info is not called for SystemAudio"),
+        DeviceKind::SystemAudio => return None,
     };
     let id = format!("{kind:?}:{idx}:{name}");
     Some(DeviceInfo {
@@ -109,6 +109,14 @@ fn device_info(d: &cpal::Device, kind: DeviceKind, idx: usize) -> Option<DeviceI
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_info_returns_none_for_system_audio() {
+        let host = cpal::default_host();
+        if let Some(d) = host.default_output_device() {
+            assert!(device_info(&d, DeviceKind::SystemAudio, 0).is_none());
+        }
+    }
 
     #[test]
     fn list_devices_returns_at_least_default() {

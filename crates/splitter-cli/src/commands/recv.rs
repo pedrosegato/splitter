@@ -49,20 +49,37 @@ pub(crate) async fn run_with_settings(
                     tracing::debug!(seq, "jitter buffer declared lost");
                 }
                 JitterOutput::Packet(p) => {
-                    if pending_fec_recover {
-                        if decoder
-                            .decode_with_fec(Some(&p.payload), &mut frame, true)
-                            .is_ok()
-                        {
-                            push_frame_to_ring(&mut producer, &frame);
-                        }
-                        pending_fec_recover = false;
-                    }
-                    decoder.decode_with_fec(Some(&p.payload), &mut frame, false)?;
-                    push_frame_to_ring(&mut producer, &frame);
+                    handle_packet(
+                        &mut decoder,
+                        &mut producer,
+                        &p.payload,
+                        &mut pending_fec_recover,
+                        &mut frame,
+                    );
                 }
             }
         }
+    }
+}
+
+fn handle_packet(
+    decoder: &mut OpusDecoder,
+    producer: &mut RingProducer,
+    payload: &[u8],
+    pending_fec_recover: &mut bool,
+    frame: &mut [f32],
+) {
+    if *pending_fec_recover {
+        // Opus in-band FEC: decode_fec=true recovers the PRIOR lost frame
+        // from this packet's FEC data; decode_fec=false below decodes THIS frame.
+        if decoder.decode_with_fec(Some(payload), frame, true).is_ok() {
+            push_frame_to_ring(producer, frame);
+        }
+        *pending_fec_recover = false;
+    }
+    match decoder.decode_with_fec(Some(payload), frame, false) {
+        Ok(()) => push_frame_to_ring(producer, frame),
+        Err(e) => tracing::warn!("malformed audio payload, skipping frame: {e}"),
     }
 }
 
@@ -82,6 +99,7 @@ fn make_udp_socket(bind: SocketAddr) -> anyhow::Result<UdpSocket> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use splitter_core::audio::ring::AudioRing;
     use splitter_core::JitterMode;
 
     /// Compile-time check: run_with_settings must accept (output, bind, JitterMode, u32).
@@ -93,7 +111,45 @@ mod tests {
 
     #[tokio::test]
     async fn recv_signature_accepts_jitter_args() {
-        // Verified at compile time by _assert_signature_compiles above.
         let _ = JitterMode::Auto;
+    }
+
+    #[test]
+    fn handle_packet_with_garbage_payload_does_not_panic_or_return_err() {
+        let mut decoder = OpusDecoder::new().unwrap();
+        let (mut producer, _consumer) = AudioRing::new(FRAME_STEREO_SAMPLES * 4);
+        let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
+        let mut pending_fec_recover = false;
+
+        let garbage: &[u8] = b"this is not valid opus data at all \xff\xfe\x00";
+        handle_packet(
+            &mut decoder,
+            &mut producer,
+            garbage,
+            &mut pending_fec_recover,
+            &mut frame,
+        );
+    }
+
+    #[test]
+    fn handle_packet_garbage_leaves_fec_state_cleared() {
+        let mut decoder = OpusDecoder::new().unwrap();
+        let (mut producer, _consumer) = AudioRing::new(FRAME_STEREO_SAMPLES * 4);
+        let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
+        let mut pending_fec_recover = true;
+
+        let garbage: &[u8] = b"\xde\xad\xbe\xef";
+        handle_packet(
+            &mut decoder,
+            &mut producer,
+            garbage,
+            &mut pending_fec_recover,
+            &mut frame,
+        );
+
+        assert!(
+            !pending_fec_recover,
+            "FEC recovery flag must be cleared even when the payload is malformed"
+        );
     }
 }

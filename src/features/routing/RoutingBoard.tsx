@@ -95,7 +95,7 @@ export function RoutingBoard() {
 
   const [modalOpen, setModalOpen] = useState(false);
 
-  const session = snapshots?.[0] ?? null;
+  const session = snapshots?.find((s) => s.state === "active") ?? null;
   const connected = !!session;
   const streams = session?.streams ?? [];
 

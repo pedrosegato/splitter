@@ -39,6 +39,7 @@ fn read_field(s: &Settings, key: &str) -> anyhow::Result<String> {
         "log_level" => Ok(format!("{:?}", s.log_level).to_lowercase()),
         "metrics_enabled" => Ok(s.metrics_enabled.to_string()),
         "metrics_port" => Ok(s.metrics_port.to_string()),
+        "signaling_port" => Ok(s.signaling_port.to_string()),
         other => anyhow::bail!("unknown settings key: {other}"),
     }
 }
@@ -57,6 +58,7 @@ fn write_field(s: &mut Settings, key: &str, value: &str) -> anyhow::Result<()> {
         "log_level" => s.log_level = parse_log_level(value)?,
         "metrics_enabled" => s.metrics_enabled = value.parse()?,
         "metrics_port" => s.metrics_port = value.parse()?,
+        "signaling_port" => s.signaling_port = value.parse()?,
         other => anyhow::bail!("unknown settings key: {other}"),
     }
     Ok(())
@@ -157,5 +159,13 @@ mod tests {
     fn unknown_log_level_errors() {
         let mut s = Settings::default();
         assert!(write_field(&mut s, "log_level", "verbose").is_err());
+    }
+
+    #[test]
+    fn signaling_port_round_trip() {
+        let mut s = Settings::default();
+        write_field(&mut s, "signaling_port", "7001").unwrap();
+        assert_eq!(s.signaling_port, 7001);
+        assert_eq!(read_field(&s, "signaling_port").unwrap(), "7001");
     }
 }

@@ -75,6 +75,42 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn validate(&self) -> Result<(), NetError> {
+        if self.fec_off_threshold_pct > self.fec_on_threshold_pct {
+            return Err(NetError::ConfigIo(format!(
+                "fec_off_threshold_pct ({}) must be <= fec_on_threshold_pct ({})",
+                self.fec_off_threshold_pct, self.fec_on_threshold_pct
+            )));
+        }
+        if self.signaling_port == 0 {
+            return Err(NetError::ConfigIo("signaling_port must not be 0".into()));
+        }
+        if self.metrics_port == 0 {
+            return Err(NetError::ConfigIo("metrics_port must not be 0".into()));
+        }
+        if self.metrics_port == self.signaling_port {
+            return Err(NetError::ConfigIo(format!(
+                "metrics_port and signaling_port must differ (both are {})",
+                self.metrics_port
+            )));
+        }
+        if !(6_000..=510_000).contains(&self.default_bitrate) {
+            return Err(NetError::ConfigIo(format!(
+                "default_bitrate ({}) must be in 6000..=510000",
+                self.default_bitrate
+            )));
+        }
+        if let JitterMode::Fixed(ms) = self.jitter_mode {
+            if ms > self.jitter_max_depth_ms {
+                return Err(NetError::ConfigIo(format!(
+                    "jitter_mode Fixed({ms}) exceeds jitter_max_depth_ms ({})",
+                    self.jitter_max_depth_ms
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub fn load_or_default(path: &Path) -> Result<Self, NetError> {
         if !path.exists() {
             return Ok(Self::default());
@@ -83,6 +119,7 @@ impl Settings {
             .map_err(|e| NetError::ConfigIo(format!("read {}: {e}", path.display())))?;
         let parsed: Self = toml::from_str(&raw)
             .map_err(|e| NetError::ConfigIo(format!("parse {}: {e}", path.display())))?;
+        parsed.validate()?;
         Ok(parsed)
     }
 
@@ -200,5 +237,126 @@ mod tests {
         std::fs::write(&path, "metrics_enabled = true\n").unwrap();
         let loaded = Settings::load_or_default(&path).unwrap();
         assert_eq!(loaded.signaling_port, 7000);
+    }
+
+    #[test]
+    fn validate_default_is_ok() {
+        assert!(Settings::default().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_fec_off_greater_than_on_is_err() {
+        let s = Settings {
+            fec_on_threshold_pct: 2,
+            fec_off_threshold_pct: 5,
+            ..Default::default()
+        };
+        let err = s.validate().unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
+    }
+
+    #[test]
+    fn validate_fec_off_equal_to_on_is_ok() {
+        let s = Settings {
+            fec_on_threshold_pct: 3,
+            fec_off_threshold_pct: 3,
+            ..Default::default()
+        };
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_signaling_port_zero_is_err() {
+        let s = Settings {
+            signaling_port: 0,
+            ..Default::default()
+        };
+        let err = s.validate().unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
+    }
+
+    #[test]
+    fn validate_metrics_port_zero_is_err() {
+        let s = Settings {
+            metrics_port: 0,
+            ..Default::default()
+        };
+        let err = s.validate().unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
+    }
+
+    #[test]
+    fn validate_ports_equal_is_err() {
+        let s = Settings {
+            signaling_port: 8000,
+            metrics_port: 8000,
+            ..Default::default()
+        };
+        let err = s.validate().unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
+    }
+
+    #[test]
+    fn validate_default_bitrate_too_low_is_err() {
+        let s = Settings {
+            default_bitrate: 5_999,
+            ..Default::default()
+        };
+        let err = s.validate().unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
+    }
+
+    #[test]
+    fn validate_default_bitrate_too_high_is_err() {
+        let s = Settings {
+            default_bitrate: 510_001,
+            ..Default::default()
+        };
+        let err = s.validate().unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
+    }
+
+    #[test]
+    fn validate_default_bitrate_boundary_values_are_ok() {
+        let lo = Settings {
+            default_bitrate: 6_000,
+            ..Default::default()
+        };
+        assert!(lo.validate().is_ok());
+        let hi = Settings {
+            default_bitrate: 510_000,
+            ..Default::default()
+        };
+        assert!(hi.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_fixed_jitter_exceeds_max_depth_is_err() {
+        let s = Settings {
+            jitter_mode: JitterMode::Fixed(300),
+            jitter_max_depth_ms: 200,
+            ..Default::default()
+        };
+        let err = s.validate().unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
+    }
+
+    #[test]
+    fn validate_fixed_jitter_equal_to_max_depth_is_ok() {
+        let s = Settings {
+            jitter_mode: JitterMode::Fixed(200),
+            jitter_max_depth_ms: 200,
+            ..Default::default()
+        };
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn load_or_default_rejects_invalid_toml_via_validate() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "signaling_port = 9000\nmetrics_port = 9000\n").unwrap();
+        let err = Settings::load_or_default(&path).unwrap_err();
+        assert!(matches!(err, NetError::ConfigIo(_)));
     }
 }

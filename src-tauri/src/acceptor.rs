@@ -54,11 +54,27 @@ pub fn spawn_acceptor(
                             let _ = core.sessions.close(&old.id).await;
                         }
 
-                        let _ = core
+                        if let Err(e) = core
                             .sessions
                             .register_incoming(sid_uuid, local_peer_id, requester_uuid)
-                            .await;
-                        let _ = core.sessions.accept(&sid_uuid).await;
+                            .await
+                        {
+                            tracing::warn!(
+                                peer = %peer_id,
+                                session = %sid_uuid,
+                                "register_incoming failed: {e}"
+                            );
+                            continue;
+                        }
+                        if let Err(e) = core.sessions.accept(&sid_uuid).await {
+                            tracing::warn!(
+                                peer = %peer_id,
+                                session = %sid_uuid,
+                                "accept failed after registration: {e}"
+                            );
+                            let _ = core.sessions.close(&sid_uuid).await;
+                            continue;
+                        }
                         let peer_name = {
                             let trust_name = core
                                 .trust

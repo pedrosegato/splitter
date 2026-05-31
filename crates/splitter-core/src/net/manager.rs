@@ -283,4 +283,18 @@ mod tests {
         let err = mgr.set_stream_muted(&fake, 0, true).await.unwrap_err();
         assert!(matches!(err, NetError::SignalingProtocol { .. }));
     }
+
+    #[tokio::test]
+    async fn register_incoming_duplicate_id_returns_err() {
+        let mgr = SessionManager::new();
+        let id = Uuid::new_v4();
+        let local = Uuid::new_v4();
+        let remote = Uuid::new_v4();
+        mgr.register_incoming(id, local, remote).await.unwrap();
+        let err = mgr.register_incoming(id, local, remote).await.unwrap_err();
+        assert!(
+            matches!(err, NetError::SignalingProtocol { .. }),
+            "duplicate session_id must return SignalingProtocol error"
+        );
+    }
 }

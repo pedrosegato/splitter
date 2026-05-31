@@ -96,6 +96,53 @@ pub async fn peer_devices(
     Ok(cached.unwrap_or_default())
 }
 
+pub fn validate_device_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("o nome não pode ser vazio".into());
+    }
+    if trimmed.chars().count() > 40 {
+        return Err("o nome deve ter no máximo 40 caracteres".into());
+    }
+    Ok(trimmed.to_string())
+}
+
+async fn broadcast_rename(core: &AppCore, peer_id: String, peer_name: String) {
+    let msg = SignalingMessage::PeerRenamed { peer_id, peer_name };
+    let conns: Vec<_> = {
+        let g = core.server.connections.read().await;
+        g.values().map(|c| c.tx.clone()).collect()
+    };
+    let outs: Vec<_> = {
+        let g = core.outgoing.read().await;
+        g.values().map(|c| c.tx.clone()).collect()
+    };
+    for tx in conns.into_iter().chain(outs) {
+        let _ = tx.send(msg.clone()).await;
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_device_name(core: State<'_, Arc<AppCore>>, name: String) -> Result<IdentityDto, String> {
+    let validated = validate_device_name(&name)?;
+    let (peer_id, snapshot) = {
+        let mut id = core.identity.write().unwrap();
+        id.peer_name = validated.clone();
+        (id.peer_id.to_string(), id.clone())
+    };
+    let path = splitter_core::net::identity::identity_path().map_err(|e| e.to_string())?;
+    snapshot.save_atomic(&path).map_err(|e| e.to_string())?;
+    if let Some(handle) = core.discovery.get() {
+        let port = core.server.bind_addr.port();
+        if let Err(e) = handle.reannounce(&snapshot, port) {
+            tracing::warn!("mDNS reannounce after rename failed: {e}");
+        }
+    }
+    broadcast_rename(&core, peer_id.clone(), validated.clone()).await;
+    Ok(IdentityDto { peer_id, peer_name: validated })
+}
+
 pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<(), String> {
     let snap = core.sessions.snapshot().await;
     if let Some(sess) = snap.iter().find(|s| s.id == sid) {
@@ -114,4 +161,17 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
 pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Result<(), String> {
     let sid = uuid::Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
     teardown_session(&core, sid).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_device_name;
+
+    #[test]
+    fn validate_trims_and_rejects_empty_and_too_long() {
+        assert_eq!(validate_device_name("  Studio  ").unwrap(), "Studio");
+        assert!(validate_device_name("   ").is_err());
+        assert!(validate_device_name(&"x".repeat(41)).is_err());
+        assert_eq!(validate_device_name(&"x".repeat(40)).unwrap().len(), 40);
+    }
 }

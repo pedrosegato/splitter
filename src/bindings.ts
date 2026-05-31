@@ -85,6 +85,14 @@ async disconnect(sessionId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async setDeviceName(name: string) : Promise<Result<IdentityDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_device_name", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async snapshot() : Promise<Result<SessionSnapshot[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("snapshot") };

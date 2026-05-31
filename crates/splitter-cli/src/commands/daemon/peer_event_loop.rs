@@ -118,22 +118,22 @@ async fn handle_stream_open(
     let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
         return;
     };
-    let route = StreamRoute {
-        source: Endpoint {
+    let route = StreamRoute::new(
+        Endpoint {
             peer_id: source.peer_id.clone(),
             device_id: source.device_id.clone(),
         },
-        sink: Endpoint {
+        Endpoint {
             peer_id: sink.peer_id.clone(),
             device_id: sink.device_id.clone(),
         },
-        codec: CodecParams {
+        CodecParams {
             name: codec.name.clone(),
             bitrate: codec.bitrate,
             frame_ms: codec.frame_ms,
         },
-        volume: 1.0,
-    };
+        1.0,
+    );
     let chosen_output = if sink.device_id == "default" {
         default_output.to_string()
     } else {

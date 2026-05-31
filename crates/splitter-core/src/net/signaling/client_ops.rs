@@ -71,18 +71,18 @@ pub fn build_stream_route(
     sink_dev: &str,
     bitrate: i32,
 ) -> StreamRoute {
-    StreamRoute {
-        source: Endpoint {
+    StreamRoute::new(
+        Endpoint {
             peer_id: local.to_string(),
             device_id: source_dev.to_string(),
         },
-        sink: Endpoint {
+        Endpoint {
             peer_id: sink_peer.to_string(),
             device_id: sink_dev.to_string(),
         },
-        codec: opus_codec(bitrate),
-        volume: 1.0,
-    }
+        opus_codec(bitrate),
+        1.0,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(route.codec.name, "opus");
         assert_eq!(route.codec.bitrate, 96_000);
         assert_eq!(route.codec.frame_ms, 20);
-        assert_eq!(route.volume, 1.0);
+        assert_eq!(route.volume(), 1.0);
     }
 
     #[test]

@@ -21,8 +21,8 @@ pub struct Session {
     pub id: SessionId,
     pub local_peer_id: Uuid,
     pub remote_peer_id: Uuid,
-    pub state: SessionState,
-    pub streams: HashMap<StreamId, Stream>,
+    state: SessionState,
+    streams: HashMap<StreamId, Stream>,
     stream_id_counter: u8,
 }
 
@@ -47,6 +47,22 @@ impl Session {
             streams: HashMap::new(),
             stream_id_counter: 0,
         }
+    }
+
+    pub fn state(&self) -> SessionState {
+        self.state
+    }
+
+    pub fn streams(&self) -> &HashMap<StreamId, Stream> {
+        &self.streams
+    }
+
+    pub fn stream(&self, id: StreamId) -> Option<&Stream> {
+        self.streams.get(&id)
+    }
+
+    pub fn stream_mut(&mut self, id: StreamId) -> Option<&mut Stream> {
+        self.streams.get_mut(&id)
     }
 
     pub fn accept(&mut self) -> Result<(), NetError> {
@@ -83,6 +99,10 @@ impl Session {
         Ok(())
     }
 
+    pub fn remove_stream(&mut self, id: StreamId) {
+        self.streams.remove(&id);
+    }
+
     pub fn next_stream_id(&mut self) -> StreamId {
         let id = self.stream_id_counter;
         self.stream_id_counter = self.stream_id_counter.wrapping_add(1);
@@ -92,7 +112,7 @@ impl Session {
     pub fn active_stream_count(&self) -> usize {
         self.streams
             .values()
-            .filter(|s| s.state == StreamState::Active)
+            .filter(|s| s.state() == StreamState::Active)
             .count()
     }
 }
@@ -104,35 +124,35 @@ mod tests {
     use crate::net::stream::StreamRoute;
 
     fn route() -> StreamRoute {
-        StreamRoute {
-            source: Endpoint {
+        StreamRoute::new(
+            Endpoint {
                 peer_id: "a".into(),
                 device_id: "d-a".into(),
             },
-            sink: Endpoint {
+            Endpoint {
                 peer_id: "b".into(),
                 device_id: "d-b".into(),
             },
-            codec: CodecParams {
+            CodecParams {
                 name: "opus".into(),
                 bitrate: 64_000,
                 frame_ms: 20,
             },
-            volume: 1.0,
-        }
+            1.0,
+        )
     }
 
     #[test]
     fn outgoing_starts_pending() {
         let s = Session::new_outgoing(Uuid::new_v4(), Uuid::new_v4());
-        assert_eq!(s.state, SessionState::PendingOutgoing);
+        assert_eq!(s.state(), SessionState::PendingOutgoing);
     }
 
     #[test]
     fn accept_from_pending_outgoing_goes_active() {
         let mut s = Session::new_outgoing(Uuid::new_v4(), Uuid::new_v4());
         s.accept().unwrap();
-        assert_eq!(s.state, SessionState::Active);
+        assert_eq!(s.state(), SessionState::Active);
     }
 
     #[test]
@@ -159,10 +179,10 @@ mod tests {
         s.accept().unwrap();
         s.add_stream(Stream::new_negotiating(0, route(), 5004))
             .unwrap();
-        s.streams.get_mut(&0).unwrap().activate().unwrap();
+        s.stream_mut(0).unwrap().activate().unwrap();
         s.close();
-        assert_eq!(s.state, SessionState::Closed);
-        assert_eq!(s.streams[&0].state, StreamState::Closed);
+        assert_eq!(s.state(), SessionState::Closed);
+        assert_eq!(s.stream(0).unwrap().state(), StreamState::Closed);
     }
 
     #[test]
@@ -173,7 +193,7 @@ mod tests {
             .unwrap();
         s.add_stream(Stream::new_negotiating(1, route(), 5005))
             .unwrap();
-        s.streams.get_mut(&0).unwrap().activate().unwrap();
+        s.stream_mut(0).unwrap().activate().unwrap();
         assert_eq!(s.active_stream_count(), 1);
     }
 
@@ -184,7 +204,7 @@ mod tests {
         let id0 = s.next_stream_id();
         s.add_stream(Stream::new_negotiating(id0, route(), 5004))
             .unwrap();
-        s.streams.remove(&id0);
+        s.remove_stream(id0);
         let id1 = s.next_stream_id();
         assert_ne!(id0, id1);
     }

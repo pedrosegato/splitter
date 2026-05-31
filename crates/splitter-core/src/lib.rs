@@ -9,7 +9,7 @@ pub use error::CoreError;
 pub use net::identity::PeerIdentity;
 pub use net::manager::{SessionManager, SessionSnapshot, StreamSnapshot};
 pub use net::session::{Session, SessionId, SessionState};
-pub use net::stream::{Stream, StreamId, StreamRoute, StreamState};
+pub use net::stream::{Stream, StreamId, StreamRoute, StreamState, Volume};
 pub use net::stream_runtime::{
     StreamControlSignal, StreamRegistry, StreamRuntime, StreamRuntimeSummary, StreamStats,
     StreamStatsSnapshot,

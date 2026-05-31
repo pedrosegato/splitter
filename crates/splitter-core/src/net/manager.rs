@@ -58,13 +58,10 @@ impl SessionManager {
     ) -> Result<R, NetError> {
         let mut guard = self.sessions.write().await;
         let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
-        let st = s
-            .streams
-            .get_mut(&stream_id)
-            .ok_or(NetError::UnknownStream {
-                session: *id,
-                stream: stream_id,
-            })?;
+        let st = s.stream_mut(stream_id).ok_or(NetError::UnknownStream {
+            session: *id,
+            stream: stream_id,
+        })?;
         f(st)
     }
 
@@ -135,7 +132,7 @@ impl SessionManager {
 
     pub async fn remove_stream(&self, id: &SessionId, stream_id: StreamId) -> Result<(), NetError> {
         self.with_session_mut(id, |s| {
-            s.streams.remove(&stream_id);
+            s.remove_stream(stream_id);
             Ok(())
         })
         .await
@@ -148,20 +145,20 @@ impl SessionManager {
             .map(|s| SessionSnapshot {
                 id: s.id,
                 remote_peer_id: s.remote_peer_id,
-                state: s.state,
+                state: s.state(),
                 streams: s
-                    .streams
+                    .streams()
                     .values()
                     .map(|st| StreamSnapshot {
                         id: st.id,
-                        state: st.state,
-                        source_peer: st.route.source.peer_id.clone(),
-                        sink_peer: st.route.sink.peer_id.clone(),
+                        state: st.state(),
+                        source_peer: st.route().source.peer_id.clone(),
+                        sink_peer: st.route().sink.peer_id.clone(),
                         udp_port: st.udp_port,
-                        source_device: st.route.source.device_id.clone(),
-                        sink_device: st.route.sink.device_id.clone(),
-                        volume: st.route.volume,
-                        muted: st.muted,
+                        source_device: st.route().source.device_id.clone(),
+                        sink_device: st.route().sink.device_id.clone(),
+                        volume: st.volume(),
+                        muted: st.muted(),
                     })
                     .collect(),
             })
@@ -176,22 +173,22 @@ mod tests {
     use crate::net::stream::StreamRoute;
 
     fn route() -> StreamRoute {
-        StreamRoute {
-            source: Endpoint {
+        StreamRoute::new(
+            Endpoint {
                 peer_id: "a".into(),
                 device_id: "d-a".into(),
             },
-            sink: Endpoint {
+            Endpoint {
                 peer_id: "b".into(),
                 device_id: "d-b".into(),
             },
-            codec: CodecParams {
+            CodecParams {
                 name: "opus".into(),
                 bitrate: 64_000,
                 frame_ms: 20,
             },
-            volume: 1.0,
-        }
+            1.0,
+        )
     }
 
     #[tokio::test]

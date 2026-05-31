@@ -1171,22 +1171,22 @@ mod open_sink_tests {
     async fn open_stream_as_sink_returns_bound_port_and_registers() {
         let registry = StreamRegistry::new();
         let session_id = Uuid::new_v4();
-        let route = StreamRoute {
-            source: Endpoint {
+        let route = StreamRoute::new(
+            Endpoint {
                 peer_id: "a".into(),
                 device_id: "ignored".into(),
             },
-            sink: Endpoint {
+            Endpoint {
                 peer_id: "b".into(),
                 device_id: "headphones".into(),
             },
-            codec: CodecParams {
+            CodecParams {
                 name: "opus".into(),
                 bitrate: 64_000,
                 frame_ms: 20,
             },
-            volume: 1.0,
-        };
+            1.0,
+        );
 
         let port = open_stream_as_sink_inproc(registry.clone(), session_id, 0, route)
             .await
@@ -1215,22 +1215,22 @@ mod open_source_tests {
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let remote: SocketAddr = sink_socket.local_addr().unwrap();
 
-        let route = StreamRoute {
-            source: Endpoint {
+        let route = StreamRoute::new(
+            Endpoint {
                 peer_id: "a".into(),
                 device_id: "mic-or-loopback".into(),
             },
-            sink: Endpoint {
+            Endpoint {
                 peer_id: "b".into(),
                 device_id: "ignored".into(),
             },
-            codec: CodecParams {
+            CodecParams {
                 name: "opus".into(),
                 bitrate: 64_000,
                 frame_ms: 20,
             },
-            volume: 1.0,
-        };
+            1.0,
+        );
 
         let result =
             open_stream_as_source_inproc(registry.clone(), session_id, 0, route, remote).await;
@@ -1256,22 +1256,22 @@ mod session_registration_failure_tests {
     use uuid::Uuid;
 
     fn test_route() -> StreamRoute {
-        StreamRoute {
-            source: Endpoint {
+        StreamRoute::new(
+            Endpoint {
                 peer_id: "a".into(),
                 device_id: "src-dev".into(),
             },
-            sink: Endpoint {
+            Endpoint {
                 peer_id: "b".into(),
                 device_id: "sink-dev".into(),
             },
-            codec: CodecParams {
+            CodecParams {
                 name: "opus".into(),
                 bitrate: 64_000,
                 frame_ms: 20,
             },
-            volume: 1.0,
-        }
+            1.0,
+        )
     }
 
     #[tokio::test]

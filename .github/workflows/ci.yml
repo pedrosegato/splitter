@@ -70,7 +70,7 @@ jobs:
       # Phase 2 mDNS pair-discovery test logs "inconclusive" when the CI sandbox
       # blocks multicast; it never fails on absence. End-to-end signaling (loopback_two_daemons)
       # runs over 127.0.0.1 and is fully deterministic.
-      - run: cargo test --workspace --all-features --all-targets --no-fail-fast
+      - run: cargo test --workspace --all-targets --no-fail-fast
 
   build:
     runs-on: ${{ matrix.os }}

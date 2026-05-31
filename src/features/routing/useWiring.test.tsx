@@ -138,7 +138,7 @@ describe("useWiring", () => {
     expect(mutateSpy).not.toHaveBeenCalled();
   });
 
-  it("no sessions yields hint 'conecte uma máquina primeiro'", () => {
+  it("no session: clicking a port does nothing (no hint, no arm)", () => {
     mockedUseSnapshot.mockReturnValue({ data: [] });
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
@@ -146,7 +146,8 @@ describe("useWiring", () => {
       result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
     });
 
-    expect(result.current.hint).toBe("conecte uma máquina primeiro");
+    expect(result.current.hint).toBeNull();
+    expect(result.current.arm).toBeNull();
     expect(mutateSpy).not.toHaveBeenCalled();
   });
 
@@ -167,25 +168,4 @@ describe("useWiring", () => {
     expect(result.current.hint).toBeNull();
   });
 
-  it("hint auto-clears after 2200ms", () => {
-    mockedUseSnapshot.mockReturnValue({ data: [] });
-    vi.useFakeTimers();
-    try {
-      const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
-
-      act(() => {
-        result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
-      });
-
-      expect(result.current.hint).toBe("conecte uma máquina primeiro");
-
-      act(() => {
-        vi.advanceTimersByTime(2200);
-      });
-
-      expect(result.current.hint).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 });

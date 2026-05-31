@@ -531,10 +531,18 @@ mod tests {
         let mut out3 = vec![0.0f32; 8820];
         filler1.fill_f32(&mut out3, &cons3, &notify3);
 
-        let non_zero = out3.iter().filter(|&&s| s.abs() > 0.01).count();
-        assert!(
-            non_zero > 8000,
-            "second call must still produce output (buffers correctly reused); non-zero: {non_zero}"
-        );
+        let (mut prod_ref, cons_ref) = AudioRing::new(32768);
+        prod_ref.push_slice(&vec![0.5f32; 9600]);
+        let cons_ref = Arc::new(Mutex::new(cons_ref));
+        let notify_ref = Arc::new(Notify::new());
+        let mut out_ref = vec![0.0f32; 8820];
+        filler2.fill_f32(&mut out_ref, &cons_ref, &notify_ref);
+
+        for (i, (&a, &b)) in out3.iter().zip(out_ref.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "sample {i}: reused filler ({a}) differs from reference second-call ({b}) — stale buffer contamination"
+            );
+        }
     }
 }

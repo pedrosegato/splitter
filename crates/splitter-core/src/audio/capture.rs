@@ -699,7 +699,7 @@ mod tests {
             assert!((a - b).abs() < 1e-6, "sample {i} mismatch: {a} vs {b}");
         }
 
-        let (prod3, cons3) = AudioRing::new(ring_cap);
+        let (prod3, mut cons3) = AudioRing::new(ring_cap);
         let prod3 = Arc::new(Mutex::new(prod3));
         let notify3 = Arc::new(Notify::new());
         router.push_f32(&input, &prod3, &notify3);
@@ -708,6 +708,31 @@ mod tests {
             avail3 > 0,
             "second call must also produce output (buffers correctly reused)"
         );
+
+        let (prod_ref_a, _) = AudioRing::new(ring_cap);
+        let prod_ref_a = Arc::new(Mutex::new(prod_ref_a));
+        let notify_ref_a = Arc::new(Notify::new());
+        let (prod_ref_b, mut cons_ref_b) = AudioRing::new(ring_cap);
+        let prod_ref_b = Arc::new(Mutex::new(prod_ref_b));
+        let notify_ref_b = Arc::new(Notify::new());
+        let mut router_ref = SampleRouter::new(44_100, 1).expect("router init");
+        router_ref.push_f32(&input, &prod_ref_a, &notify_ref_a);
+        router_ref.push_f32(&input, &prod_ref_b, &notify_ref_b);
+        let avail_ref = cons_ref_b.occupied();
+        assert_eq!(
+            avail3, avail_ref,
+            "reused router must produce same sample count as reference router on second call"
+        );
+        let mut out3 = vec![0.0f32; avail3];
+        let mut out_ref = vec![0.0f32; avail_ref];
+        cons3.pop_slice(&mut out3);
+        cons_ref_b.pop_slice(&mut out_ref);
+        for (i, (&a, &b)) in out3.iter().zip(out_ref.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "sample {i}: reused router ({a}) differs from reference second-call ({b}) — stale buffer contamination"
+            );
+        }
     }
 
     #[test]

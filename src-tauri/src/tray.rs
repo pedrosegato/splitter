@@ -1,10 +1,10 @@
+use crate::core::AppCore;
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
-use crate::core::AppCore;
 
 pub const TRAY_ID: &str = "splitter-main";
 
@@ -18,7 +18,13 @@ static ICON_ERROR: &[u8] = include_bytes!("../icons/tray/error.rgba");
 pub fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let abrir = MenuItem::with_id(app, "abrir", "Abrir", true, None::<&str>)?;
     let mute_all = MenuItem::with_id(app, "mute_all", "Mutar tudo", true, None::<&str>)?;
-    let disconnect_all = MenuItem::with_id(app, "disconnect_all", "Desconectar tudo", true, None::<&str>)?;
+    let disconnect_all = MenuItem::with_id(
+        app,
+        "disconnect_all",
+        "Desconectar tudo",
+        true,
+        None::<&str>,
+    )?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sair = MenuItem::with_id(app, "sair", "Sair", true, None::<&str>)?;
 
@@ -81,11 +87,7 @@ pub fn set_tray_state(app: &tauri::AppHandle, state: &str) -> tauri::Result<()> 
         return Ok(());
     };
     let bytes = icon_bytes_for_state(state);
-    let img = tauri::image::Image::new_owned(
-        bytes.to_vec(),
-        TRAY_ICON_SIZE,
-        TRAY_ICON_SIZE,
-    );
+    let img = tauri::image::Image::new_owned(bytes.to_vec(), TRAY_ICON_SIZE, TRAY_ICON_SIZE);
     tray.set_icon(Some(img))?;
     Ok(())
 }

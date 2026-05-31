@@ -1,11 +1,11 @@
+use bytes::Bytes;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use splitter_core::audio::codec::OpusDecoder;
 use splitter_core::audio::playback::PlaybackHandle;
 use splitter_core::audio::ring::{AudioRing, RingProducer};
 use splitter_core::net::jitter::{JitterBuffer, JitterOutput};
 use splitter_core::net::packet::Packet;
 use splitter_core::FRAME_STEREO_SAMPLES;
-use bytes::Bytes;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio::net::UdpSocket;

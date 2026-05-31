@@ -1,14 +1,14 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::core::AppCore;
+use crate::events::{IncomingSession, PeerDisconnected};
 use splitter_core::net::session::SessionState;
 use splitter_core::net::signaling::{
     CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, StreamAction,
 };
 use splitter_core::net::stream::StreamRoute;
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
-use crate::core::AppCore;
-use crate::events::{IncomingSession, PeerDisconnected};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use uuid::Uuid;
 
 fn pick_default_output_device_id() -> String {
     splitter_core::audio::devices::list_devices()
@@ -73,9 +73,8 @@ pub fn spawn_acceptor(
                                     .await
                                     .get(&requester_uuid.to_string())
                                     .map(|p| p.peer_name.clone());
-                                discovered_name.unwrap_or_else(|| {
-                                    requester_uuid.to_string()[..8].to_string()
-                                })
+                                discovered_name
+                                    .unwrap_or_else(|| requester_uuid.to_string()[..8].to_string())
                             }
                         };
                         core.emit(IncomingSession {
@@ -267,7 +266,10 @@ pub fn spawn_acceptor(
                     SignalingMessage::DeviceListResponse { devices } => {
                         core.remote_devices.write().await.insert(peer_id, devices);
                     }
-                    SignalingMessage::PeerRenamed { peer_id: rid, peer_name } => {
+                    SignalingMessage::PeerRenamed {
+                        peer_id: rid,
+                        peer_name,
+                    } => {
                         let changed = {
                             let mut peers = core.peers.write().await;
                             crate::core::apply_peer_rename(&mut peers, &rid, &peer_name)

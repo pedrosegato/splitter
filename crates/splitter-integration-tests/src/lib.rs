@@ -1,6 +1,6 @@
+use bytes::{Bytes, BytesMut};
 use splitter_core::audio::codec::{OpusDecoder, OpusEncoder};
 use splitter_core::{FRAME_STEREO_SAMPLES, SAMPLE_RATE};
-use bytes::{Bytes, BytesMut};
 
 pub struct SineSource {
     phase: f32,

@@ -1,11 +1,11 @@
 use crate::Source;
+use bytes::{Bytes, BytesMut};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use splitter_core::audio::capture::CaptureHandle;
 use splitter_core::audio::codec::OpusEncoder;
 use splitter_core::audio::ring::AudioRing;
 use splitter_core::net::packet::Packet;
 use splitter_core::FRAME_STEREO_SAMPLES;
-use bytes::{Bytes, BytesMut};
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;

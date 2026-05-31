@@ -1,3 +1,10 @@
+use crate::events::{PeersChanged, StatsTick, StreamStat};
+use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
+use splitter_core::net::signaling::connection::PeerConnectionHandle;
+use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
+use splitter_core::net::signaling::DeviceDescriptor;
+use splitter_core::settings::SettingsHandle;
+use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, TrustStore};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -5,13 +12,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, TrustStore};
-use splitter_core::settings::SettingsHandle;
-use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
-use splitter_core::net::signaling::connection::PeerConnectionHandle;
-use splitter_core::net::signaling::DeviceDescriptor;
-use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent};
-use crate::events::{PeersChanged, StatsTick, StreamStat};
 
 pub fn apply_discovery_event(map: &mut HashMap<String, DiscoveredPeer>, ev: DiscoveryEvent) {
     match ev {
@@ -53,8 +53,10 @@ pub struct AppCore {
 
 impl AppCore {
     pub async fn init(config_dir: &Path) -> Result<Arc<Self>, String> {
-        let identity = PeerIdentity::load_or_create(&config_dir.join("identity.toml")).map_err(e2s)?;
-        let loaded_settings = Settings::load_or_default(&config_dir.join("settings.toml")).map_err(e2s)?;
+        let identity =
+            PeerIdentity::load_or_create(&config_dir.join("identity.toml")).map_err(e2s)?;
+        let loaded_settings =
+            Settings::load_or_default(&config_dir.join("settings.toml")).map_err(e2s)?;
         let signaling_port = loaded_settings.signaling_port;
         let settings: SettingsHandle = Arc::new(RwLock::new(loaded_settings));
         let trust = Arc::new(RwLock::new(
@@ -62,15 +64,30 @@ impl AppCore {
         ));
         let sessions = SessionManager::new();
         let stream_registry = StreamRegistry::new();
-        let preferred_bind: SocketAddr = format!("0.0.0.0:{signaling_port}").parse().map_err(e2s)?;
-        let server = match SignalingServer::start(preferred_bind, identity.clone(), trust.clone(), sessions.clone(), settings.clone()).await {
+        let preferred_bind: SocketAddr =
+            format!("0.0.0.0:{signaling_port}").parse().map_err(e2s)?;
+        let server = match SignalingServer::start(
+            preferred_bind,
+            identity.clone(),
+            trust.clone(),
+            sessions.clone(),
+            settings.clone(),
+        )
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("failed to bind signaling server on port {signaling_port}: {e}; retrying on OS-assigned port");
                 let fallback_bind: SocketAddr = "0.0.0.0:0".parse().map_err(e2s)?;
-                SignalingServer::start(fallback_bind, identity.clone(), trust.clone(), sessions.clone(), settings.clone())
-                    .await
-                    .map_err(e2s)?
+                SignalingServer::start(
+                    fallback_bind,
+                    identity.clone(),
+                    trust.clone(),
+                    sessions.clone(),
+                    settings.clone(),
+                )
+                .await
+                .map_err(e2s)?
             }
         };
         Ok(Arc::new(Self {
@@ -156,7 +173,9 @@ impl AppCore {
                     Ok(peer_id) => {
                         let conn_info = {
                             let conns = core.server.connections.read().await;
-                            conns.get(&peer_id).map(|c| (c.events.subscribe(), c.remote_addr))
+                            conns
+                                .get(&peer_id)
+                                .map(|c| (c.events.subscribe(), c.remote_addr))
                         };
                         if let Some((events, addr)) = conn_info {
                             crate::acceptor::spawn_acceptor(core.clone(), peer_id, events, addr);
@@ -203,10 +222,16 @@ mod tests {
     fn apply_peer_rename_updates_existing_entry() {
         use splitter_core::net::discovery::DiscoveredPeer;
         let mut map = std::collections::HashMap::new();
-        map.insert("id1".to_string(), DiscoveredPeer {
-            peer_id: "id1".into(), peer_name: "Old".into(),
-            host: "10.0.0.2".into(), port: 7000, version: "0.1.0".into(),
-        });
+        map.insert(
+            "id1".to_string(),
+            DiscoveredPeer {
+                peer_id: "id1".into(),
+                peer_name: "Old".into(),
+                host: "10.0.0.2".into(),
+                port: 7000,
+                version: "0.1.0".into(),
+            },
+        );
         let changed = apply_peer_rename(&mut map, "id1", "New");
         assert!(changed);
         assert_eq!(map.get("id1").unwrap().peer_name, "New");
@@ -226,7 +251,10 @@ mod tests {
         };
         apply_discovery_event(&mut map, DiscoveryEvent::Found(p.clone()));
         assert_eq!(map.len(), 1);
-        apply_discovery_event(&mut map, DiscoveryEvent::Removed("id1._splitter._tcp.local.".into()));
+        apply_discovery_event(
+            &mut map,
+            DiscoveryEvent::Removed("id1._splitter._tcp.local.".into()),
+        );
         assert_eq!(map.len(), 0);
     }
 }

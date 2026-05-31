@@ -20,8 +20,13 @@ impl PeerIdentity {
         let tmp = path.with_extension("toml.tmp");
         std::fs::write(&tmp, raw)
             .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", tmp.display())))?;
-        std::fs::rename(&tmp, path)
-            .map_err(|e| NetError::ConfigIo(format!("rename {} -> {}: {e}", tmp.display(), path.display())))?;
+        std::fs::rename(&tmp, path).map_err(|e| {
+            NetError::ConfigIo(format!(
+                "rename {} -> {}: {e}",
+                tmp.display(),
+                path.display()
+            ))
+        })?;
         Ok(())
     }
 

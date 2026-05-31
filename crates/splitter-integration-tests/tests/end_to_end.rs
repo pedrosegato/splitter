@@ -15,8 +15,8 @@ fn sine_encode_decode_rms_is_audible() {
 
 #[test]
 fn packet_encode_decode_preserves_payload() {
-    use splitter_core::net::packet::Packet;
     use bytes::BytesMut;
+    use splitter_core::net::packet::Packet;
 
     let mut src = SineSource::new();
     let frames = encode_frames(&mut src, 5);
@@ -39,8 +39,8 @@ fn packet_encode_decode_preserves_payload() {
 
 #[tokio::test]
 async fn udp_loopback_delivers_opus_frames() {
-    use splitter_core::net::packet::Packet;
     use bytes::{Bytes, BytesMut};
+    use splitter_core::net::packet::Packet;
     use std::net::SocketAddr;
     use tokio::net::UdpSocket;
 

@@ -1,10 +1,10 @@
+use crate::core::AppCore;
+use crate::dto::{IdentityDto, PendingPeerDto};
+use splitter_core::net::discovery::DiscoveredPeer;
+use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage, StreamAction};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::State;
-use splitter_core::net::discovery::DiscoveredPeer;
-use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage, StreamAction};
-use crate::core::AppCore;
-use crate::dto::{IdentityDto, PendingPeerDto};
 
 #[tauri::command]
 #[specta::specta]
@@ -18,14 +18,23 @@ pub async fn identity(core: State<'_, Arc<AppCore>>) -> Result<IdentityDto, Stri
 
 #[tauri::command]
 #[specta::specta]
-pub async fn discovered_peers(core: State<'_, Arc<AppCore>>) -> Result<Vec<DiscoveredPeer>, String> {
+pub async fn discovered_peers(
+    core: State<'_, Arc<AppCore>>,
+) -> Result<Vec<DiscoveredPeer>, String> {
     Ok(core.peers.read().await.values().cloned().collect())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn pending_peers(core: State<'_, Arc<AppCore>>) -> Result<Vec<PendingPeerDto>, String> {
-    Ok(core.server.pending.list().await.iter().map(PendingPeerDto::from).collect())
+    Ok(core
+        .server
+        .pending
+        .list()
+        .await
+        .iter()
+        .map(PendingPeerDto::from)
+        .collect())
 }
 
 #[tauri::command]
@@ -45,8 +54,15 @@ pub async fn accept_pending(core: State<'_, Arc<AppCore>>, index: u32) -> Result
 
 #[tauri::command]
 #[specta::specta]
-pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16, peer_id: Option<String>) -> Result<bool, String> {
-    let addr = format!("{host}:{port}").parse().map_err(|_| format!("invalid address '{host}:{port}'"))?;
+pub async fn connect_peer(
+    core: State<'_, Arc<AppCore>>,
+    host: String,
+    port: u16,
+    peer_id: Option<String>,
+) -> Result<bool, String> {
+    let addr = format!("{host}:{port}")
+        .parse()
+        .map_err(|_| format!("invalid address '{host}:{port}'"))?;
     let hint = match peer_id {
         Some(s) => Some(uuid::Uuid::parse_str(&s).map_err(|e| e.to_string())?),
         None => None,
@@ -124,7 +140,10 @@ async fn broadcast_rename(core: &AppCore, peer_id: String, peer_name: String) {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_device_name(core: State<'_, Arc<AppCore>>, name: String) -> Result<IdentityDto, String> {
+pub async fn set_device_name(
+    core: State<'_, Arc<AppCore>>,
+    name: String,
+) -> Result<IdentityDto, String> {
     let validated = validate_device_name(&name)?;
     let (peer_id, snapshot) = {
         let mut id = core.identity.write().unwrap();
@@ -140,7 +159,10 @@ pub async fn set_device_name(core: State<'_, Arc<AppCore>>, name: String) -> Res
         }
     }
     broadcast_rename(&core, peer_id.clone(), validated.clone()).await;
-    Ok(IdentityDto { peer_id, peer_name: validated })
+    Ok(IdentityDto {
+        peer_id,
+        peer_name: validated,
+    })
 }
 
 pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<(), String> {
@@ -150,7 +172,14 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
             if let Err(e) = core.stream_registry.close(&sid, stream.id).await {
                 tracing::warn!(%sid, stream_id = stream.id, "teardown_session: stream_registry.close error: {e}");
             }
-            crate::commands::streams::notify_remote(core, sid, stream.id, StreamAction::Close, None).await;
+            crate::commands::streams::notify_remote(
+                core,
+                sid,
+                stream.id,
+                StreamAction::Close,
+                None,
+            )
+            .await;
         }
     }
     core.sessions.close(&sid).await.map_err(|e| e.to_string())

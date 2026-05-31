@@ -1,8 +1,6 @@
 use splitter_core::net::manager::SessionManager;
 use splitter_core::net::signaling::client::connect_to_peer;
-use splitter_core::net::signaling::server::{
-    accept_pending, local_capabilities, SignalingServer,
-};
+use splitter_core::net::signaling::server::{accept_pending, local_capabilities, SignalingServer};
 use splitter_core::net::trust::{TrustStore, TrustedPeer};
 use splitter_core::settings::Settings;
 use splitter_core::PeerIdentity;

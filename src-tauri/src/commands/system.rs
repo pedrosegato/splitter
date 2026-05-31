@@ -1,8 +1,8 @@
+use crate::core::AppCore;
+use splitter_core::settings::settings_path;
 use std::sync::Arc;
 use tauri::State;
 use tauri_plugin_autostart::ManagerExt;
-use splitter_core::settings::settings_path;
-use crate::core::AppCore;
 
 #[tauri::command]
 #[specta::specta]

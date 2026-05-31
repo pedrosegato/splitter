@@ -9,9 +9,9 @@ mod tray;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
-use tauri_specta::{collect_commands, collect_events, Builder};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 fn build() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()

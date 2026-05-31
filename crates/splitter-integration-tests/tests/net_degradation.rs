@@ -1,6 +1,6 @@
+use bytes::{Bytes, BytesMut};
 use splitter_core::net::packet::Packet;
 use splitter_integration_tests::{decode_frames, encode_frames, rms, EncodedFrame, SineSource};
-use bytes::{Bytes, BytesMut};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::UdpSocket;

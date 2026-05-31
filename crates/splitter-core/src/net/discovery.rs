@@ -30,7 +30,10 @@ pub struct Discovery {
     fullname: String,
 }
 
-fn build_service_info(identity: &PeerIdentity, signaling_port: u16) -> Result<ServiceInfo, NetError> {
+fn build_service_info(
+    identity: &PeerIdentity,
+    signaling_port: u16,
+) -> Result<ServiceInfo, NetError> {
     let instance = identity.peer_id.to_string();
     let host_name = format!("{}.local.", instance);
     let mut properties: HashMap<String, String> = HashMap::new();
@@ -46,7 +49,9 @@ fn build_service_info(identity: &PeerIdentity, signaling_port: u16) -> Result<Se
         signaling_port,
         Some(properties),
     )
-    .map_err(|e| NetError::Mdns { reason: format!("info: {e}") })?
+    .map_err(|e| NetError::Mdns {
+        reason: format!("info: {e}"),
+    })?
     .enable_addr_auto();
     Ok(info)
 }
@@ -162,9 +167,9 @@ impl DiscoveryHandle {
     pub fn reannounce(&self, identity: &PeerIdentity, signaling_port: u16) -> Result<(), NetError> {
         let _ = self.daemon.unregister(&self.fullname);
         let info = build_service_info(identity, signaling_port)?;
-        self.daemon
-            .register(info)
-            .map_err(|e| NetError::Mdns { reason: format!("reannounce register: {e}") })?;
+        self.daemon.register(info).map_err(|e| NetError::Mdns {
+            reason: format!("reannounce register: {e}"),
+        })?;
         Ok(())
     }
 }

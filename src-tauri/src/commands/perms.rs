@@ -23,8 +23,16 @@ pub async fn permission_status() -> Permissions {
         let mic = tauri_plugin_macos_permissions::check_microphone_permission().await;
         let screen = tauri_plugin_macos_permissions::check_screen_recording_permission().await;
         Permissions {
-            microphone: if mic { PermStatus::Granted } else { PermStatus::Prompt },
-            screen: if screen { PermStatus::Granted } else { PermStatus::Prompt },
+            microphone: if mic {
+                PermStatus::Granted
+            } else {
+                PermStatus::Prompt
+            },
+            screen: if screen {
+                PermStatus::Granted
+            } else {
+                PermStatus::Prompt
+            },
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -43,12 +51,21 @@ pub async fn request_permission(kind: String) -> PermStatus {
             "microphone" => {
                 let _ = tauri_plugin_macos_permissions::request_microphone_permission().await;
                 let granted = tauri_plugin_macos_permissions::check_microphone_permission().await;
-                if granted { PermStatus::Granted } else { PermStatus::Denied }
+                if granted {
+                    PermStatus::Granted
+                } else {
+                    PermStatus::Denied
+                }
             }
             "screen" => {
                 tauri_plugin_macos_permissions::request_screen_recording_permission().await;
-                let granted = tauri_plugin_macos_permissions::check_screen_recording_permission().await;
-                if granted { PermStatus::Granted } else { PermStatus::Denied }
+                let granted =
+                    tauri_plugin_macos_permissions::check_screen_recording_permission().await;
+                if granted {
+                    PermStatus::Granted
+                } else {
+                    PermStatus::Denied
+                }
             }
             _ => PermStatus::Denied,
         }

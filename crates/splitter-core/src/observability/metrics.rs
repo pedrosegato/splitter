@@ -56,9 +56,8 @@ impl MetricsRegistry {
         let peers_connected =
             prometheus::Gauge::new("splitter_peers_connected", "currently connected peers")
                 .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
-        let sessions_active =
-            prometheus::Gauge::new("splitter_sessions_active", "active sessions")
-                .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
+        let sessions_active = prometheus::Gauge::new("splitter_sessions_active", "active sessions")
+            .map_err(|e| NetError::ConfigIo(format!("prom: {e}")))?;
         registry.register(Box::new(packets_sent.clone())).unwrap();
         registry
             .register(Box::new(packets_received.clone()))

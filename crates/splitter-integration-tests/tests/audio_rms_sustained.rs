@@ -49,7 +49,7 @@ fn rms(samples: &[f32]) -> f32 {
 #[tokio::test]
 async fn sustained_rms_over_1000_frames() {
     let session_id = Uuid::new_v4();
-    let stream_id: u8 = 0;
+    let stream_id = splitter_core::StreamId(0);
 
     // Bind a sink socket; the source socket connects to it.
     let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();

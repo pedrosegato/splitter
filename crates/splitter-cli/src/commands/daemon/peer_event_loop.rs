@@ -4,7 +4,7 @@ use splitter_core::net::signaling::{
     CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction,
 };
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
-use splitter_core::StreamRoute;
+use splitter_core::{StreamId, StreamRoute};
 use uuid::Uuid;
 
 type ConnTx = tokio::sync::mpsc::Sender<SignalingMessage>;
@@ -138,7 +138,7 @@ async fn handle_stream_open(
     match open_stream_as_sink(
         ctx.stream_registry.clone(),
         sid_uuid,
-        stream_id,
+        StreamId(stream_id),
         route,
         chosen_output.clone(),
     )
@@ -214,12 +214,14 @@ async fn handle_stream_control(
     let registry = &ctx.stream_registry;
     if matches!(action, StreamAction::Close) {
         for sid in session_ids {
-            let _ = registry.close(&sid, stream_id).await;
+            let _ = registry.close(&sid, StreamId(stream_id)).await;
         }
     } else {
         let signal = StreamControlSignal::from(action);
         for sid in &session_ids {
-            let _ = registry.send_control(sid, stream_id, signal).await;
+            let _ = registry
+                .send_control(sid, StreamId(stream_id), signal)
+                .await;
         }
     }
 }
@@ -229,7 +231,7 @@ async fn handle_session_response_close(ctx: &DaemonContext, peer_id: Uuid, sessi
         return;
     };
     // Remote is shutting down this session; close local streams + session.
-    let stream_ids: Vec<u8> = ctx
+    let stream_ids: Vec<StreamId> = ctx
         .sessions
         .snapshot()
         .await
@@ -256,7 +258,7 @@ async fn handle_peer_disconnected(ctx: &DaemonContext, peer_id: Uuid, reason: &s
     }
     // Tear down all streams and sessions for this peer so the registry and
     // SessionManager don't accumulate stale entries after an abrupt disconnect.
-    let session_streams: Vec<(Uuid, Vec<u8>)> = ctx
+    let session_streams: Vec<(Uuid, Vec<StreamId>)> = ctx
         .sessions
         .snapshot()
         .await

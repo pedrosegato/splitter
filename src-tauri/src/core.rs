@@ -151,7 +151,7 @@ impl AppCore {
                     .into_iter()
                     .map(|(session_id, stream_id, snap)| StreamStat {
                         session_id: session_id.to_string(),
-                        stream_id,
+                        stream_id: stream_id.get(),
                         rtt_ms: snap.last_rtt_ms,
                         loss_pct: loss_pct(snap.packets_received, snap.packets_lost),
                         kbps_sent: snap.bitrate_kbps_sent,

@@ -258,7 +258,7 @@ impl StreamRegistry {
             .get(&(*session_id, stream_id))
             .ok_or(NetError::UnknownStream {
                 session: *session_id,
-                stream: stream_id,
+                stream: stream_id.get(),
             })?;
         rt.control_tx
             .send(signal)
@@ -275,7 +275,7 @@ impl StreamRegistry {
         } else {
             Err(NetError::UnknownStream {
                 session: *session_id,
-                stream: stream_id,
+                stream: stream_id.get(),
             })
         }
     }
@@ -347,19 +347,22 @@ mod registry_tests {
     async fn register_and_list_round_trip() {
         let reg = StreamRegistry::new();
         let sid = Uuid::new_v4();
-        reg.register(fake_runtime(sid, 0)).await.unwrap();
+        reg.register(fake_runtime(sid, StreamId(0))).await.unwrap();
         let listed = reg.list().await;
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].session_id, sid);
-        assert_eq!(listed[0].stream_id, 0);
+        assert_eq!(listed[0].stream_id, StreamId(0));
     }
 
     #[tokio::test]
     async fn register_rejects_duplicate_key() {
         let reg = StreamRegistry::new();
         let sid = Uuid::new_v4();
-        reg.register(fake_runtime(sid, 0)).await.unwrap();
-        let err = reg.register(fake_runtime(sid, 0)).await.unwrap_err();
+        reg.register(fake_runtime(sid, StreamId(0))).await.unwrap();
+        let err = reg
+            .register(fake_runtime(sid, StreamId(0)))
+            .await
+            .unwrap_err();
         assert!(matches!(
             err,
             crate::error::NetError::SignalingProtocol { .. }
@@ -370,8 +373,8 @@ mod registry_tests {
     async fn close_sends_close_signal_and_removes_entry() {
         let reg = StreamRegistry::new();
         let sid = Uuid::new_v4();
-        reg.register(fake_runtime(sid, 0)).await.unwrap();
-        reg.close(&sid, 0).await.unwrap();
+        reg.register(fake_runtime(sid, StreamId(0))).await.unwrap();
+        reg.close(&sid, StreamId(0)).await.unwrap();
         assert!(reg.list().await.is_empty());
     }
 
@@ -379,7 +382,7 @@ mod registry_tests {
     async fn snapshot_stats_collects_per_stream() {
         let reg = StreamRegistry::new();
         let sid = Uuid::new_v4();
-        let rt = fake_runtime(sid, 7);
+        let rt = fake_runtime(sid, StreamId(7));
         rt.stats.packets_sent.store(123, Ordering::Relaxed);
         reg.register(rt).await.unwrap();
         let snap = reg.snapshot_stats(1_000).await;
@@ -391,7 +394,7 @@ mod registry_tests {
     async fn current_stats_does_not_mutate_prev_snapshots() {
         let reg = StreamRegistry::new();
         let sid = Uuid::new_v4();
-        let rt = fake_runtime(sid, 3);
+        let rt = fake_runtime(sid, StreamId(3));
         rt.stats.bytes_sent.store(8_000, Ordering::Relaxed);
         reg.register(rt).await.unwrap();
 
@@ -598,7 +601,7 @@ pub async fn spawn_source_pump_inner(
                             tracing::warn!("opus encode failed: {e}");
                         } else {
                             let pkt = Packet {
-                                stream_id,
+                                stream_id: stream_id.get(),
                                 seq: seq & SEQ_MASK,
                                 timestamp_ms: start.elapsed().as_millis() as u32,
                                 payload: Bytes::copy_from_slice(&payload[..]),
@@ -666,7 +669,7 @@ pub async fn spawn_sink_pump_inner(
                 };
                 let bytes = Bytes::copy_from_slice(&buf[..n]);
                 let pkt = match Packet::decode(bytes) {
-                    Ok(p) if p.stream_id == stream_id => p,
+                    Ok(p) if p.stream_id == stream_id.get() => p,
                     Ok(_) => continue,
                     Err(e) => {
                         tracing::warn!("packet decode failed: {e}");
@@ -743,7 +746,7 @@ mod sink_pump_tests {
         let stats_clone = stats.clone();
         let pump = tokio::spawn(spawn_sink_pump_inner(
             Uuid::new_v4(),
-            5u8,
+            StreamId(5),
             sink_socket,
             prod,
             ctrl_rx,
@@ -792,7 +795,7 @@ mod sink_pump_tests {
         let stats_clone = stats.clone();
         let pump = tokio::spawn(spawn_sink_pump_inner(
             Uuid::new_v4(),
-            5u8,
+            StreamId(5),
             sink_socket,
             prod,
             ctrl_rx,
@@ -856,7 +859,7 @@ mod source_pump_tests {
 
         let pump = tokio::spawn(spawn_source_pump_inner(
             Uuid::new_v4(),
-            3u8,
+            StreamId(3),
             cons,
             notify_clone,
             send_socket,
@@ -912,7 +915,7 @@ mod source_pump_tests {
 
         let pump = tokio::spawn(spawn_source_pump_inner(
             Uuid::new_v4(),
-            3u8,
+            StreamId(3),
             cons,
             notify_clone,
             send_socket,
@@ -1201,13 +1204,13 @@ mod open_sink_tests {
             1.0,
         );
 
-        let port = open_stream_as_sink_inproc(registry.clone(), session_id, 0, route)
+        let port = open_stream_as_sink_inproc(registry.clone(), session_id, StreamId(0), route)
             .await
             .expect("open sink");
         assert!(port > 0);
         let listed = registry.list().await;
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].stream_id, 0);
+        assert_eq!(listed[0].stream_id, StreamId(0));
     }
 }
 
@@ -1246,7 +1249,8 @@ mod open_source_tests {
         );
 
         let result =
-            open_stream_as_source_inproc(registry.clone(), session_id, 0, route, remote).await;
+            open_stream_as_source_inproc(registry.clone(), session_id, StreamId(0), route, remote)
+                .await;
         assert!(
             result.is_ok(),
             "open_stream_as_source_inproc returned {result:?}"
@@ -1254,7 +1258,7 @@ mod open_source_tests {
 
         let listed = registry.list().await;
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].stream_id, 0);
+        assert_eq!(listed[0].stream_id, StreamId(0));
     }
 }
 
@@ -1292,7 +1296,7 @@ mod session_registration_failure_tests {
         let registry = StreamRegistry::new();
         let sessions = SessionManager::new();
         let unknown_sid = Uuid::new_v4();
-        let stream_id: u8 = 0;
+        let stream_id = StreamId(0);
 
         let port =
             open_stream_as_sink_inproc(registry.clone(), unknown_sid, stream_id, test_route())
@@ -1334,7 +1338,7 @@ mod session_registration_failure_tests {
         let registry = StreamRegistry::new();
         let sessions = SessionManager::new();
         let unknown_sid = Uuid::new_v4();
-        let stream_id: u8 = 1;
+        let stream_id = StreamId(1);
 
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let remote: SocketAddr = sink_socket.local_addr().unwrap();
@@ -1387,7 +1391,7 @@ mod session_registration_failure_tests {
         let sid = sessions.open_outgoing(local, remote_peer).await;
         sessions.accept(&sid).await.unwrap();
 
-        let stream_id: u8 = 2;
+        let stream_id = StreamId(2);
 
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let remote_addr: SocketAddr = sink_socket.local_addr().unwrap();
@@ -1404,7 +1408,7 @@ mod session_registration_failure_tests {
             .await
             .unwrap();
 
-        let activate_result = sessions.activate_stream(&sid, 99).await;
+        let activate_result = sessions.activate_stream(&sid, StreamId(99)).await;
         assert!(
             activate_result.is_err(),
             "activate_stream on wrong stream_id must fail"
@@ -1442,7 +1446,7 @@ pub async fn dispatch_device_events(
                         let _ = rt.control_tx.send(signal).await;
                         tracing::info!(
                             session = %sid,
-                            stream = stream_id,
+                            stream = %stream_id,
                             device = %target_id,
                             signal = ?signal,
                             "device hot-plug -> pump notified"
@@ -1476,7 +1480,7 @@ mod hotplug_tests {
         registry
             .register(StreamRuntime {
                 session_id: sid,
-                stream_id: 0,
+                stream_id: StreamId(0),
                 stats: Arc::new(StreamStats::default()),
                 control_tx: ctrl_tx.clone(),
                 bound_device_id: Some("Input:0:USB Headset".into()),

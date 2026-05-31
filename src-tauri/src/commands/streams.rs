@@ -6,7 +6,7 @@ use splitter_core::net::signaling::client_ops::{
 use splitter_core::net::signaling::SourceKind as WireSourceKind;
 use splitter_core::net::signaling::{SignalingMessage, StreamAction};
 use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
-use splitter_core::SessionSnapshot;
+use splitter_core::{SessionSnapshot, StreamId};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -97,7 +97,8 @@ pub(crate) async fn open_stream_core(
         .sessions
         .next_stream_id(&sid)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .get();
 
     let conn = find_peer_conn(core, sink_peer)
         .await
@@ -147,22 +148,29 @@ pub(crate) async fn open_stream_core(
     open_stream_as_source(
         core.stream_registry.clone(),
         sid,
-        stream_id,
+        StreamId(stream_id),
         route,
         remote,
         source_kind,
     )
     .await
     .map_err(|e| e.to_string())?;
-    let stream =
-        splitter_core::net::stream::Stream::new_negotiating(stream_id, session_route, ack_port);
+    let stream = splitter_core::net::stream::Stream::new_negotiating(
+        StreamId(stream_id),
+        session_route,
+        ack_port,
+    );
     if let Err(e) = core.sessions.add_stream(&sid, stream).await {
-        let _ = core.stream_registry.close(&sid, stream_id).await;
+        let _ = core.stream_registry.close(&sid, StreamId(stream_id)).await;
         return Err(e.to_string());
     }
-    if let Err(e) = core.sessions.activate_stream(&sid, stream_id).await {
-        let _ = core.stream_registry.close(&sid, stream_id).await;
-        let _ = core.sessions.remove_stream(&sid, stream_id).await;
+    if let Err(e) = core
+        .sessions
+        .activate_stream(&sid, StreamId(stream_id))
+        .await
+    {
+        let _ = core.stream_registry.close(&sid, StreamId(stream_id)).await;
+        let _ = core.sessions.remove_stream(&sid, StreamId(stream_id)).await;
         return Err(e.to_string());
     }
     tracing::info!(%sid, stream_id, "stream now active");
@@ -248,10 +256,10 @@ pub async fn close_stream(
 ) -> Result<(), String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
     core.stream_registry
-        .close(&sid, stream_id)
+        .close(&sid, StreamId(stream_id))
         .await
         .map_err(|e| e.to_string())?;
-    let _ = core.sessions.remove_stream(&sid, stream_id).await;
+    let _ = core.sessions.remove_stream(&sid, StreamId(stream_id)).await;
     notify_remote(&core, sid, stream_id, StreamAction::Close).await;
     Ok(())
 }
@@ -268,18 +276,18 @@ pub async fn stream_control(
     let signal = StreamControlSignal::from(action.clone());
     if matches!(signal, StreamControlSignal::Close) {
         core.stream_registry
-            .close(&sid, stream_id)
+            .close(&sid, StreamId(stream_id))
             .await
             .map_err(|e| e.to_string())?;
     } else {
         if let StreamControlSignal::SetMuted(m) = signal {
             core.sessions
-                .set_stream_muted(&sid, stream_id, m)
+                .set_stream_muted(&sid, StreamId(stream_id), m)
                 .await
                 .map_err(|e| e.to_string())?;
         }
         core.stream_registry
-            .send_control(&sid, stream_id, signal)
+            .send_control(&sid, StreamId(stream_id), signal)
             .await
             .map_err(|e| e.to_string())?;
     }

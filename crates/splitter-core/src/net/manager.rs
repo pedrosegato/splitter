@@ -60,7 +60,7 @@ impl SessionManager {
         let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
         let st = s.stream_mut(stream_id).ok_or(NetError::UnknownStream {
             session: *id,
-            stream: stream_id,
+            stream: stream_id.get(),
         })?;
         f(st)
     }
@@ -206,10 +206,10 @@ mod tests {
         let mgr = SessionManager::new();
         let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
         mgr.accept(&id).await.unwrap();
-        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+        mgr.add_stream(&id, Stream::new_negotiating(StreamId(0), route(), 5004))
             .await
             .unwrap();
-        mgr.activate_stream(&id, 0).await.unwrap();
+        mgr.activate_stream(&id, StreamId(0)).await.unwrap();
         let snap = mgr.snapshot().await;
         assert_eq!(snap[0].streams[0].state, StreamState::Active);
     }
@@ -219,7 +219,7 @@ mod tests {
         let mgr = SessionManager::new();
         let fake = Uuid::new_v4();
         let err = mgr
-            .add_stream(&fake, Stream::new_negotiating(0, route(), 5004))
+            .add_stream(&fake, Stream::new_negotiating(StreamId(0), route(), 5004))
             .await
             .unwrap_err();
         assert!(matches!(err, NetError::UnknownSession(_)));
@@ -230,10 +230,10 @@ mod tests {
         let mgr = SessionManager::new();
         let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
         mgr.accept(&id).await.unwrap();
-        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+        mgr.add_stream(&id, Stream::new_negotiating(StreamId(0), route(), 5004))
             .await
             .unwrap();
-        mgr.activate_stream(&id, 0).await.unwrap();
+        mgr.activate_stream(&id, StreamId(0)).await.unwrap();
         mgr.close(&id).await.unwrap();
         let snap = mgr.snapshot().await;
         assert_eq!(snap[0].state, SessionState::Closed);
@@ -245,17 +245,17 @@ mod tests {
         let mgr = SessionManager::new();
         let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
         mgr.accept(&id).await.unwrap();
-        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+        mgr.add_stream(&id, Stream::new_negotiating(StreamId(0), route(), 5004))
             .await
             .unwrap();
         let snap = mgr.snapshot().await;
         assert!(!snap[0].streams[0].muted);
 
-        mgr.set_stream_muted(&id, 0, true).await.unwrap();
+        mgr.set_stream_muted(&id, StreamId(0), true).await.unwrap();
         let snap = mgr.snapshot().await;
         assert!(snap[0].streams[0].muted);
 
-        mgr.set_stream_muted(&id, 0, false).await.unwrap();
+        mgr.set_stream_muted(&id, StreamId(0), false).await.unwrap();
         let snap = mgr.snapshot().await;
         assert!(!snap[0].streams[0].muted);
     }
@@ -264,7 +264,10 @@ mod tests {
     async fn set_stream_muted_unknown_session_errors() {
         let mgr = SessionManager::new();
         let fake = Uuid::new_v4();
-        let err = mgr.set_stream_muted(&fake, 0, true).await.unwrap_err();
+        let err = mgr
+            .set_stream_muted(&fake, StreamId(0), true)
+            .await
+            .unwrap_err();
         assert!(matches!(err, NetError::UnknownSession(_)));
     }
 
@@ -273,10 +276,10 @@ mod tests {
         let mgr = SessionManager::new();
         let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
         mgr.accept(&id).await.unwrap();
-        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+        mgr.add_stream(&id, Stream::new_negotiating(StreamId(0), route(), 5004))
             .await
             .unwrap();
-        let err = mgr.activate_stream(&id, 99).await.unwrap_err();
+        let err = mgr.activate_stream(&id, StreamId(99)).await.unwrap_err();
         assert!(matches!(err, NetError::UnknownStream { .. }), "got {err:?}");
     }
 
@@ -285,10 +288,13 @@ mod tests {
         let mgr = SessionManager::new();
         let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
         mgr.accept(&id).await.unwrap();
-        mgr.add_stream(&id, Stream::new_negotiating(0, route(), 5004))
+        mgr.add_stream(&id, Stream::new_negotiating(StreamId(0), route(), 5004))
             .await
             .unwrap();
-        let err = mgr.set_stream_muted(&id, 99, true).await.unwrap_err();
+        let err = mgr
+            .set_stream_muted(&id, StreamId(99), true)
+            .await
+            .unwrap_err();
         assert!(matches!(err, NetError::UnknownStream { .. }), "got {err:?}");
     }
 
@@ -310,7 +316,7 @@ mod tests {
     async fn remove_stream_unknown_session_returns_unknown_session_error() {
         let mgr = SessionManager::new();
         let fake = Uuid::new_v4();
-        let err = mgr.remove_stream(&fake, 0).await.unwrap_err();
+        let err = mgr.remove_stream(&fake, StreamId(0)).await.unwrap_err();
         assert!(
             matches!(err, NetError::UnknownSession(_)),
             "remove_stream on unknown session must error consistently with sibling methods: {err:?}"

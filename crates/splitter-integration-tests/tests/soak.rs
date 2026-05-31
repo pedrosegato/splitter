@@ -65,7 +65,7 @@ fn rss_bytes() -> i64 {
 #[ignore = "30-minute soak; run with: cargo test --test soak --ignored --release -- --test-threads=1"]
 async fn soak_30_minutes_no_leak_no_loss() {
     let session_id = Uuid::new_v4();
-    let stream_id: u8 = 0;
+    let stream_id = splitter_core::StreamId(0);
 
     let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let sink_addr = sink_socket.local_addr().unwrap();

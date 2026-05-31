@@ -106,7 +106,7 @@ impl Session {
     pub fn next_stream_id(&mut self) -> StreamId {
         let id = self.stream_id_counter;
         self.stream_id_counter = self.stream_id_counter.wrapping_add(1);
-        id
+        StreamId(id)
     }
 
     pub fn active_stream_count(&self) -> usize {
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn add_stream_requires_active() {
         let mut s = Session::new_outgoing(Uuid::new_v4(), Uuid::new_v4());
-        let stream = Stream::new_negotiating(0, route(), 5004);
+        let stream = Stream::new_negotiating(StreamId(0), route(), 5004);
         let err = s.add_stream(stream).unwrap_err();
         assert!(matches!(err, NetError::SignalingProtocol { .. }));
     }
@@ -167,9 +167,9 @@ mod tests {
     fn add_stream_rejects_duplicate_id() {
         let mut s = Session::new_outgoing(Uuid::new_v4(), Uuid::new_v4());
         s.accept().unwrap();
-        s.add_stream(Stream::new_negotiating(0, route(), 5004))
+        s.add_stream(Stream::new_negotiating(StreamId(0), route(), 5004))
             .unwrap();
-        let dup = Stream::new_negotiating(0, route(), 5005);
+        let dup = Stream::new_negotiating(StreamId(0), route(), 5005);
         assert!(s.add_stream(dup).is_err());
     }
 
@@ -177,23 +177,23 @@ mod tests {
     fn close_propagates_to_streams() {
         let mut s = Session::new_outgoing(Uuid::new_v4(), Uuid::new_v4());
         s.accept().unwrap();
-        s.add_stream(Stream::new_negotiating(0, route(), 5004))
+        s.add_stream(Stream::new_negotiating(StreamId(0), route(), 5004))
             .unwrap();
-        s.stream_mut(0).unwrap().activate().unwrap();
+        s.stream_mut(StreamId(0)).unwrap().activate().unwrap();
         s.close();
         assert_eq!(s.state(), SessionState::Closed);
-        assert_eq!(s.stream(0).unwrap().state(), StreamState::Closed);
+        assert_eq!(s.stream(StreamId(0)).unwrap().state(), StreamState::Closed);
     }
 
     #[test]
     fn active_stream_count_reflects_state() {
         let mut s = Session::new_outgoing(Uuid::new_v4(), Uuid::new_v4());
         s.accept().unwrap();
-        s.add_stream(Stream::new_negotiating(0, route(), 5004))
+        s.add_stream(Stream::new_negotiating(StreamId(0), route(), 5004))
             .unwrap();
-        s.add_stream(Stream::new_negotiating(1, route(), 5005))
+        s.add_stream(Stream::new_negotiating(StreamId(1), route(), 5005))
             .unwrap();
-        s.stream_mut(0).unwrap().activate().unwrap();
+        s.stream_mut(StreamId(0)).unwrap().activate().unwrap();
         assert_eq!(s.active_stream_count(), 1);
     }
 

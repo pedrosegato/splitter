@@ -11,7 +11,7 @@ pub async fn build_heartbeat(
     let streams_stats = snaps
         .into_iter()
         .map(|(_sid, stream_id, snap)| HeartbeatStreamStats {
-            stream_id,
+            stream_id: stream_id.get(),
             packets_sent: snap.packets_sent,
             packets_received: snap.packets_received,
             packets_lost: snap.packets_lost,
@@ -32,6 +32,7 @@ pub async fn build_heartbeat(
 mod phase3_tests {
     use super::*;
     use crate::net::session::SessionId;
+    use crate::net::stream::StreamId;
     use crate::net::stream_runtime::{
         DeviceGuard, StreamControlSignal, StreamRegistry, StreamRuntime, StreamStats,
     };
@@ -45,7 +46,7 @@ mod phase3_tests {
         let join = tokio::spawn(async move { while rx.recv().await.is_some() {} });
         StreamRuntime {
             session_id,
-            stream_id: 0,
+            stream_id: StreamId(0),
             stats: Arc::new(StreamStats::default()),
             control_tx: tx,
             bound_device_id: None,

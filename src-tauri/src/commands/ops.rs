@@ -12,14 +12,14 @@ pub(crate) async fn mute_all_core(core: &AppCore) {
                 .set_stream_muted(&sess.id, stream.id, true)
                 .await
             {
-                tracing::warn!(sid = %sess.id, stream_id = stream.id, "mute_all: set_stream_muted error: {e}");
+                tracing::warn!(sid = %sess.id, stream_id = %stream.id, "mute_all: set_stream_muted error: {e}");
             }
             if let Err(e) = core
                 .stream_registry
                 .send_control(&sess.id, stream.id, StreamControlSignal::SetMuted(true))
                 .await
             {
-                tracing::warn!(sid = %sess.id, stream_id = stream.id, "mute_all: send_control error: {e}");
+                tracing::warn!(sid = %sess.id, stream_id = %stream.id, "mute_all: send_control error: {e}");
             }
         }
     }

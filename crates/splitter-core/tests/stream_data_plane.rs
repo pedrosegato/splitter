@@ -2,6 +2,7 @@ use bytes::{Bytes, BytesMut};
 use splitter_core::audio::codec::OpusEncoder;
 use splitter_core::audio::ring::AudioRing;
 use splitter_core::net::packet::Packet;
+use splitter_core::net::stream::StreamId;
 use splitter_core::net::stream_runtime::{
     spawn_sink_pump_inner, spawn_source_pump_inner, StreamControlSignal, StreamStats,
 };
@@ -15,7 +16,7 @@ use uuid::Uuid;
 #[tokio::test]
 async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
     let session_id = Uuid::new_v4();
-    let stream_id: u8 = 0;
+    let stream_id = StreamId(0);
 
     let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let sink_addr = sink_socket.local_addr().unwrap();
@@ -85,7 +86,7 @@ async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
 
 #[tokio::test]
 async fn volume_change_attenuates_decoded_signal() {
-    let stream_id: u8 = 1;
+    let stream_id = StreamId(1);
     let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let sink_addr = sink_socket.local_addr().unwrap();
 
@@ -108,7 +109,7 @@ async fn volume_change_attenuates_decoded_signal() {
     let mut payload = BytesMut::with_capacity(400);
     enc.encode(&sine, &mut payload).unwrap();
     let pkt = Packet {
-        stream_id,
+        stream_id: stream_id.get(),
         seq: 0,
         timestamp_ms: 0,
         payload: Bytes::copy_from_slice(&payload[..]),

@@ -3,7 +3,7 @@ use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
 use splitter_core::net::signaling::{
     CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, SourceKind, StreamAction,
 };
-use splitter_core::net::stream::StreamRoute;
+use splitter_core::net::stream::{StreamId, StreamRoute};
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -139,7 +139,7 @@ pub fn spawn_acceptor(
                         match open_stream_as_sink(
                             core.stream_registry.clone(),
                             sid_uuid,
-                            stream_id,
+                            StreamId(stream_id),
                             route,
                             chosen_output.clone(),
                         )
@@ -147,7 +147,7 @@ pub fn spawn_acceptor(
                         {
                             Ok(port) => {
                                 let stream = splitter_core::net::stream::Stream::new_negotiating(
-                                    stream_id,
+                                    StreamId(stream_id),
                                     session_route,
                                     port,
                                 );
@@ -157,7 +157,10 @@ pub fn spawn_acceptor(
                                         stream_id,
                                         "add_stream failed — tearing down runtime: {e}"
                                     );
-                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
+                                    let _ = core
+                                        .stream_registry
+                                        .close(&sid_uuid, StreamId(stream_id))
+                                        .await;
                                     send_to_peer(
                                         &core,
                                         peer_id,
@@ -170,16 +173,24 @@ pub fn spawn_acceptor(
                                     .await;
                                     continue;
                                 }
-                                if let Err(e) =
-                                    core.sessions.activate_stream(&sid_uuid, stream_id).await
+                                if let Err(e) = core
+                                    .sessions
+                                    .activate_stream(&sid_uuid, StreamId(stream_id))
+                                    .await
                                 {
                                     tracing::warn!(
                                         peer = %peer_id,
                                         stream_id,
                                         "activate_stream failed — tearing down runtime: {e}"
                                     );
-                                    let _ = core.stream_registry.close(&sid_uuid, stream_id).await;
-                                    let _ = core.sessions.remove_stream(&sid_uuid, stream_id).await;
+                                    let _ = core
+                                        .stream_registry
+                                        .close(&sid_uuid, StreamId(stream_id))
+                                        .await;
+                                    let _ = core
+                                        .sessions
+                                        .remove_stream(&sid_uuid, StreamId(stream_id))
+                                        .await;
                                     send_to_peer(
                                         &core,
                                         peer_id,
@@ -260,20 +271,24 @@ pub fn spawn_acceptor(
                             .collect();
                         if matches!(action, StreamAction::Close) {
                             for sid in session_ids {
-                                let _ = core.stream_registry.close(&sid, stream_id).await;
-                                let _ = core.sessions.remove_stream(&sid, stream_id).await;
+                                let _ = core.stream_registry.close(&sid, StreamId(stream_id)).await;
+                                let _ =
+                                    core.sessions.remove_stream(&sid, StreamId(stream_id)).await;
                             }
                         } else {
                             let signal = StreamControlSignal::from(action);
                             if let StreamControlSignal::SetMuted(m) = signal {
                                 for sid in &session_ids {
-                                    let _ = core.sessions.set_stream_muted(sid, stream_id, m).await;
+                                    let _ = core
+                                        .sessions
+                                        .set_stream_muted(sid, StreamId(stream_id), m)
+                                        .await;
                                 }
                             }
                             for sid in &session_ids {
                                 let _ = core
                                     .stream_registry
-                                    .send_control(sid, stream_id, signal)
+                                    .send_control(sid, StreamId(stream_id), signal)
                                     .await;
                             }
                         }
@@ -286,7 +301,7 @@ pub fn spawn_acceptor(
                         let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
                             continue;
                         };
-                        let stream_ids: Vec<u8> = core
+                        let stream_ids: Vec<StreamId> = core
                             .sessions
                             .snapshot()
                             .await
@@ -388,7 +403,7 @@ pub fn spawn_acceptor(
                         .collect();
                     let had_active_session = !session_ids.is_empty();
                     for sid in &session_ids {
-                        let stream_ids: Vec<u8> = core
+                        let stream_ids: Vec<StreamId> = core
                             .sessions
                             .snapshot()
                             .await

@@ -179,10 +179,15 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
     if let Some(sess) = snap.iter().find(|s| s.id == sid) {
         for stream in &sess.streams {
             if let Err(e) = core.stream_registry.close(&sid, stream.id).await {
-                tracing::warn!(%sid, stream_id = stream.id, "teardown_session: stream_registry.close error: {e}");
+                tracing::warn!(%sid, stream_id = %stream.id, "teardown_session: stream_registry.close error: {e}");
             }
-            crate::commands::streams::notify_remote(core, sid, stream.id, StreamAction::Close)
-                .await;
+            crate::commands::streams::notify_remote(
+                core,
+                sid,
+                stream.id.get(),
+                StreamAction::Close,
+            )
+            .await;
         }
         let remote = sess.remote_peer_id;
         let tx = {

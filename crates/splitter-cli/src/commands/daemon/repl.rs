@@ -369,7 +369,7 @@ async fn cmd_disconnect<'a>(
         for stream in &sess.streams {
             let _ = ctx.stream_registry.close(&id, stream.id).await;
             if let Some(ref tx) = conn_tx {
-                notify_remote_control(tx, stream.id, StreamAction::Close).await;
+                notify_remote_control(tx, stream.id.get(), StreamAction::Close).await;
             }
         }
     }

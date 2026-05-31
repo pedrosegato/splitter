@@ -2,7 +2,28 @@ use crate::error::NetError;
 use crate::net::signaling::{CodecParams, Endpoint};
 use serde::{Deserialize, Serialize};
 
-pub type StreamId = u8;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(transparent)]
+pub struct StreamId(pub u8);
+
+impl StreamId {
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<u8> for StreamId {
+    fn from(value: u8) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for StreamId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -162,20 +183,20 @@ mod tests {
 
     #[test]
     fn new_starts_negotiating() {
-        let s = Stream::new_negotiating(0, sample_route(), 5004);
+        let s = Stream::new_negotiating(StreamId(0), sample_route(), 5004);
         assert_eq!(s.state(), StreamState::Negotiating);
     }
 
     #[test]
     fn activate_from_negotiating_goes_active() {
-        let mut s = Stream::new_negotiating(0, sample_route(), 5004);
+        let mut s = Stream::new_negotiating(StreamId(0), sample_route(), 5004);
         s.activate().unwrap();
         assert_eq!(s.state(), StreamState::Active);
     }
 
     #[test]
     fn activate_from_closed_errors() {
-        let mut s = Stream::new_negotiating(0, sample_route(), 5004);
+        let mut s = Stream::new_negotiating(StreamId(0), sample_route(), 5004);
         s.close();
         let err = s.activate().unwrap_err();
         assert!(matches!(err, NetError::SignalingProtocol { .. }));
@@ -183,7 +204,7 @@ mod tests {
 
     #[test]
     fn pause_then_resume_via_activate() {
-        let mut s = Stream::new_negotiating(0, sample_route(), 5004);
+        let mut s = Stream::new_negotiating(StreamId(0), sample_route(), 5004);
         s.activate().unwrap();
         s.pause().unwrap();
         assert_eq!(s.state(), StreamState::Paused);
@@ -193,13 +214,13 @@ mod tests {
 
     #[test]
     fn pause_from_negotiating_errors() {
-        let mut s = Stream::new_negotiating(0, sample_route(), 5004);
+        let mut s = Stream::new_negotiating(StreamId(0), sample_route(), 5004);
         assert!(s.pause().is_err());
     }
 
     #[test]
     fn set_volume_clamps_into_range() {
-        let mut s = Stream::new_negotiating(0, sample_route(), 5004);
+        let mut s = Stream::new_negotiating(StreamId(0), sample_route(), 5004);
         s.set_volume(5.0);
         assert_eq!(s.volume(), 2.0);
         s.set_volume(-1.0);
@@ -208,7 +229,7 @@ mod tests {
 
     #[test]
     fn volume_nan_maps_to_one() {
-        let mut s = Stream::new_negotiating(0, sample_route(), 5004);
+        let mut s = Stream::new_negotiating(StreamId(0), sample_route(), 5004);
         s.set_volume(f32::NAN);
         assert_eq!(s.volume(), 1.0);
     }

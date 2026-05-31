@@ -4,7 +4,7 @@ use splitter_core::net::signaling::client_ops::{
 };
 use splitter_core::net::signaling::StreamAction;
 use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
-use splitter_core::{PeerIdentity, SessionManager, StreamRegistry};
+use splitter_core::{PeerIdentity, SessionManager, StreamId, StreamRegistry};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,14 +36,17 @@ pub(crate) async fn handle(
     }
 }
 
-fn parse_session_stream(rest: &[&str]) -> anyhow::Result<(Uuid, u8)> {
+fn parse_session_stream(rest: &[&str]) -> anyhow::Result<(Uuid, StreamId)> {
     let raw = rest
         .first()
         .ok_or_else(|| anyhow::anyhow!("missing <session_id>:<stream_id>"))?;
     let (sid_str, stream_str) = raw
         .split_once(':')
         .ok_or_else(|| anyhow::anyhow!("expected session_id:stream_id"))?;
-    Ok((Uuid::parse_str(sid_str)?, stream_str.parse::<u8>()?))
+    Ok((
+        Uuid::parse_str(sid_str)?,
+        StreamId(stream_str.parse::<u8>()?),
+    ))
 }
 
 async fn stream_open(
@@ -95,7 +98,7 @@ async fn stream_open(
         .await
         .ok_or_else(|| anyhow::anyhow!("no live signaling connection to remote peer"))?;
 
-    let stream_id: u8 = sessions
+    let stream_id = sessions
         .next_stream_id(&session_id)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -104,7 +107,7 @@ async fn stream_open(
     conn.tx
         .send(stream_open_message(
             session_id,
-            stream_id,
+            stream_id.get(),
             identity.peer_id,
             remote_peer_id,
             &from_dev,
@@ -114,7 +117,8 @@ async fn stream_open(
         .await
         .ok();
 
-    let ack_port = wait_for_stream_open_ack(&mut ack_rx, stream_id, Duration::from_secs(5)).await?;
+    let ack_port =
+        wait_for_stream_open_ack(&mut ack_rx, stream_id.get(), Duration::from_secs(5)).await?;
     let remote: SocketAddr = SocketAddr::new(conn.remote_addr.ip(), ack_port);
 
     let route = build_stream_route(
@@ -159,7 +163,7 @@ async fn stream_close(
     registry.close(&sid, stream_id).await?;
     if let Some(remote) = remote {
         if let Some(conn) = find_conn(&server.connections, outgoing, remote).await {
-            notify_remote_control(&conn.tx, stream_id, StreamAction::Close).await;
+            notify_remote_control(&conn.tx, stream_id.get(), StreamAction::Close).await;
         }
     }
     #[allow(clippy::print_stdout)]
@@ -190,7 +194,7 @@ async fn stream_volume(
         if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
             notify_remote_control(
                 &conn.tx,
-                stream_id,
+                stream_id.get(),
                 StreamAction::SetVolume { volume: gain },
             )
             .await;
@@ -235,7 +239,7 @@ async fn stream_set_paused(
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
         if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
-            notify_remote_control(&conn.tx, stream_id, action).await;
+            notify_remote_control(&conn.tx, stream_id.get(), action).await;
         }
     }
     Ok(())
@@ -246,7 +250,7 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
     use sysinfo::System;
 
     const BAR: &str = "═══════════════════════════════════════════════════════════════════════════";
-    let target: Option<(Uuid, u8)> = if rest.is_empty() {
+    let target: Option<(Uuid, StreamId)> = if rest.is_empty() {
         None
     } else {
         Some(parse_session_stream(rest)?)
@@ -322,7 +326,7 @@ mod tests {
         let parts: Vec<&str> = vec![raw.as_str()];
         let (parsed_sid, parsed_stream) = parse_session_stream(&parts).unwrap();
         assert_eq!(parsed_sid, sid);
-        assert_eq!(parsed_stream, 3u8);
+        assert_eq!(parsed_stream, StreamId(3));
     }
 
     #[test]

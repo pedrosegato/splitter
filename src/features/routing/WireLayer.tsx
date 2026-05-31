@@ -107,7 +107,7 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
   let previewPath: string | null = null;
   if (arm && cursor) {
     const board = boardRef.current;
-    const el = registry.get(`${arm.peerId}:src:${arm.deviceId}`);
+    const el = registry.get(`${arm.peerId}:${arm.kind}:${arm.deviceId}`);
     if (board && el) {
       const br = board.getBoundingClientRect();
       const r = el.getBoundingClientRect();

@@ -58,6 +58,7 @@ async fn udp_rms_under_loss(loss_percent: u8, jitter_ms: u32) -> f32 {
 fn apply_netem_or_dummynet(port: u16, loss_percent: u8, jitter_ms: u32) {
     #[cfg(target_os = "linux")]
     {
+        let _ = port;
         std::process::Command::new("tc")
             .args([
                 "qdisc",
@@ -88,6 +89,7 @@ fn apply_netem_or_dummynet(port: u16, loss_percent: u8, jitter_ms: u32) {
 fn remove_netem_or_dummynet(port: u16) {
     #[cfg(target_os = "linux")]
     {
+        let _ = port;
         std::process::Command::new("tc")
             .args(["qdisc", "del", "dev", "lo", "root"])
             .status()

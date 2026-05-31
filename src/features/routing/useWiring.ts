@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useUiStore } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { useDevices } from "@/hooks/useDevices";
+import { useIdentity } from "@/hooks/useIdentity";
 import { useOpenStream } from "@/hooks/useStreams";
 
 export function useWiring() {
@@ -10,8 +11,10 @@ export function useWiring() {
   const clearArm = useUiStore((s) => s.clearArm);
   const { data: snap } = useSnapshot();
   const { data: devices } = useDevices();
+  const { data: identity } = useIdentity();
   const openStream = useOpenStream();
   const [hint, setHint] = useState<string | null>(null);
+  const selfPeerId = identity?.peer_id;
 
   useEffect(() => {
     if (!hint) return;
@@ -43,7 +46,11 @@ export function useWiring() {
 
       if (!arm) {
         if (kind !== "src") {
-          setHint("comece por uma fonte (direita)");
+          setHint("comece por uma fonte deste PC");
+          return;
+        }
+        if (selfPeerId && peerId !== selfPeerId) {
+          setHint("pra ouvir o outro PC, inicie o envio lá");
           return;
         }
         armSource(peerId, deviceId);
@@ -52,7 +59,7 @@ export function useWiring() {
       }
 
       if (kind !== "sink") {
-        setHint("termine num destino");
+        setHint("termine num destino do outro PC");
         return;
       }
 
@@ -77,7 +84,7 @@ export function useWiring() {
       clearArm();
       setHint(null);
     },
-    [arm, snap, devices, armSource, clearArm, openStream],
+    [arm, snap, devices, selfPeerId, armSource, clearArm, openStream],
   );
 
   return { arm, hint, onPortActivate };

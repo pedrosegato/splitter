@@ -58,14 +58,18 @@ describe("useWiring", () => {
     mockedUseIdentity.mockReturnValue({ data: { peer_id: "peer-a", peer_name: "A" } });
   });
 
-  it("sink-first yields hint 'comece por uma fonte'", () => {
+  it("clicking a sink first arms it (order-agnostic, no error)", () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
       result.current.onPortActivate("peer-a:sink:mic-1", "sink", "peer-a", "mic-1");
     });
 
-    expect(result.current.hint).toBe("comece por uma fonte");
+    expect(result.current.arm).toEqual({
+      peerId: "peer-a",
+      deviceId: "mic-1",
+      kind: "sink",
+    });
     expect(mutateSpy).not.toHaveBeenCalled();
   });
 
@@ -76,8 +80,11 @@ describe("useWiring", () => {
       result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
     });
 
-    expect(result.current.arm).toEqual({ peerId: "peer-a", deviceId: "sys-1" });
-    expect(result.current.hint).toBe("agora clique num destino");
+    expect(result.current.arm).toEqual({
+      peerId: "peer-a",
+      deviceId: "sys-1",
+      kind: "src",
+    });
 
     act(() => {
       result.current.onPortActivate("peer-b:sink:spk-1", "sink", "peer-b", "spk-1");
@@ -115,7 +122,7 @@ describe("useWiring", () => {
     );
   });
 
-  it("src then sink on the SAME peer does not call mutate and clears arm", () => {
+  it("src then sink on the SAME peer does not connect", () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
@@ -129,8 +136,6 @@ describe("useWiring", () => {
     });
 
     expect(mutateSpy).not.toHaveBeenCalled();
-    expect(result.current.arm).toBeNull();
-    expect(result.current.hint).toBe("não pode rotear pra mesma máquina");
   });
 
   it("no sessions yields hint 'conecte uma máquina primeiro'", () => {
@@ -163,15 +168,16 @@ describe("useWiring", () => {
   });
 
   it("hint auto-clears after 2200ms", () => {
+    mockedUseSnapshot.mockReturnValue({ data: [] });
     vi.useFakeTimers();
     try {
       const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
       act(() => {
-        result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
+        result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
       });
 
-      expect(result.current.hint).toBe("comece por uma fonte");
+      expect(result.current.hint).toBe("conecte uma máquina primeiro");
 
       act(() => {
         vi.advanceTimersByTime(2200);

@@ -102,6 +102,7 @@ export function RoutingBoard() {
 
   const selectedStreamId = useUiStore((s) => s.selectedStreamId);
   const selectStream = useUiStore((s) => s.selectStream);
+  const clearArm = useUiStore((s) => s.clearArm);
 
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -158,10 +159,16 @@ export function RoutingBoard() {
       <div className="flex flex-col h-full">
         <div
           ref={boardRef}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              selectStream(null);
+              clearArm();
+            }
+          }}
           className="relative flex flex-1 items-center justify-center gap-[120px] bg-board"
           style={{
             backgroundImage:
-              "repeating-linear-gradient(to right, transparent, transparent 39px, rgba(255,255,255,0.025) 39px, rgba(255,255,255,0.025) 40px)",
+              "repeating-linear-gradient(to right, transparent, transparent 39px, var(--grid-line) 39px, var(--grid-line) 40px)",
           }}
         >
           <MachinePanel

@@ -3,7 +3,7 @@ import type { StreamStat } from "@/bindings";
 
 const HISTORY_CAP = 60;
 
-type Arm = { peerId: string; deviceId: string } | null;
+type Arm = { peerId: string; deviceId: string; kind: "src" | "sink" } | null;
 type Incoming = { peerId: string; peerName: string } | null;
 
 export type StreamHistory = { rtt: number[]; loss: number[]; kbps: number[] };
@@ -39,7 +39,7 @@ interface UiState {
   knownNames: Record<string, string>;
   setTab: (t: UiState["activeTab"]) => void;
   selectStream: (id: number | null) => void;
-  armSource: (peerId: string, deviceId: string) => void;
+  armSource: (peerId: string, deviceId: string, kind: "src" | "sink") => void;
   clearArm: () => void;
   setStats: (s: StreamStat[]) => void;
   pushStats: (tick: StreamStat[]) => void;
@@ -57,7 +57,7 @@ export const useUiStore = create<UiState>((set) => ({
   knownNames: {},
   setTab: (activeTab) => set({ activeTab }),
   selectStream: (selectedStreamId) => set({ selectedStreamId }),
-  armSource: (peerId, deviceId) => set({ arm: { peerId, deviceId } }),
+  armSource: (peerId, deviceId, kind) => set({ arm: { peerId, deviceId, kind } }),
   clearArm: () => set({ arm: null }),
   setStats: (stats) => set({ stats }),
   pushStats: (tick) =>

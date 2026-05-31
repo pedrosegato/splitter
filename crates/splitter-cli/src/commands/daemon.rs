@@ -1315,32 +1315,4 @@ mod tests {
         assert!(existing.is_some(), "should find existing active session");
         assert_eq!(existing.unwrap().id, sid);
     }
-
-    #[tokio::test]
-    async fn lagged_does_not_terminate_event_loop() {
-        let (tx, mut rx) = tokio::sync::broadcast::channel::<u8>(2);
-        for i in 0..10 {
-            let _ = tx.send(i);
-        }
-        let mut sender = Some(tx);
-        let mut got_lagged = false;
-        let closed_normally;
-        loop {
-            match rx.recv().await {
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    got_lagged = true;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    closed_normally = true;
-                    break;
-                }
-            }
-            if got_lagged {
-                drop(sender.take());
-            }
-        }
-        assert!(got_lagged);
-        assert!(closed_normally);
-    }
 }

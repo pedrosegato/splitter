@@ -365,7 +365,10 @@ pub fn spawn_acceptor(
                     break;
                 }
                 Ok(PeerEvent::Connected { .. }) => {}
-                Err(_) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "peer event stream lagged; continuing");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     });

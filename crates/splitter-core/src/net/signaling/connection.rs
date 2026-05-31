@@ -31,8 +31,14 @@ pub struct PeerConnectionHandle {
 pub fn spawn_peer_connection(
     stream: TcpStream,
     registry: Option<Arc<StreamRegistry>>,
-) -> PeerConnectionHandle {
-    let peer_addr = stream.peer_addr().expect("peer_addr");
+) -> Result<PeerConnectionHandle, NetError> {
+    let peer_addr = match stream.peer_addr() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!(error = %e, "dropping connection: peer_addr unavailable");
+            return Err(NetError::UdpIo(e));
+        }
+    };
     let (msg_tx, mut msg_rx) = mpsc::channel::<SignalingMessage>(64);
     let (event_tx, _) = broadcast::channel::<PeerEvent>(64);
     let event_tx_task = event_tx.clone();
@@ -159,12 +165,12 @@ pub fn spawn_peer_connection(
         }
     });
 
-    PeerConnectionHandle {
+    Ok(PeerConnectionHandle {
         tx: msg_tx,
         events: event_tx.clone(),
         peer_addr,
         remote_addr: peer_addr,
-    }
+    })
 }
 
 impl PeerConnectionHandle {
@@ -229,8 +235,8 @@ pub async fn _wire_for_tests() -> (PeerConnectionHandle, PeerConnectionHandle) {
     let client = TcpStream::connect(addr).await.unwrap();
     let server = server_fut.await.unwrap();
     (
-        spawn_peer_connection(server, None),
-        spawn_peer_connection(client, None),
+        spawn_peer_connection(server, None).unwrap(),
+        spawn_peer_connection(client, None).unwrap(),
     )
 }
 
@@ -310,7 +316,7 @@ mod tests {
         });
         let _client = TcpStream::connect(addr).await.unwrap();
         let server = server_fut.await.unwrap();
-        let handle = spawn_peer_connection(server, None);
+        let handle = spawn_peer_connection(server, None).unwrap();
         let mut events = handle.events.subscribe();
         let saw_disconnect = tokio::time::timeout(
             REMOTE_PEER_HEARTBEAT_TIMEOUT + Duration::from_secs(2),
@@ -328,5 +334,35 @@ mod tests {
             saw_disconnect,
             "expected disconnect after 5s of no heartbeats"
         );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn peer_addr_failure_returns_err_not_panic() {
+        use std::os::unix::io::FromRawFd;
+        let (r, _w) = nix_pipe();
+        let stream = unsafe { std::net::TcpStream::from_raw_fd(r) };
+        let tokio_stream = {
+            stream.set_nonblocking(true).unwrap();
+            tokio::net::TcpStream::from_std(stream).unwrap()
+        };
+        let result = spawn_peer_connection(tokio_stream, None);
+        assert!(
+            result.is_err(),
+            "spawn_peer_connection must return Err when peer_addr is unavailable"
+        );
+        match result.unwrap_err() {
+            crate::error::NetError::UdpIo(_) => {}
+            other => panic!("expected NetError::UdpIo, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn nix_pipe() -> (i32, i32) {
+        let mut fds = [0i32; 2];
+        unsafe {
+            assert_eq!(libc::pipe(fds.as_mut_ptr()), 0, "pipe() failed");
+        }
+        (fds[0], fds[1])
     }
 }

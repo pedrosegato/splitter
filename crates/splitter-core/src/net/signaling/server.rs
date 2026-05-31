@@ -89,7 +89,13 @@ impl SignalingServer {
                         continue;
                     }
                 };
-                let handle = spawn_peer_connection(stream, None);
+                let handle = match spawn_peer_connection(stream, None) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "dropping accepted connection: peer_addr unavailable");
+                        continue;
+                    }
+                };
                 let mut events = handle.events.subscribe();
                 let p_inner = p_clone.clone();
                 let c_inner = c_clone.clone();
@@ -319,7 +325,7 @@ mod tests {
     async fn server_queues_unknown_peer_hello() {
         let (server, _identity, _trust, _sessions, _dir) = setup().await;
         let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None);
+        let client = spawn_peer_connection(stream, None).unwrap();
         let client_peer_id = Uuid::new_v4();
         client
             .tx
@@ -351,7 +357,7 @@ mod tests {
     async fn server_rejects_protocol_mismatch() {
         let (server, _identity, _trust, _sessions, _dir) = setup().await;
         let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None);
+        let client = spawn_peer_connection(stream, None).unwrap();
         let mut events = client.events.subscribe();
         client
             .tx
@@ -385,7 +391,7 @@ mod tests {
     async fn accept_pending_promotes_and_acks() {
         let (server, _identity, trust, _sessions, _dir) = setup().await;
         let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None);
+        let client = spawn_peer_connection(stream, None).unwrap();
         let mut events = client.events.subscribe();
         let peer_id = Uuid::new_v4();
         client
@@ -451,7 +457,7 @@ mod tests {
             .unwrap();
 
         let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None);
+        let client = spawn_peer_connection(stream, None).unwrap();
         let mut events = client.events.subscribe();
 
         client
@@ -511,7 +517,7 @@ mod tests {
             .unwrap();
 
         let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None);
+        let client = spawn_peer_connection(stream, None).unwrap();
 
         client
             .tx

@@ -4643,6 +4643,7 @@ dependencies = [
  "dirs 5.0.1",
  "futures",
  "gethostname",
+ "libc",
  "mdns-sd",
  "prometheus",
  "proptest",

@@ -57,7 +57,7 @@ describe("useWiring", () => {
       result.current.onPortActivate("peer-a:sink:mic-1", "sink", "peer-a", "mic-1");
     });
 
-    expect(result.current.hint).toBe("comece por uma fonte (direita)");
+    expect(result.current.hint).toBe("comece por uma fonte deste PC");
     expect(mutateSpy).not.toHaveBeenCalled();
   });
 
@@ -163,7 +163,7 @@ describe("useWiring", () => {
         result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
       });
 
-      expect(result.current.hint).toBe("comece por uma fonte (direita)");
+      expect(result.current.hint).toBe("comece por uma fonte deste PC");
 
       act(() => {
         vi.advanceTimersByTime(2200);

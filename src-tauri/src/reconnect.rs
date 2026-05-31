@@ -1,18 +1,14 @@
+use crate::core::AppCore;
+use splitter_core::net::signaling::connect_to_peer;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
-use splitter_core::net::signaling::connect_to_peer;
-use crate::core::AppCore;
 
 pub fn spawn_reconnect(core: Arc<AppCore>, peer_id: Uuid, _addr: SocketAddr) {
     tokio::spawn(async move {
         let in_outgoing = core.outgoing.read().await.contains_key(&peer_id);
-        let in_mdns = core
-            .peers
-            .read()
-            .await
-            .contains_key(&peer_id.to_string());
+        let in_mdns = core.peers.read().await.contains_key(&peer_id.to_string());
         if !in_outgoing && !in_mdns {
             tracing::debug!(%peer_id, "skip reconnect: no dialable address for {peer_id}");
             return;
@@ -45,9 +41,10 @@ pub fn spawn_reconnect(core: Arc<AppCore>, peer_id: Uuid, _addr: SocketAddr) {
 
             tracing::debug!(%peer_id, attempt, %current_addr, "reconnect attempt");
 
+            let identity = core.identity.read().unwrap().clone();
             match connect_to_peer(
                 current_addr,
-                &core.identity,
+                &identity,
                 core.trust.clone(),
                 Some(peer_id),
                 Duration::from_secs(5),
@@ -72,11 +69,7 @@ pub fn spawn_reconnect(core: Arc<AppCore>, peer_id: Uuid, _addr: SocketAddr) {
                 }
             }
 
-            let still_present = core
-                .peers
-                .read()
-                .await
-                .contains_key(&peer_id.to_string());
+            let still_present = core.peers.read().await.contains_key(&peer_id.to_string());
             if !still_present {
                 tracing::debug!(%peer_id, "peer no longer in mDNS; aborting reconnect");
                 return;

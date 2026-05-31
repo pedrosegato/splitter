@@ -104,6 +104,10 @@ pub enum SignalingMessage {
     DeviceListResponse {
         devices: Vec<DeviceDescriptor>,
     },
+    PeerRenamed {
+        peer_id: String,
+        peer_name: String,
+    },
 }
 
 impl SignalingMessage {
@@ -258,5 +262,18 @@ mod tests {
         };
         let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
         assert!(raw.contains("\"action\":\"set_volume\""));
+    }
+
+    #[test]
+    fn peer_renamed_round_trip() {
+        let msg = SignalingMessage::PeerRenamed {
+            peer_id: "11111111-1111-1111-1111-111111111111".into(),
+            peer_name: "Novo Nome".into(),
+        };
+        let bytes = msg.encode_to_bytes().unwrap();
+        let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
+        assert_eq!(msg, back);
+        let raw = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(raw.contains("\"type\":\"peer_renamed\""));
     }
 }

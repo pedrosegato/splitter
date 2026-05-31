@@ -9,9 +9,9 @@ mod tray;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
-use tauri_specta::{collect_commands, collect_events, Builder};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 fn build() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
@@ -19,6 +19,7 @@ fn build() -> Builder<tauri::Wry> {
             commands::devices::list_devices,
             commands::settings::settings_get,
             commands::settings::settings_set,
+            commands::settings::settings_reset,
             commands::peers::identity,
             commands::peers::discovered_peers,
             commands::peers::pending_peers,
@@ -26,6 +27,7 @@ fn build() -> Builder<tauri::Wry> {
             commands::peers::accept_pending,
             commands::peers::peer_devices,
             commands::peers::disconnect,
+            commands::peers::set_device_name,
             commands::streams::snapshot,
             commands::streams::open_session,
             commands::streams::open_stream,

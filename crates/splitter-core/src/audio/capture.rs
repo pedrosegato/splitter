@@ -35,7 +35,7 @@ impl CaptureHandle {
     pub fn start_loopback(producer: RingProducer) -> Result<Self, AudioError> {
         #[cfg(target_os = "windows")]
         {
-            return Self::start_loopback_wasapi(producer);
+            Self::start_loopback_wasapi(producer)
         }
         #[cfg(target_os = "linux")]
         {
@@ -47,7 +47,7 @@ impl CaptureHandle {
                 })?
                 .find(|d| d.name().map(|n| n.ends_with(".monitor")).unwrap_or(false))
                 .ok_or_else(|| AudioError::DeviceNotFound("PulseAudio .monitor source".into()))?;
-            return Self::from_device(device, producer, Arc::new(Notify::new()));
+            Self::from_device(device, producer, Arc::new(Notify::new()))
         }
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {

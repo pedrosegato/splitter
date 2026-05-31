@@ -1,30 +1,40 @@
+use crate::core::AppCore;
+use crate::dto::{IdentityDto, PendingPeerDto};
+use splitter_core::net::discovery::DiscoveredPeer;
+use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage, StreamAction};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::State;
-use splitter_core::net::discovery::DiscoveredPeer;
-use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage, StreamAction};
-use crate::core::AppCore;
-use crate::dto::{IdentityDto, PendingPeerDto};
 
 #[tauri::command]
 #[specta::specta]
 pub async fn identity(core: State<'_, Arc<AppCore>>) -> Result<IdentityDto, String> {
+    let id = core.identity.read().unwrap().clone();
     Ok(IdentityDto {
-        peer_id: core.identity.peer_id.to_string(),
-        peer_name: core.identity.peer_name.clone(),
+        peer_id: id.peer_id.to_string(),
+        peer_name: id.peer_name,
     })
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn discovered_peers(core: State<'_, Arc<AppCore>>) -> Result<Vec<DiscoveredPeer>, String> {
+pub async fn discovered_peers(
+    core: State<'_, Arc<AppCore>>,
+) -> Result<Vec<DiscoveredPeer>, String> {
     Ok(core.peers.read().await.values().cloned().collect())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn pending_peers(core: State<'_, Arc<AppCore>>) -> Result<Vec<PendingPeerDto>, String> {
-    Ok(core.server.pending.list().await.iter().map(PendingPeerDto::from).collect())
+    Ok(core
+        .server
+        .pending
+        .list()
+        .await
+        .iter()
+        .map(PendingPeerDto::from)
+        .collect())
 }
 
 #[tauri::command]
@@ -44,15 +54,23 @@ pub async fn accept_pending(core: State<'_, Arc<AppCore>>, index: u32) -> Result
 
 #[tauri::command]
 #[specta::specta]
-pub async fn connect_peer(core: State<'_, Arc<AppCore>>, host: String, port: u16, peer_id: Option<String>) -> Result<bool, String> {
-    let addr = format!("{host}:{port}").parse().map_err(|_| format!("invalid address '{host}:{port}'"))?;
+pub async fn connect_peer(
+    core: State<'_, Arc<AppCore>>,
+    host: String,
+    port: u16,
+    peer_id: Option<String>,
+) -> Result<bool, String> {
+    let addr = format!("{host}:{port}")
+        .parse()
+        .map_err(|_| format!("invalid address '{host}:{port}'"))?;
     let hint = match peer_id {
         Some(s) => Some(uuid::Uuid::parse_str(&s).map_err(|e| e.to_string())?),
         None => None,
     };
+    let identity = core.identity.read().unwrap().clone();
     let outcome = splitter_core::net::signaling::client::connect_to_peer(
         addr,
-        &core.identity,
+        &identity,
         core.trust.clone(),
         hint,
         Duration::from_secs(5),
@@ -94,6 +112,59 @@ pub async fn peer_devices(
     Ok(cached.unwrap_or_default())
 }
 
+pub fn validate_device_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("o nome não pode ser vazio".into());
+    }
+    if trimmed.chars().count() > 40 {
+        return Err("o nome deve ter no máximo 40 caracteres".into());
+    }
+    Ok(trimmed.to_string())
+}
+
+async fn broadcast_rename(core: &AppCore, peer_id: String, peer_name: String) {
+    let msg = SignalingMessage::PeerRenamed { peer_id, peer_name };
+    let conns: Vec<_> = {
+        let g = core.server.connections.read().await;
+        g.values().map(|c| c.tx.clone()).collect()
+    };
+    let outs: Vec<_> = {
+        let g = core.outgoing.read().await;
+        g.values().map(|c| c.tx.clone()).collect()
+    };
+    for tx in conns.into_iter().chain(outs) {
+        let _ = tx.send(msg.clone()).await;
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_device_name(
+    core: State<'_, Arc<AppCore>>,
+    name: String,
+) -> Result<IdentityDto, String> {
+    let validated = validate_device_name(&name)?;
+    let (peer_id, snapshot) = {
+        let mut id = core.identity.write().unwrap();
+        id.peer_name = validated.clone();
+        (id.peer_id.to_string(), id.clone())
+    };
+    let path = splitter_core::net::identity::identity_path().map_err(|e| e.to_string())?;
+    snapshot.save_atomic(&path).map_err(|e| e.to_string())?;
+    if let Some(handle) = core.discovery.get() {
+        let port = core.server.bind_addr.port();
+        if let Err(e) = handle.reannounce(&snapshot, port) {
+            tracing::warn!("mDNS reannounce after rename failed: {e}");
+        }
+    }
+    broadcast_rename(&core, peer_id.clone(), validated.clone()).await;
+    Ok(IdentityDto {
+        peer_id,
+        peer_name: validated,
+    })
+}
+
 pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<(), String> {
     let snap = core.sessions.snapshot().await;
     if let Some(sess) = snap.iter().find(|s| s.id == sid) {
@@ -101,7 +172,14 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
             if let Err(e) = core.stream_registry.close(&sid, stream.id).await {
                 tracing::warn!(%sid, stream_id = stream.id, "teardown_session: stream_registry.close error: {e}");
             }
-            crate::commands::streams::notify_remote(core, sid, stream.id, StreamAction::Close, None).await;
+            crate::commands::streams::notify_remote(
+                core,
+                sid,
+                stream.id,
+                StreamAction::Close,
+                None,
+            )
+            .await;
         }
     }
     core.sessions.close(&sid).await.map_err(|e| e.to_string())
@@ -112,4 +190,17 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
 pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Result<(), String> {
     let sid = uuid::Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
     teardown_session(&core, sid).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_device_name;
+
+    #[test]
+    fn validate_trims_and_rejects_empty_and_too_long() {
+        assert_eq!(validate_device_name("  Studio  ").unwrap(), "Studio");
+        assert!(validate_device_name("   ").is_err());
+        assert!(validate_device_name(&"x".repeat(41)).is_err());
+        assert_eq!(validate_device_name(&"x".repeat(40)).unwrap().len(), 40);
+    }
 }

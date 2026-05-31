@@ -1,13 +1,15 @@
+use crate::core::AppCore;
+use splitter_core::net::signaling::{
+    CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction,
+};
+use splitter_core::net::stream::StreamRoute;
+use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
+use splitter_core::SessionSnapshot;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::State;
 use uuid::Uuid;
-use splitter_core::SessionSnapshot;
-use splitter_core::net::signaling::{CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction};
-use splitter_core::net::stream::StreamRoute;
-use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
-use crate::core::AppCore;
 
 fn signal_from(action: &str, value: Option<f32>) -> Result<StreamControlSignal, String> {
     match action {
@@ -127,20 +129,22 @@ pub async fn open_session(
     remote_peer_id: String,
 ) -> Result<String, String> {
     let remote = Uuid::parse_str(&remote_peer_id).map_err(|e| e.to_string())?;
-    let sid = core.sessions.open_outgoing(core.identity.peer_id, remote).await;
-    core.sessions.accept(&sid).await.map_err(|e| e.to_string())?;
+    let local_peer_id = core.identity.read().unwrap().peer_id;
+    let sid = core.sessions.open_outgoing(local_peer_id, remote).await;
+    core.sessions
+        .accept(&sid)
+        .await
+        .map_err(|e| e.to_string())?;
     let (tx, _, _) = find_peer_conn(&core, remote)
         .await
         .ok_or_else(|| "no live signaling connection to remote peer".to_string())?;
     tx.send(SignalingMessage::SessionRequest {
         session_id: sid.to_string(),
-        requested_by: core.identity.peer_id.to_string(),
+        requested_by: local_peer_id.to_string(),
     })
     .await
     .map_err(|e| e.to_string())?;
-    tx.send(SignalingMessage::DeviceListRequest {})
-        .await
-        .ok();
+    tx.send(SignalingMessage::DeviceListRequest {}).await.ok();
     Ok(sid.to_string())
 }
 
@@ -157,6 +161,7 @@ pub async fn open_stream(
 ) -> Result<u8, String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
     let bitrate = bitrate.unwrap_or(64_000);
+    let local_peer_id = core.identity.read().unwrap().peer_id;
 
     let snap = core.sessions.snapshot().await;
     let session = snap
@@ -182,7 +187,7 @@ pub async fn open_stream(
             session_id: sid.to_string(),
             stream_id,
             source: Endpoint {
-                peer_id: core.identity.peer_id.to_string(),
+                peer_id: local_peer_id.to_string(),
                 device_id: source_device_id.clone(),
             },
             sink: Endpoint {
@@ -205,7 +210,7 @@ pub async fn open_stream(
 
     let route = StreamRoute {
         source: Endpoint {
-            peer_id: core.identity.peer_id.to_string(),
+            peer_id: local_peer_id.to_string(),
             device_id: source_device_id.clone(),
         },
         sink: Endpoint {
@@ -324,7 +329,10 @@ mod tests {
 
     #[test]
     fn signal_from_pause() {
-        assert_eq!(signal_from("pause", None).unwrap(), StreamControlSignal::Pause);
+        assert_eq!(
+            signal_from("pause", None).unwrap(),
+            StreamControlSignal::Pause
+        );
     }
 
     #[test]
@@ -337,7 +345,10 @@ mod tests {
 
     #[test]
     fn signal_from_close() {
-        assert_eq!(signal_from("close", None).unwrap(), StreamControlSignal::Close);
+        assert_eq!(
+            signal_from("close", None).unwrap(),
+            StreamControlSignal::Close
+        );
     }
 
     #[test]
@@ -379,8 +390,14 @@ mod tests {
 
     #[test]
     fn remote_action_from_set_muted_is_none() {
-        assert_eq!(remote_action_from(&StreamControlSignal::SetMuted(true)), None);
-        assert_eq!(remote_action_from(&StreamControlSignal::SetMuted(false)), None);
+        assert_eq!(
+            remote_action_from(&StreamControlSignal::SetMuted(true)),
+            None
+        );
+        assert_eq!(
+            remote_action_from(&StreamControlSignal::SetMuted(false)),
+            None
+        );
     }
 
     #[test]

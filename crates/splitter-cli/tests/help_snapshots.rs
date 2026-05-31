@@ -8,11 +8,8 @@ fn help_output(args: &[&str]) -> String {
         .expect("run cli");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !stdout.is_empty() {
-        stdout
-    } else {
-        stderr
-    }
+    let raw = if !stdout.is_empty() { stdout } else { stderr };
+    raw.replace("splitter-cli.exe", "splitter-cli")
 }
 
 #[test]

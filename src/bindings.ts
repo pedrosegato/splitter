@@ -29,6 +29,14 @@ async settingsSet(key: string, value: string) : Promise<Result<Settings, string>
     else return { status: "error", error: e  as any };
 }
 },
+async settingsReset() : Promise<Result<Settings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("settings_reset") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async identity() : Promise<Result<IdentityDto, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("identity") };
@@ -80,6 +88,14 @@ async peerDevices(peerId: string) : Promise<Result<DeviceDescriptor[], string>> 
 async disconnect(sessionId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("disconnect", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setDeviceName(name: string) : Promise<Result<IdentityDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_device_name", { name }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

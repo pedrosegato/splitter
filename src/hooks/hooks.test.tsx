@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDevices } from "./useDevices";
-import { useSetSetting } from "./useSettings";
+import { useSetSetting, useResetSettings } from "./useSettings";
 import { useConnectPeer, useDisconnect } from "./useConnection";
 import { useIdentity } from "./useIdentity";
+import { useSetDeviceName } from "./useDeviceName";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -18,6 +19,8 @@ vi.mock("@/lib/api", () => ({
     listDevices: vi.fn(),
     settingsGet: vi.fn(),
     settingsSet: vi.fn(),
+    settingsReset: vi.fn(),
+    setDeviceName: vi.fn(),
     discoveredPeers: vi.fn(),
     pendingPeers: vi.fn(),
     connectPeer: vi.fn(),
@@ -115,6 +118,74 @@ describe("useSetSetting mutation", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(mockedCommands.settingsSet).toHaveBeenCalledWith("auto_accept_trusted", "true");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["settings"] });
+  });
+});
+
+describe("useSetDeviceName mutation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls setDeviceName and invalidates identity and peers on success", async () => {
+    mockedCommands.setDeviceName.mockResolvedValue({
+      status: "ok",
+      data: { peer_id: "p", peer_name: "New Name" },
+    });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper, queryClient } = makeWrapper();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useSetDeviceName(), { wrapper });
+
+    result.current.mutate("New Name");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockedCommands.setDeviceName).toHaveBeenCalledWith("New Name");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["identity"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["peers"] });
+  });
+
+  it("calls toast.error when setDeviceName fails", async () => {
+    mockedUnwrap.mockRejectedValue(new Error("nome inválido"));
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useSetDeviceName(), { wrapper });
+
+    act(() => {
+      result.current.mutate("");
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith("nome inválido");
+  });
+});
+
+describe("useResetSettings mutation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls settingsReset and invalidates settings on success", async () => {
+    mockedCommands.settingsReset.mockResolvedValue({ status: "ok", data: {} });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper, queryClient } = makeWrapper();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useResetSettings(), { wrapper });
+
+    result.current.mutate();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockedCommands.settingsReset).toHaveBeenCalledOnce();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["settings"] });
   });
 });

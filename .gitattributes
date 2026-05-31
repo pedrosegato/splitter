@@ -1,0 +1,3 @@
+# Keep insta snapshot fixtures LF so comparisons match on Windows CI
+# (Windows checkout would otherwise convert them to CRLF via autocrlf).
+*.snap text eol=lf

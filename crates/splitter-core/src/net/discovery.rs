@@ -30,32 +30,39 @@ pub struct Discovery {
     fullname: String,
 }
 
+fn build_service_info(
+    identity: &PeerIdentity,
+    signaling_port: u16,
+) -> Result<ServiceInfo, NetError> {
+    let instance = identity.peer_id.to_string();
+    let host_name = format!("{}.local.", instance);
+    let mut properties: HashMap<String, String> = HashMap::new();
+    properties.insert("peer_id".into(), identity.peer_id.to_string());
+    properties.insert("peer_name".into(), identity.peer_name.clone());
+    properties.insert("version".into(), env!("CARGO_PKG_VERSION").into());
+    properties.insert("signaling_port".into(), signaling_port.to_string());
+    let info = ServiceInfo::new(
+        SERVICE_TYPE,
+        &instance,
+        &host_name,
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        signaling_port,
+        Some(properties),
+    )
+    .map_err(|e| NetError::Mdns {
+        reason: format!("info: {e}"),
+    })?
+    .enable_addr_auto();
+    Ok(info)
+}
+
 impl Discovery {
     pub fn start(identity: &PeerIdentity, signaling_port: u16) -> Result<Self, NetError> {
         let daemon = ServiceDaemon::new().map_err(|e| NetError::Mdns {
             reason: format!("daemon: {e}"),
         })?;
 
-        let instance = identity.peer_id.to_string();
-        let host_name = format!("{}.local.", instance);
-        let mut properties: HashMap<String, String> = HashMap::new();
-        properties.insert("peer_id".into(), identity.peer_id.to_string());
-        properties.insert("peer_name".into(), identity.peer_name.clone());
-        properties.insert("version".into(), env!("CARGO_PKG_VERSION").into());
-        properties.insert("signaling_port".into(), signaling_port.to_string());
-
-        let info = ServiceInfo::new(
-            SERVICE_TYPE,
-            &instance,
-            &host_name,
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            signaling_port,
-            Some(properties),
-        )
-        .map_err(|e| NetError::Mdns {
-            reason: format!("info: {e}"),
-        })?
-        .enable_addr_auto();
+        let info = build_service_info(identity, signaling_port)?;
 
         let fullname = info.get_fullname().to_string();
         daemon.register(info).map_err(|e| NetError::Mdns {
@@ -130,6 +137,13 @@ impl Discovery {
         &self.fullname
     }
 
+    pub fn handle(&self) -> DiscoveryHandle {
+        DiscoveryHandle {
+            daemon: self.daemon.clone(),
+            fullname: self.fullname.clone(),
+        }
+    }
+
     pub fn shutdown(&mut self) {
         let _ = self.daemon.unregister(&self.fullname);
         let _ = self.daemon.shutdown();
@@ -140,6 +154,23 @@ impl Drop for Discovery {
     fn drop(&mut self) {
         let _ = self.daemon.unregister(&self.fullname);
         let _ = self.daemon.shutdown();
+    }
+}
+
+#[derive(Clone)]
+pub struct DiscoveryHandle {
+    daemon: ServiceDaemon,
+    fullname: String,
+}
+
+impl DiscoveryHandle {
+    pub fn reannounce(&self, identity: &PeerIdentity, signaling_port: u16) -> Result<(), NetError> {
+        let _ = self.daemon.unregister(&self.fullname);
+        let info = build_service_info(identity, signaling_port)?;
+        self.daemon.register(info).map_err(|e| NetError::Mdns {
+            reason: format!("reannounce register: {e}"),
+        })?;
+        Ok(())
     }
 }
 
@@ -166,6 +197,15 @@ mod tests {
         let id = id("shutdown-test");
         let mut disc = Discovery::start(&id, 0).expect("start");
         disc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn reannounce_does_not_panic_and_updates_name() {
+        let mut identity = id("orig-name");
+        let disc = Discovery::start(&identity, 0).expect("start");
+        let handle = disc.handle();
+        identity.peer_name = "renamed".into();
+        handle.reannounce(&identity, 0).expect("reannounce");
     }
 
     #[allow(clippy::print_stderr)]

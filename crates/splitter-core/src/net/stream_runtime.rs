@@ -864,42 +864,44 @@ pub async fn open_stream_as_source(
 ) -> Result<(), NetError> {
     let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);
 
-    let (device_guard, frame_ready) =
-        match source_kind {
-            SourceKind::Mic(device_id) => {
-                let cap = crate::audio::capture::CaptureHandle::start_by_id(&device_id, producer)
-                    .map_err(|e| NetError::SignalingProtocol {
+    let (device_guard, frame_ready) = match source_kind {
+        SourceKind::Mic(device_id) => {
+            let cap = crate::audio::capture::CaptureHandle::start_by_id(&device_id, producer)
+                .map_err(|e| NetError::SignalingProtocol {
                     reason: format!("capture start_by_id failed: {e}"),
                 })?;
+            let notify = cap.frame_ready();
+            (DeviceGuard::Capture(cap), notify)
+        }
+        SourceKind::System => {
+            #[cfg(all(target_os = "macos", feature = "sck"))]
+            {
+                let cap =
+                    crate::audio::loopback::MacosLoopbackHandle::start(producer).map_err(|e| {
+                        NetError::SignalingProtocol {
+                            reason: format!("macos loopback start failed: {e}"),
+                        }
+                    })?;
+                (DeviceGuard::MacosLoopback(cap), Arc::new(Notify::new()))
+            }
+            #[cfg(all(target_os = "macos", not(feature = "sck")))]
+            {
+                return Err(NetError::SignalingProtocol {
+                        reason: "system audio capture requires the sck feature (use BlackHole 2ch as an input device instead)".into(),
+                    });
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let cap = crate::audio::capture::CaptureHandle::start_loopback(producer).map_err(
+                    |e| NetError::SignalingProtocol {
+                        reason: format!("loopback start failed: {e}"),
+                    },
+                )?;
                 let notify = cap.frame_ready();
                 (DeviceGuard::Capture(cap), notify)
             }
-            SourceKind::System => {
-                #[cfg(all(target_os = "macos", feature = "sck"))]
-                {
-                    let cap = crate::audio::loopback::MacosLoopbackHandle::start(producer)
-                        .map_err(|e| NetError::SignalingProtocol {
-                            reason: format!("macos loopback start failed: {e}"),
-                        })?;
-                    (DeviceGuard::MacosLoopback(cap), Arc::new(Notify::new()))
-                }
-                #[cfg(all(target_os = "macos", not(feature = "sck")))]
-                {
-                    return Err(NetError::SignalingProtocol {
-                        reason: "system audio capture requires the sck feature (use BlackHole 2ch as an input device instead)".into(),
-                    });
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let cap = crate::audio::capture::CaptureHandle::start_loopback(producer)
-                        .map_err(|e| NetError::SignalingProtocol {
-                            reason: format!("loopback start failed: {e}"),
-                        })?;
-                    let notify = cap.frame_ready();
-                    (DeviceGuard::Capture(cap), notify)
-                }
-            }
-        };
+        }
+    };
 
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await

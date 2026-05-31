@@ -22,6 +22,19 @@ export const useSetSetting = () => {
   });
 };
 
+export const useResetSettings = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(commands.settingsReset()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+};
+
 export const useSetAutostart = () => {
   const queryClient = useQueryClient();
   return useMutation({

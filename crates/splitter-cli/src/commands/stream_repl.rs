@@ -2,9 +2,7 @@ use splitter_core::net::signaling::{
     CodecParams, Endpoint, PeerConnectionHandle, SignalingMessage, StreamAction,
 };
 use splitter_core::net::stream::StreamRoute;
-use splitter_core::net::stream_runtime::{
-    open_stream_as_source, SourceKind, StreamControlSignal,
-};
+use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
 use splitter_core::{PeerIdentity, SessionManager, StreamRegistry};
 use std::collections::HashMap;
 use std::net::SocketAddr;

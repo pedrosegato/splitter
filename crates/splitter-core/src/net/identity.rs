@@ -10,6 +10,26 @@ pub struct PeerIdentity {
 }
 
 impl PeerIdentity {
+    pub fn save_atomic(&self, path: &Path) -> Result<(), NetError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| NetError::ConfigIo(format!("mkdir {}: {e}", parent.display())))?;
+        }
+        let raw = toml::to_string_pretty(self)
+            .map_err(|e| NetError::ConfigIo(format!("serialize identity: {e}")))?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, raw)
+            .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", tmp.display())))?;
+        std::fs::rename(&tmp, path).map_err(|e| {
+            NetError::ConfigIo(format!(
+                "rename {} -> {}: {e}",
+                tmp.display(),
+                path.display()
+            ))
+        })?;
+        Ok(())
+    }
+
     pub fn load_or_create(path: &Path) -> Result<Self, NetError> {
         if path.exists() {
             let raw = std::fs::read_to_string(path)
@@ -88,5 +108,17 @@ mod tests {
         let id_a = PeerIdentity::load_or_create(&path_a).expect("create a");
         let id_b = PeerIdentity::load_or_create(&path_b).expect("create b");
         assert_ne!(id_a.peer_id, id_b.peer_id);
+    }
+
+    #[test]
+    fn save_atomic_persists_updated_name() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identity.toml");
+        let mut id = PeerIdentity::load_or_create(&path).expect("create");
+        id.peer_name = "Estúdio do Pedro".into();
+        id.save_atomic(&path).expect("save");
+        let reloaded = PeerIdentity::load_or_create(&path).expect("reload");
+        assert_eq!(reloaded.peer_name, "Estúdio do Pedro");
+        assert_eq!(reloaded.peer_id, id.peer_id);
     }
 }

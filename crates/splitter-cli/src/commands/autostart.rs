@@ -83,6 +83,7 @@ fn activate(artifact: &AutostartArtifact) -> anyhow::Result<()> {
     }
     #[cfg(target_os = "linux")]
     {
+        let _ = artifact;
         let _ = std::process::Command::new("systemctl")
             .args(["--user", "daemon-reload"])
             .status();

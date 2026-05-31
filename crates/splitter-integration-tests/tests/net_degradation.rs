@@ -1,6 +1,6 @@
+use bytes::{Bytes, BytesMut};
 use splitter_core::net::packet::Packet;
 use splitter_integration_tests::{decode_frames, encode_frames, rms, EncodedFrame, SineSource};
-use bytes::{Bytes, BytesMut};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::UdpSocket;
@@ -58,6 +58,7 @@ async fn udp_rms_under_loss(loss_percent: u8, jitter_ms: u32) -> f32 {
 fn apply_netem_or_dummynet(port: u16, loss_percent: u8, jitter_ms: u32) {
     #[cfg(target_os = "linux")]
     {
+        let _ = port;
         std::process::Command::new("tc")
             .args([
                 "qdisc",
@@ -88,6 +89,7 @@ fn apply_netem_or_dummynet(port: u16, loss_percent: u8, jitter_ms: u32) {
 fn remove_netem_or_dummynet(port: u16) {
     #[cfg(target_os = "linux")]
     {
+        let _ = port;
         std::process::Command::new("tc")
             .args(["qdisc", "del", "dev", "lo", "root"])
             .status()

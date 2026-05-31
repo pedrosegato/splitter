@@ -184,7 +184,10 @@ mod tests {
         assert_eq!(s.signaling_port, 7000);
         let dir = tempdir().unwrap();
         let path = dir.path().join("settings.toml");
-        let custom = Settings { signaling_port: 8765, ..Default::default() };
+        let custom = Settings {
+            signaling_port: 8765,
+            ..Default::default()
+        };
         custom.save_atomic(&path).unwrap();
         let loaded = Settings::load_or_default(&path).unwrap();
         assert_eq!(loaded.signaling_port, 8765);

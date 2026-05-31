@@ -7,6 +7,8 @@ import type { Settings } from "@/bindings";
 
 const mockSet = vi.fn();
 const mockSetAutostart = vi.fn();
+const mockSetDeviceNameMutate = vi.fn();
+const mockResetSettingsMutate = vi.fn();
 
 const defaultSettings: Settings = {
   auto_accept_trusted: false,
@@ -32,6 +34,20 @@ vi.mock("./useSettingsForm", () => ({
     set: mockSet,
     setAutostart: mockSetAutostart,
   }),
+}));
+
+const mockIdentity = { data: { peer_id: "p", peer_name: "Este Mac" } };
+
+vi.mock("@/hooks/useIdentity", () => ({
+  useIdentity: () => mockIdentity,
+}));
+
+vi.mock("@/hooks/useDeviceName", () => ({
+  useSetDeviceName: () => ({ mutate: mockSetDeviceNameMutate, isPending: false }),
+}));
+
+vi.mock("@/hooks/useSettings", () => ({
+  useResetSettings: () => ({ mutate: mockResetSettingsMutate, isPending: false }),
 }));
 
 vi.mock("@/stores/theme", async (importOriginal) => {
@@ -153,5 +169,31 @@ describe("SettingsDialog", () => {
     fireEvent.click(switchEl);
 
     expect(mockSet).toHaveBeenCalledWith("metrics_enabled", true);
+  });
+
+  it("renders the device name field and saves the typed name on blur", () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />, {
+      wrapper: makeWrapper(),
+    });
+
+    const input = within(document.body).getByLabelText(
+      "Nome do dispositivo",
+    ) as HTMLInputElement;
+    expect(input).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: "Estúdio do Pedro" } });
+    fireEvent.blur(input);
+
+    expect(mockSetDeviceNameMutate).toHaveBeenCalledWith("Estúdio do Pedro");
+  });
+
+  it("renders a restore-defaults button", () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />, {
+      wrapper: makeWrapper(),
+    });
+
+    expect(
+      within(document.body).getByText("Restaurar padrões"),
+    ).toBeTruthy();
   });
 });

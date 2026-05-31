@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { StreamAction } from "@/bindings";
+import type { SourceKind, StreamAction } from "@/bindings";
 import { commands, unwrap } from "@/lib/api";
 
 export const useOpenStream = () => {
@@ -45,23 +45,13 @@ export const useRequestStream = () => {
   return useMutation({
     mutationFn: ({
       sessionId,
-      sourceDeviceId,
-      sourceIsSystem,
+      source,
       sinkDeviceId,
     }: {
       sessionId: string;
-      sourceDeviceId: string;
-      sourceIsSystem: boolean;
+      source: SourceKind;
       sinkDeviceId: string;
-    }) =>
-      unwrap(
-        commands.requestStream(
-          sessionId,
-          sourceDeviceId,
-          sourceIsSystem,
-          sinkDeviceId,
-        ),
-      ),
+    }) => unwrap(commands.requestStream(sessionId, source, sinkDeviceId)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
     },

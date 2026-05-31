@@ -1,7 +1,7 @@
 use crate::core::AppCore;
 use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
 use splitter_core::net::signaling::{
-    CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, StreamAction,
+    CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, SourceKind, StreamAction,
 };
 use splitter_core::net::stream::StreamRoute;
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
@@ -308,7 +308,7 @@ pub fn spawn_acceptor(
                             .map(|d| DeviceDescriptor {
                                 id: d.id,
                                 name: d.name,
-                                kind: format!("{:?}", d.kind),
+                                kind: d.kind,
                             })
                             .collect();
                         send_to_peer(
@@ -339,12 +339,15 @@ pub fn spawn_acceptor(
                     }
                     SignalingMessage::StreamRequest {
                         session_id,
-                        source_device,
-                        source_is_system,
+                        source,
                         sink_device,
                     } => {
                         let Ok(req_sid) = Uuid::parse_str(&session_id) else {
                             continue;
+                        };
+                        let (source_device, source_is_system) = match source {
+                            SourceKind::Mic { device_id } => (device_id, false),
+                            SourceKind::System => (String::new(), true),
                         };
                         let core2 = core.clone();
                         let sink_peer = peer_id;

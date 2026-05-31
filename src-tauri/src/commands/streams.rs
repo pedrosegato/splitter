@@ -3,6 +3,7 @@ use splitter_core::net::signaling::client_ops::{
     build_stream_route, find_conn, notify_remote_control, stream_open_message,
     wait_for_stream_open_ack, ConnEndpoints,
 };
+use splitter_core::net::signaling::SourceKind as WireSourceKind;
 use splitter_core::net::signaling::{SignalingMessage, StreamAction};
 use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
 use splitter_core::SessionSnapshot;
@@ -212,8 +213,7 @@ pub async fn open_stream(
 pub async fn request_stream(
     core: State<'_, Arc<AppCore>>,
     session_id: String,
-    source_device_id: String,
-    source_is_system: bool,
+    source: WireSourceKind,
     sink_device_id: String,
 ) -> Result<(), String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
@@ -231,8 +231,7 @@ pub async fn request_stream(
     conn.tx
         .send(SignalingMessage::StreamRequest {
             session_id: sid.to_string(),
-            source_device: source_device_id,
-            source_is_system,
+            source,
             sink_device: sink_device_id,
         })
         .await

@@ -133,9 +133,9 @@ async openStream(sessionId: string, sourceDeviceId: string, sourceIsSystem: bool
     else return { status: "error", error: e  as any };
 }
 },
-async requestStream(sessionId: string, sourceDeviceId: string, sourceIsSystem: boolean, sinkDeviceId: string) : Promise<Result<null, string>> {
+async requestStream(sessionId: string, source: SourceKind, sinkDeviceId: string) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("request_stream", { sessionId, sourceDeviceId, sourceIsSystem, sinkDeviceId }) };
+    return { status: "ok", data: await TAURI_INVOKE("request_stream", { sessionId, source, sinkDeviceId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -220,7 +220,7 @@ statsTick: "stats-tick"
 
 /** user-defined types **/
 
-export type DeviceDescriptor = { id: string; name: string; kind: string }
+export type DeviceDescriptor = { id: string; name: string; kind: DeviceKind }
 export type DeviceInfo = { id: string; name: string; kind: DeviceKind; default_sample_rate: number; channels: number }
 export type DeviceKind = "Input" | "Output" | "SystemAudio"
 export type DiscoveredPeer = { peer_id: string; peer_name: string; host: string; port: number; version: string }
@@ -238,6 +238,7 @@ export type SessionSnapshot = { id: string; remote_peer_id: string; state: Sessi
 export type SessionState = "pending_outgoing" | "pending_incoming" | "active" | "closed"
 export type Settings = { auto_accept_trusted: boolean; auto_start_with_system: boolean; default_bitrate: number; fec_mode: FecMode; fec_on_threshold_pct: number; fec_off_threshold_pct: number; fec_hysteresis_secs: number; jitter_mode: JitterMode; jitter_max_depth_ms: number; log_level: LogLevel; metrics_enabled: boolean; metrics_port: number; signaling_port: number }
 export type SnapshotChanged = null
+export type SourceKind = { type: "mic"; device_id: string } | { type: "system" }
 export type StatsTick = StreamStat[]
 export type StreamAction = { type: "pause" } | { type: "resume" } | { type: "close" } | { type: "set_volume"; volume: number } | { type: "set_muted"; muted: boolean }
 export type StreamSnapshot = { id: number; state: StreamState; source_peer: string; sink_peer: string; udp_port: number; source_device: string; sink_device: string; volume: number; muted: boolean }

@@ -69,8 +69,10 @@ export function useWiring() {
         const remoteDevice = peerDevices?.find((d) => d.id === src.dev);
         requestStream.mutate({
           sessionId: session.id,
-          sourceDeviceId: src.dev,
-          sourceIsSystem: remoteDevice?.kind === "SystemAudio",
+          source:
+            remoteDevice?.kind === "SystemAudio"
+              ? { type: "system" }
+              : { type: "mic", device_id: src.dev },
           sinkDeviceId: sink.dev,
         });
       }

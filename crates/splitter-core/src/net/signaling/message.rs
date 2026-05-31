@@ -1,3 +1,4 @@
+use crate::audio::devices::DeviceKind;
 use crate::error::NetError;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,15 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub struct DeviceDescriptor {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: DeviceKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SourceKind {
+    Mic { device_id: String },
+    System,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -110,8 +119,7 @@ pub enum SignalingMessage {
     },
     StreamRequest {
         session_id: String,
-        source_device: String,
-        source_is_system: bool,
+        source: SourceKind,
         sink_device: String,
     },
 }
@@ -296,6 +304,78 @@ mod tests {
         assert!(raw.contains("\"muted\":true"));
         let back = SignalingMessage::decode_from_slice(raw.as_bytes()).unwrap();
         assert_eq!(msg, back);
+    }
+
+    #[test]
+    fn stream_request_round_trips_with_system_source() {
+        let msg = SignalingMessage::StreamRequest {
+            session_id: "sess-1".into(),
+            source: SourceKind::System,
+            sink_device: "dev-b".into(),
+        };
+        let bytes = msg.encode_to_bytes().unwrap();
+        let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
+        assert_eq!(msg, back);
+        let raw = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(raw.contains("\"type\":\"system\""));
+    }
+
+    #[test]
+    fn stream_request_round_trips_with_mic_source() {
+        let msg = SignalingMessage::StreamRequest {
+            session_id: "sess-1".into(),
+            source: SourceKind::Mic {
+                device_id: "Input:0:Built-in".into(),
+            },
+            sink_device: "dev-b".into(),
+        };
+        let bytes = msg.encode_to_bytes().unwrap();
+        let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
+        assert_eq!(msg, back);
+        let raw = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(raw.contains("\"type\":\"mic\""));
+        assert!(raw.contains("\"device_id\":\"Input:0:Built-in\""));
+    }
+
+    #[test]
+    fn device_descriptor_round_trips_each_kind() {
+        for kind in [
+            DeviceKind::Input,
+            DeviceKind::Output,
+            DeviceKind::SystemAudio,
+        ] {
+            let msg = SignalingMessage::DeviceListResponse {
+                devices: vec![DeviceDescriptor {
+                    id: "id".into(),
+                    name: "name".into(),
+                    kind,
+                }],
+            };
+            let bytes = msg.encode_to_bytes().unwrap();
+            let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
+            assert_eq!(msg, back);
+        }
+    }
+
+    #[test]
+    fn device_kind_serializes_to_pascal_case_strings() {
+        let msg = SignalingMessage::DeviceListResponse {
+            devices: vec![
+                DeviceDescriptor {
+                    id: "a".into(),
+                    name: "a".into(),
+                    kind: DeviceKind::Input,
+                },
+                DeviceDescriptor {
+                    id: "b".into(),
+                    name: "b".into(),
+                    kind: DeviceKind::SystemAudio,
+                },
+            ],
+        };
+        let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
+        assert!(raw.contains("\"kind\":\"Input\""));
+        assert!(raw.contains("\"kind\":\"SystemAudio\""));
     }
 
     #[test]

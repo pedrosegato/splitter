@@ -120,6 +120,52 @@ describe("useWiring", () => {
     );
   });
 
+  it("remote system src then local sink calls requestStream with system SourceKind", async () => {
+    const requestMutate = vi.fn();
+    mockedUseRequestStream.mockReturnValue({ mutate: requestMutate });
+    mockedUsePeerDevices.mockReturnValue({
+      data: [{ id: "rsys-1", name: "Remote System", kind: "SystemAudio" }],
+    });
+    const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
+
+    act(() => {
+      result.current.onPortActivate("peer-b:src:rsys-1", "src", "peer-b", "rsys-1");
+    });
+    act(() => {
+      result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
+    });
+
+    await waitFor(() => expect(requestMutate).toHaveBeenCalledOnce());
+    expect(requestMutate).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      source: { type: "system" },
+      sinkDeviceId: "spk-1",
+    });
+  });
+
+  it("remote mic src then local sink calls requestStream with mic SourceKind", async () => {
+    const requestMutate = vi.fn();
+    mockedUseRequestStream.mockReturnValue({ mutate: requestMutate });
+    mockedUsePeerDevices.mockReturnValue({
+      data: [{ id: "rmic-1", name: "Remote Mic", kind: "Input" }],
+    });
+    const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
+
+    act(() => {
+      result.current.onPortActivate("peer-b:src:rmic-1", "src", "peer-b", "rmic-1");
+    });
+    act(() => {
+      result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
+    });
+
+    await waitFor(() => expect(requestMutate).toHaveBeenCalledOnce());
+    expect(requestMutate).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      source: { type: "mic", device_id: "rmic-1" },
+      sinkDeviceId: "spk-1",
+    });
+  });
+
   it("src then sink on the SAME peer does not connect", () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 

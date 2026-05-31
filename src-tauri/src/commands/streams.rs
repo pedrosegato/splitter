@@ -229,6 +229,7 @@ pub async fn open_stream(
     } else {
         SourceKind::Mic(source_device_id)
     };
+    let session_route = route.clone();
     open_stream_as_source(
         core.stream_registry.clone(),
         sid,
@@ -239,6 +240,13 @@ pub async fn open_stream(
     )
     .await
     .map_err(|e| e.to_string())?;
+    let stream =
+        splitter_core::net::stream::Stream::new_negotiating(stream_id, session_route, ack_port);
+    core.sessions
+        .add_stream(&sid, stream)
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = core.sessions.activate_stream(&sid, stream_id).await;
     tracing::info!(%sid, stream_id, "stream now active");
     Ok(stream_id)
 }
@@ -255,6 +263,7 @@ pub async fn close_stream(
         .close(&sid, stream_id)
         .await
         .map_err(|e| e.to_string())?;
+    let _ = core.sessions.remove_stream(&sid, stream_id).await;
     notify_remote(&core, sid, stream_id, StreamAction::Close, None).await;
     Ok(())
 }

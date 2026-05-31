@@ -136,6 +136,14 @@ impl SessionManager {
         Ok(())
     }
 
+    pub async fn remove_stream(&self, id: &SessionId, stream_id: StreamId) -> Result<(), NetError> {
+        let mut guard = self.sessions.write().await;
+        if let Some(s) = guard.get_mut(id) {
+            s.streams.remove(&stream_id);
+        }
+        Ok(())
+    }
+
     pub async fn snapshot(&self) -> Vec<SessionSnapshot> {
         let guard = self.sessions.read().await;
         guard

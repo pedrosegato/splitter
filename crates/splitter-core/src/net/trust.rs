@@ -1,4 +1,5 @@
 use crate::error::NetError;
+use constant_time_eq::constant_time_eq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -56,7 +57,7 @@ impl TrustStore {
     pub fn verify(&self, peer_id: &Uuid, token: &str) -> bool {
         self.trusted
             .get(peer_id)
-            .map(|p| p.auth_token == token)
+            .map(|p| constant_time_eq(p.auth_token.as_bytes(), token.as_bytes()))
             .unwrap_or(false)
     }
 

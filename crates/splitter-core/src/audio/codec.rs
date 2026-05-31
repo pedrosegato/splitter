@@ -13,7 +13,6 @@ pub struct OpusEncoder {
 
 impl OpusEncoder {
     pub fn new(bitrate: i32) -> Result<Self, CodecError> {
-        // stereo end-to-end; see audio docs for rationale
         let mut enc =
             coder::Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)
                 .map_err(|e| CodecError::OpusInit {

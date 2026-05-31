@@ -38,8 +38,6 @@ export function useWiring() {
         return;
       }
 
-      // Second click must be the opposite kind on the other machine.
-      // Invalid targets are visually disabled, so just ignore stray clicks.
       if (kind === arm.kind) {
         if (peerId === arm.peerId && deviceId === arm.deviceId) {
           clearArm();

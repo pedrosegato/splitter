@@ -128,8 +128,6 @@ impl CaptureHandle {
         Self::from_device_with_config(device, config, producer, Arc::new(Notify::new()))
     }
 
-    // Variant of from_device that accepts a pre-selected SupportedStreamConfig instead
-    // of calling default_input_config().  Used by start_loopback_wasapi.
     #[cfg(target_os = "windows")]
     fn from_device_with_config(
         device: cpal::Device,
@@ -377,10 +375,6 @@ impl SampleRouter {
             return;
         }
 
-        // Resampling path: accumulate stereo-interleaved samples in scratch,
-        // flush resampler in RESAMPLE_CHUNK slices.
-        // Note: RESAMPLE_CHUNK is per-channel; scratch holds stereo pairs so
-        // we flush when we have RESAMPLE_CHUNK frames = RESAMPLE_CHUNK*2 samples.
         for i in 0..frame_count {
             let (l, r) = deinterleave_stereo_frame(interleaved, i * ch, ch, &to_f32);
             self.scratch.push(l);

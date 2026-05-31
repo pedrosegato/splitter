@@ -72,8 +72,6 @@ async fn handle_session_request(
         return;
     };
 
-    // A — dedupe incoming session requests: if there is already an Active session for
-    // this (local, remote) pair, keep it and skip creating a duplicate.
     let existing = ctx.sessions.snapshot().await.into_iter().find(|s| {
         s.remote_peer_id == requester_uuid
             && s.state == splitter_core::net::session::SessionState::Active
@@ -295,7 +293,6 @@ async fn handle_peer_disconnected(ctx: &DaemonContext, peer_id: Uuid, reason: &s
         }
         let _ = ctx.sessions.close(sid).await;
     }
-    // B — auto-reconnect if peer was in an active session and is still announced via mDNS.
     if had_active_session {
         let still_present = ctx
             .discovered

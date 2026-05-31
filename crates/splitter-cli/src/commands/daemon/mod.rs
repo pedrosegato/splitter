@@ -108,7 +108,6 @@ pub(crate) async fn run(
         }
     }
 
-    // C — settings hot-reload: every 5 s check mtime; reload on change.
     {
         let sh = settings_handle.clone();
         let sp = settings_path_buf.clone();

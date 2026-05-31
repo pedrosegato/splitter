@@ -148,7 +148,6 @@ fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
         .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))
 }
 
-// Same chunk granularity as capture: 441 input frames at 44100 -> 480 at 48000.
 const RESAMPLE_CHUNK: usize = 441;
 
 /// Reads 48k stereo-interleaved (L,R,L,R,...) samples from the ring, resamples to device rate,

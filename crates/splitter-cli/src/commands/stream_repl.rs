@@ -255,7 +255,6 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
         None => snaps,
     };
 
-    // F — sample process-wide CPU% via sysinfo at print time.
     let cpu_pct = {
         let mut sys = System::new();
         sys.refresh_cpu_usage();

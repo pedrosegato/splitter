@@ -244,7 +244,6 @@ async fn cmd_connect<'a>(
         .next()
         .ok_or_else(|| anyhow::anyhow!("usage: connect <peer_id|name|host:port>"))?;
 
-    // D — if the argument looks like host:port, dial directly without mDNS lookup.
     let (host_port, remote_uuid) = if key.contains(':') && !is_uuid(key) {
         let addr: SocketAddr = key.parse().map_err(|_| {
             anyhow::anyhow!("invalid address: {key}; expected host:port or a known peer name/id")
@@ -312,7 +311,6 @@ async fn cmd_open<'a>(
     };
     let remote_uuid = Uuid::parse_str(&target.peer_id)?;
 
-    // A — dedupe: reuse an existing Active session with this remote peer.
     let existing = ctx.sessions.snapshot().await.into_iter().find(|s| {
         s.remote_peer_id == remote_uuid
             && s.state == splitter_core::net::session::SessionState::Active
@@ -375,7 +373,6 @@ async fn cmd_disconnect<'a>(
         }
     }
     ctx.sessions.close(&id).await?;
-    // H — clean ack message
     #[allow(clippy::print_stdout)]
     {
         println!(">> session {} closed", short(&id));

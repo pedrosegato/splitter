@@ -4,9 +4,6 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
 
-// B — auto-reconnect: called when a peer whose session was active disconnects and is
-// still advertised via mDNS. Tries connect_to_peer with exponential backoff, up to 10
-// attempts, cap 30 s. On success the TOFU token still matches so the handshake is instant.
 pub(crate) fn spawn_reconnect_loop(ctx: DaemonContext, peer_id: Uuid) {
     tokio::spawn(async move {
         let delays_secs: [u64; 10] = [1, 2, 4, 8, 16, 30, 30, 30, 30, 30];

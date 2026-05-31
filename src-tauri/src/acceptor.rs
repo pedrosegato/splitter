@@ -1,6 +1,5 @@
 use crate::core::AppCore;
 use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
-use splitter_core::net::session::SessionState;
 use splitter_core::net::signaling::{
     CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, StreamAction,
 };
@@ -44,12 +43,15 @@ pub fn spawn_acceptor(
                             continue;
                         };
 
-                        let existing = core.sessions.snapshot().await.into_iter().find(|s| {
-                            s.remote_peer_id == requester_uuid && s.state == SessionState::Active
-                        });
-                        if let Some(ex) = existing {
-                            tracing::info!(peer = %peer_id, session = %ex.id, "re-opened existing session");
-                            continue;
+                        let stale = core.sessions.snapshot().await;
+                        for old in stale
+                            .iter()
+                            .filter(|s| s.remote_peer_id == requester_uuid && s.id != sid_uuid)
+                        {
+                            for st in &old.streams {
+                                let _ = core.stream_registry.close(&old.id, st.id).await;
+                            }
+                            let _ = core.sessions.close(&old.id).await;
                         }
 
                         let _ = core
@@ -81,6 +83,7 @@ pub fn spawn_acceptor(
                             peer_id: requester_uuid.to_string(),
                             peer_name,
                         });
+                        core.emit(SnapshotChanged);
                         tracing::info!(peer = %peer_id, session = %sid_uuid, "opened session");
                     }
                     SignalingMessage::StreamOpen {

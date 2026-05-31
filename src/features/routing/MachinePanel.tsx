@@ -1,6 +1,16 @@
 import { cn } from "@/lib/utils";
 import { Port } from "./Port";
 
+export const panelCardClass = "relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]";
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[8.5px] tracking-[1.4px] text-ink-3 font-semibold px-[11px] pt-[3px] pb-[7px]">
+      {children}
+    </div>
+  );
+}
+
 type Dev = { id: string; name: string };
 
 type MachinePanelProps = {
@@ -95,7 +105,7 @@ export function MachinePanel({
 
   if (side === "right" && !connected) {
     return (
-      <div className="relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]">
+      <div className={panelCardClass}>
         <div className="py-[44px] px-5 text-center flex flex-col items-center gap-[5px]">
           <div className="w-[38px] h-[38px] rounded-[2px] border border-dashed border-line-2 text-ink-3 flex items-center justify-center text-[18px] mb-2">
             +
@@ -144,9 +154,7 @@ export function MachinePanel({
       </div>
 
       <div className="py-[7px] pb-[9px]">
-        <div className="text-[8.5px] tracking-[1.4px] text-ink-3 font-semibold px-[11px] pt-[3px] pb-[7px]">
-          DESTINOS
-        </div>
+        <SectionHeading>DESTINOS</SectionHeading>
         {sinks.map((dev) => (
           <DevRow
             key={dev.id}
@@ -164,9 +172,7 @@ export function MachinePanel({
       <div className="h-px bg-line mx-[11px]" />
 
       <div className="py-[7px] pb-[9px]">
-        <div className="text-[8.5px] tracking-[1.4px] text-ink-3 font-semibold px-[11px] pt-[3px] pb-[7px]">
-          FONTES
-        </div>
+        <SectionHeading>FONTES</SectionHeading>
         {sources.map((dev) => (
           <DevRow
             key={dev.id}

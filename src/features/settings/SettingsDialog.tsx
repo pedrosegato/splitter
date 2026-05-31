@@ -70,6 +70,67 @@ function useDebouncedSetter(set: (key: string, value: string | number | boolean)
   );
 }
 
+const inputClass = "h-[28px] text-[12px] bg-board border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold";
+
+function SettingSelect({
+  id,
+  value,
+  onValueChange,
+  options,
+}: {
+  id?: string;
+  value: string;
+  onValueChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger
+        id={id}
+        size="sm"
+        className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function ThemeButton({
+  value,
+  active,
+  onSelect,
+  label,
+  borderLeft,
+}: {
+  value: "dark" | "light";
+  active: boolean;
+  onSelect: (value: "dark" | "light") => void;
+  label: string;
+  borderLeft?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(value)}
+      className={`px-[10px] py-[5px] font-mono text-[11px] cursor-pointer transition-colors${borderLeft ? " border-l border-line-2" : ""} ${
+        active
+          ? "bg-gold text-[#1c1c1f] font-semibold"
+          : "bg-board text-ink-2 hover:text-ink"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
 function NumberInput({
   id,
   settingKey,
@@ -104,7 +165,7 @@ function NumberInput({
         const n = Number(e.target.value);
         if (!Number.isNaN(n)) debouncedSet(settingKey, n);
       }}
-      className="w-[90px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold"
+      className={`w-[90px] font-mono ${inputClass}`}
     />
   );
 }
@@ -196,7 +257,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
               }}
-              className="w-[170px] h-[28px] text-[12px] bg-board border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold"
+              className={`w-[170px] ${inputClass}`}
             />
           </Row>
 
@@ -230,47 +291,33 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
 
           <Row>
             <SettingLabel>Bitrate padrão</SettingLabel>
-            <Select
+            <SettingSelect
               value={String(settings.default_bitrate)}
               onValueChange={(v) => set("default_bitrate", Number(v))}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="64000">64 kbps</SelectItem>
-                <SelectItem value="96000">96 kbps</SelectItem>
-                <SelectItem value="128000">128 kbps</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "64000", label: "64 kbps" },
+                { value: "96000", label: "96 kbps" },
+                { value: "128000", label: "128 kbps" },
+              ]}
+            />
           </Row>
 
           <Row>
             <SettingLabel>Modo FEC</SettingLabel>
-            <Select
+            <SettingSelect
               value={settings.fec_mode}
               onValueChange={(v) => set("fec_mode", v)}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">auto</SelectItem>
-                <SelectItem value="always">sempre</SelectItem>
-                <SelectItem value="never">nunca</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "auto", label: "auto" },
+                { value: "always", label: "sempre" },
+                { value: "never", label: "nunca" },
+              ]}
+            />
           </Row>
 
           <Row>
             <SettingLabel>Modo jitter</SettingLabel>
-            <Select
+            <SettingSelect
               value={jitter.base}
               onValueChange={(v) => {
                 if (v === "auto" || v === "min") {
@@ -279,19 +326,12 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                   set("jitter_mode", `fixed:${jitter.fixedMs}`);
                 }
               }}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">auto</SelectItem>
-                <SelectItem value="min">min</SelectItem>
-                <SelectItem value="fixed">fixo</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "auto", label: "auto" },
+                { value: "min", label: "min" },
+                { value: "fixed", label: "fixo" },
+              ]}
+            />
           </Row>
 
           {jitter.base === "fixed" && (
@@ -334,24 +374,17 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
 
           <Row>
             <SettingLabel>Nível de log</SettingLabel>
-            <Select
+            <SettingSelect
               value={settings.log_level}
               onValueChange={(v) => set("log_level", v)}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="trace">trace</SelectItem>
-                <SelectItem value="debug">debug</SelectItem>
-                <SelectItem value="info">info</SelectItem>
-                <SelectItem value="warn">warn</SelectItem>
-                <SelectItem value="error">error</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "trace", label: "trace" },
+                { value: "debug", label: "debug" },
+                { value: "info", label: "info" },
+                { value: "warn", label: "warn" },
+                { value: "error", label: "error" },
+              ]}
+            />
           </Row>
 
           <Row>
@@ -369,34 +402,19 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
           <Row>
             <SettingLabel>Tema</SettingLabel>
             <div className="flex rounded-[2px] border border-line-2 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => {
-                  setTheme("dark");
-                  applyTheme("dark");
-                }}
-                className={`px-[10px] py-[5px] font-mono text-[11px] cursor-pointer transition-colors ${
-                  theme === "dark"
-                    ? "bg-gold text-[#1c1c1f] font-semibold"
-                    : "bg-board text-ink-2 hover:text-ink"
-                }`}
-              >
-                Escuro
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setTheme("light");
-                  applyTheme("light");
-                }}
-                className={`px-[10px] py-[5px] font-mono text-[11px] cursor-pointer transition-colors border-l border-line-2 ${
-                  theme === "light"
-                    ? "bg-gold text-[#1c1c1f] font-semibold"
-                    : "bg-board text-ink-2 hover:text-ink"
-                }`}
-              >
-                Claro
-              </button>
+              <ThemeButton
+                value="dark"
+                active={theme === "dark"}
+                onSelect={(v) => { setTheme(v); applyTheme(v); }}
+                label="Escuro"
+              />
+              <ThemeButton
+                value="light"
+                active={theme === "light"}
+                onSelect={(v) => { setTheme(v); applyTheme(v); }}
+                label="Claro"
+                borderLeft
+              />
             </div>
           </Row>
           <SectionLabel>Sobre</SectionLabel>

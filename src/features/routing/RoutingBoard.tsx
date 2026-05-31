@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 import { PortRegistryProvider } from "./usePortRegistry";
-import { MachinePanel } from "./MachinePanel";
+import { MachinePanel, panelCardClass } from "./MachinePanel";
 import { WireLayer } from "./WireLayer";
 import { ChannelDock } from "./ChannelDock";
 import { ConnectModal } from "@/features/connect/ConnectModal";
@@ -168,7 +169,7 @@ export function RoutingBoard() {
       <div className="flex flex-col h-full">
         <div className="relative flex flex-1 items-center justify-center gap-[120px] bg-board">
           {[0, 1].map((i) => (
-            <div key={i} className="w-[262px] bg-surface border border-line rounded-[3px] p-3 flex flex-col gap-2">
+            <div key={i} className={cn(panelCardClass, "p-3 flex flex-col gap-2")}>
               <Skeleton className="h-4 w-2/3 bg-line-2" />
               <Skeleton className="h-3 w-full bg-line-2" />
               <Skeleton className="h-3 w-4/5 bg-line-2" />

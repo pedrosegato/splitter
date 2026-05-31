@@ -61,8 +61,13 @@ pub fn spawn_reconnect(core: Arc<AppCore>, peer_id: Uuid, _addr: SocketAddr) {
                     }
                     return;
                 }
-                Ok(_) => {
-                    tracing::debug!(%peer_id, attempt, "reconnect not accepted, retrying");
+                Ok(outcome) => {
+                    tracing::warn!(
+                        %peer_id,
+                        reason = ?outcome.reason,
+                        "reconnect explicitly rejected by peer; giving up"
+                    );
+                    return;
                 }
                 Err(e) => {
                     tracing::debug!(%peer_id, attempt, "reconnect failed: {e}");

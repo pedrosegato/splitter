@@ -159,16 +159,12 @@ impl SignalingServer {
                         return;
                     };
 
-                    let known = {
+                    let (known, token_valid) = {
                         let t = t_inner.read().await;
-                        t.contains(&peer_uuid)
+                        (t.contains(&peer_uuid), t.verify(&peer_uuid, &auth_token))
                     };
                     if known {
-                        let ok = {
-                            let t = t_inner.read().await;
-                            t.verify(&peer_uuid, &auth_token)
-                        };
-                        if !ok {
+                        if !token_valid {
                             let _ = handle
                                 .tx
                                 .send(SignalingMessage::HelloAck {
@@ -547,5 +543,69 @@ mod tests {
         );
         let pending = server.pending.list().await;
         assert_eq!(pending[0].peer_id, peer_id);
+    }
+
+    #[tokio::test]
+    async fn trusted_peer_bad_token_rejected_not_queued() {
+        let settings = Settings {
+            auto_accept_trusted: true,
+            ..Settings::default()
+        };
+        let (server, _identity, trust, _sessions, _dir) = setup_with_settings(settings).await;
+
+        let peer_id = Uuid::new_v4();
+        trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id,
+                peer_name: "trusted-client".into(),
+                auth_token: "correct-tok".into(),
+            })
+            .unwrap();
+
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None).unwrap();
+        let mut events = client.events.subscribe();
+
+        client
+            .tx
+            .send(SignalingMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                peer_id: peer_id.to_string(),
+                peer_name: "trusted-client".into(),
+                app_version: "0".into(),
+                capabilities: local_capabilities(),
+                auth_token: "wrong-tok".into(),
+            })
+            .await
+            .unwrap();
+
+        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck {
+                    accepted, reason, ..
+                })) = events.recv().await
+                {
+                    return (accepted, reason);
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for HelloAck");
+
+        assert!(!ack.0, "known peer with wrong token must be rejected");
+        assert!(
+            ack.1
+                .as_deref()
+                .unwrap_or("")
+                .contains("auth_token mismatch"),
+            "rejection reason must mention auth_token mismatch, got: {:?}",
+            ack.1
+        );
+        assert!(
+            server.pending.list().await.is_empty(),
+            "rejected peer must not appear in pending queue"
+        );
     }
 }

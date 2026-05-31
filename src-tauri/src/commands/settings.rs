@@ -55,6 +55,19 @@ pub async fn settings_set(core: State<'_, Arc<AppCore>>, key: String, value: Str
     Ok(guard.clone())
 }
 
+pub fn reset_settings(_current: Settings) -> Settings {
+    Settings::default()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn settings_reset(core: State<'_, Arc<AppCore>>) -> Result<Settings, String> {
+    let mut guard = core.settings.write().await;
+    *guard = reset_settings(guard.clone());
+    guard.save_atomic(&settings_path().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(guard.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +92,14 @@ mod tests {
         apply_setting(&mut s, "signaling_port", "8080").unwrap();
         assert_eq!(s.signaling_port, 8080);
         assert!(apply_setting(&mut s, "signaling_port", "not_a_number").is_err());
+    }
+
+    #[test]
+    fn reset_replaces_with_default() {
+        let mut s = Settings::default();
+        s.default_bitrate = 128_000;
+        s.metrics_enabled = true;
+        s = reset_settings(s);
+        assert_eq!(s, Settings::default());
     }
 }

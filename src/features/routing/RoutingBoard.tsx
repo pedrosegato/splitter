@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PortRegistryProvider } from "./usePortRegistry";
 import { MachinePanel } from "./MachinePanel";
 import { WireLayer } from "./WireLayer";
@@ -33,6 +33,23 @@ function useRemoteName(remotePeerId: string | undefined): string {
   if (matchName) return matchName;
   if (knownNames[remotePeerId]) return knownNames[remotePeerId];
   return remotePeerId.slice(0, 8);
+}
+
+function srcPortId(s: StreamSnapshot): string {
+  return `${s.source_peer}:src:${s.source_device}`;
+}
+
+function sinkPortId(s: StreamSnapshot): string {
+  return `${s.sink_peer}:sink:${s.sink_device}`;
+}
+
+function toDeviceOptions(
+  devices: { id: string; name: string; kind: string }[],
+  kind: string,
+): { id: string; name: string }[] {
+  return devices
+    .filter((d) => d.kind === kind)
+    .map((d) => ({ id: d.id, name: d.name }));
 }
 
 function deriveRemoteDevices(
@@ -71,24 +88,20 @@ function deriveRemoteDevices(
 function buildWiredPortIds(streams: StreamSnapshot[]): Set<string> {
   const ids = new Set<string>();
   for (const s of streams) {
-    ids.add(`${s.source_peer}:src:${s.source_device}`);
-    ids.add(`${s.sink_peer}:sink:${s.sink_device}`);
+    ids.add(srcPortId(s));
+    ids.add(sinkPortId(s));
   }
   return ids;
 }
 
-function portColorFromStreams(streams: StreamSnapshot[]) {
-  return (portId: string): string | undefined => {
-    for (const s of streams) {
-      if (
-        portId === `${s.source_peer}:src:${s.source_device}` ||
-        portId === `${s.sink_peer}:sink:${s.sink_device}`
-      ) {
-        return streamColor(s.id);
-      }
-    }
-    return undefined;
-  };
+function buildPortColorMap(streams: StreamSnapshot[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const s of streams) {
+    const color = streamColor(s.id);
+    map.set(srcPortId(s), color);
+    map.set(sinkPortId(s), color);
+  }
+  return map;
 }
 
 export function RoutingBoard() {
@@ -108,29 +121,43 @@ export function RoutingBoard() {
 
   const session = snapshots?.find((s) => s.state === "active") ?? null;
   const connected = !!session;
-  const streams = session?.streams ?? [];
+  const streams = useMemo(() => session?.streams ?? [], [session]);
 
   const selfPeerId = identity?.peer_id ?? "";
   const selfName = identity?.peer_name ?? "Este Mac";
 
-  const selfSinks = (devices ?? [])
-    .filter((d) => d.kind === "Output")
-    .map((d) => ({ id: d.id, name: d.name }));
+  const selfSinks = useMemo(
+    () => toDeviceOptions(devices ?? [], "Output"),
+    [devices],
+  );
 
-  const selfSources = (devices ?? [])
-    .filter((d) => d.kind === "Input" || d.kind === "SystemAudio")
-    .map((d) => ({ id: d.id, name: d.name }));
+  const selfSources = useMemo(
+    () => [
+      ...toDeviceOptions(devices ?? [], "Input"),
+      ...toDeviceOptions(devices ?? [], "SystemAudio"),
+    ],
+    [devices],
+  );
 
   const remotePeerId = session?.remote_peer_id;
   const remoteName = useRemoteName(remotePeerId);
   const { data: peerDevices } = usePeerDevices(remotePeerId);
 
-  const { remoteSources, remoteSinks } = remotePeerId
-    ? deriveRemoteDevices(streams, remotePeerId, peerDevices ?? [])
-    : { remoteSources: [], remoteSinks: [] };
+  const { remoteSources, remoteSinks } = useMemo(
+    () =>
+      remotePeerId
+        ? deriveRemoteDevices(streams, remotePeerId, peerDevices ?? [])
+        : { remoteSources: [], remoteSinks: [] },
+    [streams, remotePeerId, peerDevices],
+  );
 
-  const wiredPortIds = buildWiredPortIds(streams);
-  const portColor = portColorFromStreams(streams);
+  const wiredPortIds = useMemo(() => buildWiredPortIds(streams), [streams]);
+
+  const portColorMap = useMemo(() => buildPortColorMap(streams), [streams]);
+  const portColor = useMemo(
+    () => (id: string) => portColorMap.get(id),
+    [portColorMap],
+  );
 
   const { onPortActivate } = useWiring();
 

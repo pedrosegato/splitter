@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { StreamStat, StreamSnapshot } from "@/bindings";
 import { useUiStore } from "@/stores/ui";
 import type { StreamHistory } from "@/stores/ui";
@@ -96,7 +97,15 @@ export function StatsView() {
   const activeSession = sessions?.find((s) => s.state === "active");
   const activeStreamCount = activeSession?.streams.length ?? 0;
 
-  const allStreams: StreamSnapshot[] = sessions?.flatMap((s) => s.streams) ?? [];
+  const allStreams = useMemo<StreamSnapshot[]>(
+    () => sessions?.flatMap((s) => s.streams) ?? [],
+    [sessions],
+  );
+
+  const streamById = useMemo(
+    () => new Map(allStreams.map((s) => [s.id, s])),
+    [allStreams],
+  );
 
   const { avgRtt, avgLoss, totalKbps } = aggregate(stats);
 
@@ -144,7 +153,7 @@ export function StatsView() {
           </div>
         ) : (
           stats.map((stat) => {
-            const stream = allStreams.find((s) => s.id === stat.stream_id);
+            const stream = streamById.get(stat.stream_id);
             return (
               <StreamRow
                 key={`${stat.session_id}-${stat.stream_id}`}

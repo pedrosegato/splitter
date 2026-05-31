@@ -176,7 +176,11 @@ pub(crate) async fn open_stream_core(
     if session.remote_peer_id != sink_peer {
         return Err(format!("session {sid} is not bound to peer {sink_peer}"));
     }
-    let stream_id: u8 = session.streams.len() as u8;
+    let stream_id: u8 = core
+        .sessions
+        .next_stream_id(&sid)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let (conn_tx, conn_remote_addr, conn_events) = find_peer_conn(core, sink_peer)
         .await

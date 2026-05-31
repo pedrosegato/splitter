@@ -136,6 +136,16 @@ impl SessionManager {
         Ok(())
     }
 
+    pub async fn next_stream_id(&self, id: &SessionId) -> Result<StreamId, NetError> {
+        let mut guard = self.sessions.write().await;
+        let s = guard
+            .get_mut(id)
+            .ok_or_else(|| NetError::SignalingProtocol {
+                reason: format!("unknown session {id}"),
+            })?;
+        Ok(s.next_stream_id())
+    }
+
     pub async fn remove_stream(&self, id: &SessionId, stream_id: StreamId) -> Result<(), NetError> {
         let mut guard = self.sessions.write().await;
         if let Some(s) = guard.get_mut(id) {

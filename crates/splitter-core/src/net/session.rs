@@ -23,6 +23,7 @@ pub struct Session {
     pub remote_peer_id: Uuid,
     pub state: SessionState,
     pub streams: HashMap<StreamId, Stream>,
+    stream_id_counter: u8,
 }
 
 impl Session {
@@ -33,6 +34,7 @@ impl Session {
             remote_peer_id: remote,
             state: SessionState::PendingOutgoing,
             streams: HashMap::new(),
+            stream_id_counter: 0,
         }
     }
 
@@ -43,6 +45,7 @@ impl Session {
             remote_peer_id: remote,
             state: SessionState::PendingIncoming,
             streams: HashMap::new(),
+            stream_id_counter: 0,
         }
     }
 
@@ -78,6 +81,12 @@ impl Session {
         }
         self.streams.insert(stream.id, stream);
         Ok(())
+    }
+
+    pub fn next_stream_id(&mut self) -> StreamId {
+        let id = self.stream_id_counter;
+        self.stream_id_counter = self.stream_id_counter.wrapping_add(1);
+        id
     }
 
     pub fn active_stream_count(&self) -> usize {
@@ -166,5 +175,17 @@ mod tests {
             .unwrap();
         s.streams.get_mut(&0).unwrap().activate().unwrap();
         assert_eq!(s.active_stream_count(), 1);
+    }
+
+    #[test]
+    fn stream_ids_are_monotonic_across_removal() {
+        let mut s = Session::new_outgoing(Uuid::new_v4(), Uuid::new_v4());
+        s.accept().unwrap();
+        let id0 = s.next_stream_id();
+        s.add_stream(Stream::new_negotiating(id0, route(), 5004))
+            .unwrap();
+        s.streams.remove(&id0);
+        let id1 = s.next_stream_id();
+        assert_ne!(id0, id1);
     }
 }

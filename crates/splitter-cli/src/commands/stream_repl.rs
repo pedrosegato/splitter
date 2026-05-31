@@ -146,12 +146,9 @@ async fn stream_open(
         .ok_or_else(|| anyhow::anyhow!("no live signaling connection to remote peer"))?;
 
     let stream_id: u8 = sessions
-        .snapshot()
+        .next_stream_id(&session_id)
         .await
-        .iter()
-        .find(|s| s.id == session_id)
-        .map(|s| s.streams.len() as u8)
-        .unwrap_or(0);
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     conn_tx
         .send(SignalingMessage::StreamOpen {

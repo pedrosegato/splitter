@@ -166,14 +166,17 @@ pub(crate) async fn open_stream_core(
 ) -> Result<u8, String> {
     let local_peer_id = core.identity.read().unwrap().peer_id;
 
-    let stream_id: u8 = core
+    let session = core
         .sessions
         .snapshot()
         .await
-        .iter()
+        .into_iter()
         .find(|s| s.id == sid)
-        .map(|s| s.streams.len() as u8)
         .ok_or_else(|| format!("session {sid} not found"))?;
+    if session.remote_peer_id != sink_peer {
+        return Err(format!("session {sid} is not bound to peer {sink_peer}"));
+    }
+    let stream_id: u8 = session.streams.len() as u8;
 
     let (conn_tx, conn_remote_addr, conn_events) = find_peer_conn(core, sink_peer)
         .await

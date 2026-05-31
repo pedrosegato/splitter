@@ -115,6 +115,8 @@ pub fn spawn_acceptor(
                         } else {
                             sink.device_id.clone()
                         };
+                        let mut session_route = route.clone();
+                        session_route.sink.device_id = chosen_output.clone();
                         match open_stream_as_sink(
                             core.stream_registry.clone(),
                             sid_uuid,
@@ -142,6 +144,13 @@ pub fn spawn_acceptor(
                                     sink = %chosen_output,
                                     "opened stream as sink"
                                 );
+                                let stream = splitter_core::net::stream::Stream::new_negotiating(
+                                    stream_id,
+                                    session_route,
+                                    port,
+                                );
+                                let _ = core.sessions.add_stream(&sid_uuid, stream).await;
+                                let _ = core.sessions.activate_stream(&sid_uuid, stream_id).await;
                                 core.emit(SnapshotChanged);
                             }
                             Err(e) => {
@@ -193,6 +202,7 @@ pub fn spawn_acceptor(
                             StreamAction::Close => {
                                 for sid in session_ids {
                                     let _ = core.stream_registry.close(&sid, stream_id).await;
+                                    let _ = core.sessions.remove_stream(&sid, stream_id).await;
                                 }
                             }
                             StreamAction::Pause => {

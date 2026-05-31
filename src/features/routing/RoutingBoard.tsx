@@ -102,7 +102,6 @@ export function RoutingBoard() {
 
   const selectedStreamId = useUiStore((s) => s.selectedStreamId);
   const selectStream = useUiStore((s) => s.selectStream);
-  const incoming = useUiStore((s) => s.incoming);
 
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -135,12 +134,6 @@ export function RoutingBoard() {
   const { onPortActivate, hint } = useWiring();
 
   useTrayHealth(snapshots);
-
-  useEffect(() => {
-    if (incoming) {
-      setModalOpen(true);
-    }
-  }, [incoming]);
 
   if (isLoading) {
     return (

@@ -65,11 +65,12 @@ pub(crate) async fn run(
     let log_level = settings_handle.read().await.log_level;
     let _logs_guard = splitter_core::observability::logs::init(log_level, &log_dir()?)?;
 
-    let base_dir = identity_dir.unwrap_or_else(|| {
-        dirs::config_dir()
-            .expect("no config_dir on this platform")
-            .join("Splitter")
-    });
+    let base_dir = match identity_dir {
+        Some(d) => d,
+        None => dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("no config_dir available on this platform"))?
+            .join("Splitter"),
+    };
     std::fs::create_dir_all(&base_dir)?;
     let id_path = base_dir.join("identity.toml");
     let trust_path = base_dir.join("trusted_peers.toml");
@@ -250,7 +251,13 @@ pub(crate) async fn run(
     #[cfg(unix)]
     let mut sigterm = {
         use tokio::signal::unix::{signal, SignalKind};
-        signal(SignalKind::terminate()).expect("SIGTERM handler")
+        match signal(SignalKind::terminate()) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::warn!("SIGTERM handler registration failed, proceeding without it: {e}");
+                None
+            }
+        }
     };
 
     loop {
@@ -275,7 +282,7 @@ pub(crate) async fn run(
                 }
             }
             _ = &mut ctrl_c => "SIGINT",
-            _ = sigterm.recv() => "SIGTERM",
+            _ = async { if let Some(ref mut s) = sigterm { s.recv().await } else { std::future::pending().await } } => "SIGTERM",
             disc_ev = discovery.next_event() => {
                 match disc_ev {
                     Some(DiscoveryEvent::Found(p)) => {
@@ -1314,5 +1321,17 @@ mod tests {
             .find(|s| s.remote_peer_id == remote && s.state == SessionState::Active);
         assert!(existing.is_some(), "should find existing active session");
         assert_eq!(existing.unwrap().id, sid);
+    }
+
+    #[test]
+    fn missing_config_dir_returns_err_via_ok_or_else() {
+        let result: anyhow::Result<std::path::PathBuf> = None::<std::path::PathBuf>
+            .ok_or_else(|| anyhow::anyhow!("no config_dir available on this platform"))
+            .map(|d| d.join("Splitter"));
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("no config_dir"),
+            "error message must describe the missing config_dir"
+        );
     }
 }

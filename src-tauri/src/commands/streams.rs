@@ -151,7 +151,16 @@ pub(crate) async fn open_stream_core(
 
     let ack_port = wait_for_stream_open_ack(&mut ack_rx, stream_id, Duration::from_secs(5))
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            use splitter_core::error::NetError;
+            match e {
+                NetError::SignalingProtocol { .. } => {
+                    "the other PC rejected the stream".to_string()
+                }
+                NetError::Timeout { .. } => "timed out waiting for stream_open_ack".to_string(),
+                other => other.to_string(),
+            }
+        })?;
     let remote: SocketAddr = SocketAddr::new(conn.remote_addr.ip(), ack_port);
 
     let route = build_stream_route(

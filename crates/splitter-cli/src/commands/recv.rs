@@ -68,6 +68,8 @@ fn handle_packet(
     pending_fec_recover: &mut bool,
     frame: &mut [f32],
 ) {
+    // Opus in-band FEC: decode_fec=true recovers the PRIOR lost frame from this packet;
+    // decode_fec=false decodes THIS frame — two calls, two distinct frames.
     if *pending_fec_recover {
         if decoder.decode_with_fec(Some(payload), frame, true).is_ok() {
             push_frame_to_ring(producer, frame);

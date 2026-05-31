@@ -99,8 +99,10 @@ function buildPortColorMap(streams: StreamSnapshot[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const s of streams) {
     const color = streamColor(s.id);
-    map.set(srcPortId(s), color);
-    map.set(sinkPortId(s), color);
+    const src = srcPortId(s);
+    const sink = sinkPortId(s);
+    if (!map.has(src)) map.set(src, color);
+    if (!map.has(sink)) map.set(sink, color);
   }
   return map;
 }
@@ -133,10 +135,10 @@ export function RoutingBoard() {
   );
 
   const selfSources = useMemo(
-    () => [
-      ...toDeviceOptions(devices ?? [], "Input"),
-      ...toDeviceOptions(devices ?? [], "SystemAudio"),
-    ],
+    () =>
+      (devices ?? [])
+        .filter((d) => d.kind === "Input" || d.kind === "SystemAudio")
+        .map((d) => ({ id: d.id, name: d.name })),
     [devices],
   );
 

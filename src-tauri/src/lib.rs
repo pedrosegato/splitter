@@ -46,6 +46,7 @@ fn build() -> Builder<tauri::Wry> {
             events::IncomingSession,
             events::StatsTick,
             events::PeerDisconnected,
+            events::SnapshotChanged,
         ])
 }
 

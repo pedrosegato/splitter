@@ -1,5 +1,5 @@
 use crate::core::AppCore;
-use crate::events::{IncomingSession, PeerDisconnected};
+use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
 use splitter_core::net::session::SessionState;
 use splitter_core::net::signaling::{
     CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, StreamAction,
@@ -142,6 +142,7 @@ pub fn spawn_acceptor(
                                     sink = %chosen_output,
                                     "opened stream as sink"
                                 );
+                                core.emit(SnapshotChanged);
                             }
                             Err(e) => {
                                 tracing::warn!("stream_open accept failed: {e}");
@@ -224,6 +225,7 @@ pub fn spawn_acceptor(
                                 }
                             }
                         }
+                        core.emit(SnapshotChanged);
                     }
                     SignalingMessage::SessionResponse {
                         session_id,
@@ -245,6 +247,7 @@ pub fn spawn_acceptor(
                         }
                         let _ = core.sessions.close(&sid_uuid).await;
                         tracing::info!(peer = %peer_id, session = %sid_uuid, "remote closed session");
+                        core.emit(SnapshotChanged);
                     }
                     SignalingMessage::DeviceListRequest {} => {
                         let devices = splitter_core::audio::devices::list_devices()
@@ -265,6 +268,7 @@ pub fn spawn_acceptor(
                     }
                     SignalingMessage::DeviceListResponse { devices } => {
                         core.remote_devices.write().await.insert(peer_id, devices);
+                        core.emit(SnapshotChanged);
                     }
                     SignalingMessage::PeerRenamed {
                         peer_id: rid,

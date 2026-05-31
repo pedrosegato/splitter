@@ -11,11 +11,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Notify};
-use uuid::Uuid;
 
 #[tokio::test]
 async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
-    let session_id = Uuid::new_v4();
+    let session_id = splitter_core::SessionId::new();
     let stream_id = StreamId(0);
 
     let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -94,7 +93,7 @@ async fn volume_change_attenuates_decoded_signal() {
     let stats = Arc::new(StreamStats::default());
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
     let handle = tokio::spawn(spawn_sink_pump_inner(
-        Uuid::new_v4(),
+        splitter_core::SessionId::new(),
         stream_id,
         sink_socket,
         play_prod,

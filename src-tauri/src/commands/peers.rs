@@ -174,7 +174,10 @@ pub async fn set_device_name(
     })
 }
 
-pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<(), String> {
+pub(crate) async fn teardown_session(
+    core: &AppCore,
+    sid: splitter_core::SessionId,
+) -> Result<(), String> {
     let snap = core.sessions.snapshot().await;
     if let Some(sess) = snap.iter().find(|s| s.id == sid) {
         for stream in &sess.streams {
@@ -183,7 +186,7 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
             }
             crate::commands::streams::notify_remote(
                 core,
-                sid,
+                sid.get(),
                 stream.id.get(),
                 StreamAction::Close,
             )
@@ -218,7 +221,8 @@ pub(crate) async fn teardown_session(core: &AppCore, sid: uuid::Uuid) -> Result<
 #[tauri::command]
 #[specta::specta]
 pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Result<(), String> {
-    let sid = uuid::Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let sid =
+        splitter_core::SessionId(uuid::Uuid::parse_str(&session_id).map_err(|e| e.to_string())?);
     teardown_session(&core, sid).await
 }
 

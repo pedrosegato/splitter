@@ -257,7 +257,7 @@ impl StreamRegistry {
         let rt = guard
             .get(&(*session_id, stream_id))
             .ok_or(NetError::UnknownStream {
-                session: *session_id,
+                session: session_id.get(),
                 stream: stream_id.get(),
             })?;
         rt.control_tx
@@ -274,7 +274,7 @@ impl StreamRegistry {
             Ok(())
         } else {
             Err(NetError::UnknownStream {
-                session: *session_id,
+                session: session_id.get(),
                 stream: stream_id.get(),
             })
         }
@@ -321,7 +321,6 @@ impl StreamRegistry {
 #[cfg(test)]
 mod registry_tests {
     use super::*;
-    use uuid::Uuid;
 
     fn fake_runtime(session_id: SessionId, stream_id: StreamId) -> StreamRuntime {
         let (tx, mut rx) = mpsc::channel::<StreamControlSignal>(4);
@@ -346,7 +345,7 @@ mod registry_tests {
     #[tokio::test]
     async fn register_and_list_round_trip() {
         let reg = StreamRegistry::new();
-        let sid = Uuid::new_v4();
+        let sid = SessionId::new();
         reg.register(fake_runtime(sid, StreamId(0))).await.unwrap();
         let listed = reg.list().await;
         assert_eq!(listed.len(), 1);
@@ -357,7 +356,7 @@ mod registry_tests {
     #[tokio::test]
     async fn register_rejects_duplicate_key() {
         let reg = StreamRegistry::new();
-        let sid = Uuid::new_v4();
+        let sid = SessionId::new();
         reg.register(fake_runtime(sid, StreamId(0))).await.unwrap();
         let err = reg
             .register(fake_runtime(sid, StreamId(0)))
@@ -372,7 +371,7 @@ mod registry_tests {
     #[tokio::test]
     async fn close_sends_close_signal_and_removes_entry() {
         let reg = StreamRegistry::new();
-        let sid = Uuid::new_v4();
+        let sid = SessionId::new();
         reg.register(fake_runtime(sid, StreamId(0))).await.unwrap();
         reg.close(&sid, StreamId(0)).await.unwrap();
         assert!(reg.list().await.is_empty());
@@ -381,7 +380,7 @@ mod registry_tests {
     #[tokio::test]
     async fn snapshot_stats_collects_per_stream() {
         let reg = StreamRegistry::new();
-        let sid = Uuid::new_v4();
+        let sid = SessionId::new();
         let rt = fake_runtime(sid, StreamId(7));
         rt.stats.packets_sent.store(123, Ordering::Relaxed);
         reg.register(rt).await.unwrap();
@@ -393,7 +392,7 @@ mod registry_tests {
     #[tokio::test]
     async fn current_stats_does_not_mutate_prev_snapshots() {
         let reg = StreamRegistry::new();
-        let sid = Uuid::new_v4();
+        let sid = SessionId::new();
         let rt = fake_runtime(sid, StreamId(3));
         rt.stats.bytes_sent.store(8_000, Ordering::Relaxed);
         reg.register(rt).await.unwrap();
@@ -732,7 +731,6 @@ mod sink_pump_tests {
     use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
     use bytes::{Bytes, BytesMut};
     use tokio::net::UdpSocket;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn sink_pump_decodes_into_playback_ring() {
@@ -745,7 +743,7 @@ mod sink_pump_tests {
 
         let stats_clone = stats.clone();
         let pump = tokio::spawn(spawn_sink_pump_inner(
-            Uuid::new_v4(),
+            SessionId::new(),
             StreamId(5),
             sink_socket,
             prod,
@@ -794,7 +792,7 @@ mod sink_pump_tests {
 
         let stats_clone = stats.clone();
         let pump = tokio::spawn(spawn_sink_pump_inner(
-            Uuid::new_v4(),
+            SessionId::new(),
             StreamId(5),
             sink_socket,
             prod,
@@ -840,7 +838,6 @@ mod source_pump_tests {
     use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
     use tokio::net::UdpSocket;
     use tokio::sync::Notify;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn source_pump_sends_a_packet_per_frame() {
@@ -858,7 +855,7 @@ mod source_pump_tests {
         let notify_clone = notify.clone();
 
         let pump = tokio::spawn(spawn_source_pump_inner(
-            Uuid::new_v4(),
+            SessionId::new(),
             StreamId(3),
             cons,
             notify_clone,
@@ -914,7 +911,7 @@ mod source_pump_tests {
         notify.notify_one();
 
         let pump = tokio::spawn(spawn_source_pump_inner(
-            Uuid::new_v4(),
+            SessionId::new(),
             StreamId(3),
             cons,
             notify_clone,
@@ -1181,12 +1178,11 @@ mod open_sink_tests {
     use super::*;
     use crate::net::signaling::{Codec, CodecParams, Endpoint};
     use crate::net::stream::StreamRoute;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn open_stream_as_sink_returns_bound_port_and_registers() {
         let registry = StreamRegistry::new();
-        let session_id = Uuid::new_v4();
+        let session_id = SessionId::new();
         let route = StreamRoute::new(
             Endpoint {
                 peer_id: "a".into(),
@@ -1221,12 +1217,11 @@ mod open_source_tests {
     use crate::net::stream::StreamRoute;
     use std::net::SocketAddr;
     use tokio::net::UdpSocket;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn open_stream_as_source_registers_runtime() {
         let registry = StreamRegistry::new();
-        let session_id = Uuid::new_v4();
+        let session_id = SessionId::new();
 
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let remote: SocketAddr = sink_socket.local_addr().unwrap();
@@ -1295,7 +1290,7 @@ mod session_registration_failure_tests {
     async fn sink_session_add_stream_failure_tears_down_registry_entry() {
         let registry = StreamRegistry::new();
         let sessions = SessionManager::new();
-        let unknown_sid = Uuid::new_v4();
+        let unknown_sid = SessionId::new();
         let stream_id = StreamId(0);
 
         let port =
@@ -1337,7 +1332,7 @@ mod session_registration_failure_tests {
     async fn source_session_add_stream_failure_tears_down_registry_entry() {
         let registry = StreamRegistry::new();
         let sessions = SessionManager::new();
-        let unknown_sid = Uuid::new_v4();
+        let unknown_sid = SessionId::new();
         let stream_id = StreamId(1);
 
         let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -1467,13 +1462,12 @@ mod hotplug_tests {
     use super::*;
     use crate::net::device_watcher::DeviceEvent;
     use tokio::sync::broadcast;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn watcher_dispatches_pause_when_bound_device_disappears() {
         let registry = StreamRegistry::new();
         let (tx, _) = broadcast::channel::<DeviceEvent>(8);
-        let sid = Uuid::new_v4();
+        let sid = SessionId::new();
 
         let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
         let join = tokio::spawn(async move { while ctrl_rx.recv().await.is_some() {} });

@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Notify};
-use uuid::Uuid;
 
 /// Total soak duration — 30 minutes.
 const SOAK_DURATION: Duration = Duration::from_secs(30 * 60);
@@ -64,7 +63,7 @@ fn rss_bytes() -> i64 {
 #[tokio::test]
 #[ignore = "30-minute soak; run with: cargo test --test soak --ignored --release -- --test-threads=1"]
 async fn soak_30_minutes_no_leak_no_loss() {
-    let session_id = Uuid::new_v4();
+    let session_id = splitter_core::SessionId::new();
     let stream_id = splitter_core::StreamId(0);
 
     let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();

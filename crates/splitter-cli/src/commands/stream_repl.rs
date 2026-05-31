@@ -4,7 +4,7 @@ use splitter_core::net::signaling::client_ops::{
 };
 use splitter_core::net::signaling::StreamAction;
 use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
-use splitter_core::{PeerIdentity, SessionManager, StreamId, StreamRegistry};
+use splitter_core::{PeerIdentity, SessionId, SessionManager, StreamId, StreamRegistry};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,7 +36,7 @@ pub(crate) async fn handle(
     }
 }
 
-fn parse_session_stream(rest: &[&str]) -> anyhow::Result<(Uuid, StreamId)> {
+fn parse_session_stream(rest: &[&str]) -> anyhow::Result<(SessionId, StreamId)> {
     let raw = rest
         .first()
         .ok_or_else(|| anyhow::anyhow!("missing <session_id>:<stream_id>"))?;
@@ -44,7 +44,7 @@ fn parse_session_stream(rest: &[&str]) -> anyhow::Result<(Uuid, StreamId)> {
         .split_once(':')
         .ok_or_else(|| anyhow::anyhow!("expected session_id:stream_id"))?;
     Ok((
-        Uuid::parse_str(sid_str)?,
+        SessionId(Uuid::parse_str(sid_str)?),
         StreamId(stream_str.parse::<u8>()?),
     ))
 }
@@ -59,7 +59,7 @@ async fn stream_open(
 ) -> anyhow::Result<()> {
     let mut from_dev: Option<String> = None;
     let mut to_spec: Option<String> = None;
-    let mut session_id: Option<Uuid> = None;
+    let mut session_id: Option<SessionId> = None;
     let mut bitrate: u32 = 64_000;
 
     let mut iter = rest.iter();
@@ -67,7 +67,11 @@ async fn stream_open(
         match *flag {
             "--from" => from_dev = iter.next().map(|s| (*s).to_string()),
             "--to" => to_spec = iter.next().map(|s| (*s).to_string()),
-            "--session" => session_id = iter.next().and_then(|s| Uuid::parse_str(s).ok()),
+            "--session" => {
+                session_id = iter
+                    .next()
+                    .and_then(|s| Uuid::parse_str(s).ok().map(SessionId))
+            }
             "--bitrate" => {
                 bitrate = iter
                     .next()
@@ -106,7 +110,7 @@ async fn stream_open(
     let mut ack_rx = conn.events.subscribe();
     conn.tx
         .send(stream_open_message(
-            session_id,
+            session_id.get(),
             stream_id.get(),
             identity.peer_id,
             remote_peer_id,
@@ -250,7 +254,7 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
     use sysinfo::System;
 
     const BAR: &str = "═══════════════════════════════════════════════════════════════════════════";
-    let target: Option<(Uuid, StreamId)> = if rest.is_empty() {
+    let target: Option<(SessionId, StreamId)> = if rest.is_empty() {
         None
     } else {
         Some(parse_session_stream(rest)?)
@@ -325,7 +329,7 @@ mod tests {
         let raw = format!("{sid}:3");
         let parts: Vec<&str> = vec![raw.as_str()];
         let (parsed_sid, parsed_stream) = parse_session_stream(&parts).unwrap();
-        assert_eq!(parsed_sid, sid);
+        assert_eq!(parsed_sid, SessionId(sid));
         assert_eq!(parsed_stream, StreamId(3));
     }
 

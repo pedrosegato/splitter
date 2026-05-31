@@ -1,5 +1,6 @@
 use crate::core::AppCore;
 use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
+use splitter_core::net::session::SessionId;
 use splitter_core::net::signaling::{
     CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, SourceKind, StreamAction,
 };
@@ -36,7 +37,7 @@ pub fn spawn_acceptor(
                         session_id,
                         requested_by,
                     } => {
-                        let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+                        let Ok(sid_uuid) = Uuid::parse_str(&session_id).map(SessionId) else {
                             continue;
                         };
                         let Ok(requester_uuid) = Uuid::parse_str(&requested_by) else {
@@ -110,7 +111,7 @@ pub fn spawn_acceptor(
                         codec,
                         ..
                     } => {
-                        let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+                        let Ok(sid_uuid) = Uuid::parse_str(&session_id).map(SessionId) else {
                             continue;
                         };
                         let route = StreamRoute::new(
@@ -261,7 +262,7 @@ pub fn spawn_acceptor(
                                 "remote set stream muted"
                             ),
                         }
-                        let session_ids: Vec<Uuid> = core
+                        let session_ids: Vec<SessionId> = core
                             .sessions
                             .snapshot()
                             .await
@@ -298,7 +299,7 @@ pub fn spawn_acceptor(
                         session_id,
                         accepted: false,
                     } => {
-                        let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+                        let Ok(sid_uuid) = Uuid::parse_str(&session_id).map(SessionId) else {
                             continue;
                         };
                         let stream_ids: Vec<StreamId> = core
@@ -393,7 +394,7 @@ pub fn spawn_acceptor(
                         peer_id: peer_id.to_string(),
                         reason: reason.clone(),
                     });
-                    let session_ids: Vec<Uuid> = core
+                    let session_ids: Vec<SessionId> = core
                         .sessions
                         .snapshot()
                         .await

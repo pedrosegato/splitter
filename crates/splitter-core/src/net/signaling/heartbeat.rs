@@ -39,7 +39,6 @@ mod phase3_tests {
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use tokio::sync::mpsc;
-    use uuid::Uuid;
 
     fn fake_runtime(session_id: SessionId) -> StreamRuntime {
         let (tx, mut rx) = mpsc::channel::<StreamControlSignal>(4);
@@ -58,7 +57,7 @@ mod phase3_tests {
     #[tokio::test]
     async fn build_heartbeat_includes_per_stream_stats() {
         let reg = StreamRegistry::new();
-        let sid = Uuid::new_v4();
+        let sid = SessionId::new();
         let rt = fake_runtime(sid);
         rt.stats.packets_sent.store(7, Ordering::Relaxed);
         rt.stats.packets_received.store(6, Ordering::Relaxed);

@@ -356,7 +356,7 @@ async fn cmd_disconnect<'a>(
     let key = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("usage: disconnect <session_id>"))?;
-    let id = Uuid::parse_str(key)?;
+    let id = splitter_core::SessionId(Uuid::parse_str(key)?);
     // Close all local stream runtimes for this session and notify the remote peer.
     let snap = ctx.sessions.snapshot().await;
     if let Some(sess) = snap.iter().find(|s| s.id == id) {
@@ -376,7 +376,7 @@ async fn cmd_disconnect<'a>(
     ctx.sessions.close(&id).await?;
     #[allow(clippy::print_stdout)]
     {
-        println!(">> session {} closed", short(&id));
+        println!(">> session {} closed", short(&id.get()));
     }
     Ok(())
 }

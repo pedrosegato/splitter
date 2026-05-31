@@ -4,7 +4,38 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub type SessionId = Uuid;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(transparent)]
+pub struct SessionId(pub Uuid);
+
+impl SessionId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    pub fn get(self) -> Uuid {
+        self.0
+    }
+}
+
+impl Default for SessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<Uuid> for SessionId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -29,7 +60,7 @@ pub struct Session {
 impl Session {
     pub fn new_outgoing(local: Uuid, remote: Uuid) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: SessionId::new(),
             local_peer_id: local,
             remote_peer_id: remote,
             state: SessionState::PendingOutgoing,

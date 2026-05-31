@@ -46,7 +46,9 @@ impl SessionManager {
         f: impl FnOnce(&mut Session) -> Result<R, NetError>,
     ) -> Result<R, NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
+        let s = guard
+            .get_mut(id)
+            .ok_or(NetError::UnknownSession(id.get()))?;
         f(s)
     }
 
@@ -57,9 +59,11 @@ impl SessionManager {
         f: impl FnOnce(&mut Stream) -> Result<R, NetError>,
     ) -> Result<R, NetError> {
         let mut guard = self.sessions.write().await;
-        let s = guard.get_mut(id).ok_or(NetError::UnknownSession(*id))?;
+        let s = guard
+            .get_mut(id)
+            .ok_or(NetError::UnknownSession(id.get()))?;
         let st = s.stream_mut(stream_id).ok_or(NetError::UnknownStream {
-            session: *id,
+            session: id.get(),
             stream: stream_id.get(),
         })?;
         f(st)
@@ -217,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn add_stream_to_unknown_session_errors() {
         let mgr = SessionManager::new();
-        let fake = Uuid::new_v4();
+        let fake = SessionId::new();
         let err = mgr
             .add_stream(&fake, Stream::new_negotiating(StreamId(0), route(), 5004))
             .await
@@ -263,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn set_stream_muted_unknown_session_errors() {
         let mgr = SessionManager::new();
-        let fake = Uuid::new_v4();
+        let fake = SessionId::new();
         let err = mgr
             .set_stream_muted(&fake, StreamId(0), true)
             .await
@@ -301,7 +305,7 @@ mod tests {
     #[tokio::test]
     async fn register_incoming_duplicate_id_returns_err() {
         let mgr = SessionManager::new();
-        let id = Uuid::new_v4();
+        let id = SessionId::new();
         let local = Uuid::new_v4();
         let remote = Uuid::new_v4();
         mgr.register_incoming(id, local, remote).await.unwrap();
@@ -315,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn remove_stream_unknown_session_returns_unknown_session_error() {
         let mgr = SessionManager::new();
-        let fake = Uuid::new_v4();
+        let fake = SessionId::new();
         let err = mgr.remove_stream(&fake, StreamId(0)).await.unwrap_err();
         assert!(
             matches!(err, NetError::UnknownSession(_)),

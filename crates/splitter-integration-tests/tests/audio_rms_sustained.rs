@@ -15,7 +15,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Notify};
-use uuid::Uuid;
 
 /// Number of 20 ms frames to push through the pipeline.
 /// 1 000 frames × 20 ms = 20 s worth of audio content.
@@ -48,7 +47,7 @@ fn rms(samples: &[f32]) -> f32 {
 
 #[tokio::test]
 async fn sustained_rms_over_1000_frames() {
-    let session_id = Uuid::new_v4();
+    let session_id = splitter_core::SessionId::new();
     let stream_id = splitter_core::StreamId(0);
 
     // Bind a sink socket; the source socket connects to it.

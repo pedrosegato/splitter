@@ -4,7 +4,7 @@ use splitter_core::net::signaling::{
     CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction,
 };
 use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
-use splitter_core::{StreamId, StreamRoute};
+use splitter_core::{SessionId, StreamId, StreamRoute};
 use uuid::Uuid;
 
 type ConnTx = tokio::sync::mpsc::Sender<SignalingMessage>;
@@ -61,7 +61,7 @@ async fn handle_session_request(
     session_id: &str,
     requested_by: &str,
 ) {
-    let Ok(sid_uuid) = Uuid::parse_str(session_id) else {
+    let Ok(sid_uuid) = Uuid::parse_str(session_id).map(SessionId) else {
         return;
     };
     let Ok(requester_uuid) = Uuid::parse_str(requested_by) else {
@@ -76,7 +76,10 @@ async fn handle_session_request(
         let name = ctx.peer_display_name(&peer_id).await;
         #[allow(clippy::print_stdout)]
         {
-            println!(">> {name} re-opened existing session {}", short(&ex.id));
+            println!(
+                ">> {name} re-opened existing session {}",
+                short(&ex.id.get())
+            );
         }
         return;
     }
@@ -89,7 +92,7 @@ async fn handle_session_request(
     let name = ctx.peer_display_name(&peer_id).await;
     #[allow(clippy::print_stdout)]
     {
-        println!(">> {name} opened session {}", short(&sid_uuid));
+        println!(">> {name} opened session {}", short(&sid_uuid.get()));
     }
 }
 
@@ -111,7 +114,7 @@ async fn handle_stream_open(
     else {
         return;
     };
-    let Ok(sid_uuid) = Uuid::parse_str(&session_id) else {
+    let Ok(sid_uuid) = Uuid::parse_str(&session_id).map(SessionId) else {
         return;
     };
     let route = StreamRoute::new(
@@ -203,7 +206,7 @@ async fn handle_stream_control(
             }
         }
     }
-    let session_ids: Vec<Uuid> = ctx
+    let session_ids: Vec<SessionId> = ctx
         .sessions
         .snapshot()
         .await
@@ -227,7 +230,7 @@ async fn handle_stream_control(
 }
 
 async fn handle_session_response_close(ctx: &DaemonContext, peer_id: Uuid, session_id: &str) {
-    let Ok(sid_uuid) = Uuid::parse_str(session_id) else {
+    let Ok(sid_uuid) = Uuid::parse_str(session_id).map(SessionId) else {
         return;
     };
     // Remote is shutting down this session; close local streams + session.
@@ -246,7 +249,7 @@ async fn handle_session_response_close(ctx: &DaemonContext, peer_id: Uuid, sessi
     let name = ctx.peer_display_name(&peer_id).await;
     #[allow(clippy::print_stdout)]
     {
-        println!(">> {name} closed session {}", short(&sid_uuid));
+        println!(">> {name} closed session {}", short(&sid_uuid.get()));
     }
 }
 
@@ -258,7 +261,7 @@ async fn handle_peer_disconnected(ctx: &DaemonContext, peer_id: Uuid, reason: &s
     }
     // Tear down all streams and sessions for this peer so the registry and
     // SessionManager don't accumulate stale entries after an abrupt disconnect.
-    let session_streams: Vec<(Uuid, Vec<StreamId>)> = ctx
+    let session_streams: Vec<(SessionId, Vec<StreamId>)> = ctx
         .sessions
         .snapshot()
         .await

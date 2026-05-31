@@ -6,7 +6,7 @@ use splitter_core::net::signaling::client_ops::{
 use splitter_core::net::signaling::SourceKind as WireSourceKind;
 use splitter_core::net::signaling::{SignalingMessage, StreamAction};
 use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
-use splitter_core::{SessionSnapshot, StreamId};
+use splitter_core::{SessionId, SessionSnapshot, StreamId};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +19,11 @@ async fn find_peer_conn(core: &AppCore, peer_id: Uuid) -> Option<ConnEndpoints> 
 
 pub(crate) async fn notify_remote(core: &AppCore, sid: Uuid, stream_id: u8, action: StreamAction) {
     let snap = core.sessions.snapshot().await;
-    let remote = match snap.iter().find(|s| s.id == sid).map(|s| s.remote_peer_id) {
+    let remote = match snap
+        .iter()
+        .find(|s| s.id.get() == sid)
+        .map(|s| s.remote_peer_id)
+    {
         Some(r) => r,
         None => {
             tracing::warn!(%sid, "notify_remote: session not found, skipping remote signal");
@@ -81,6 +85,7 @@ pub(crate) async fn open_stream_core(
     sink_device_id: String,
     bitrate: u32,
 ) -> Result<u8, String> {
+    let sid = SessionId(sid);
     let local_peer_id = core.identity.read().peer_id;
 
     let session = core
@@ -107,7 +112,7 @@ pub(crate) async fn open_stream_core(
     let mut ack_rx = conn.events.subscribe();
     conn.tx
         .send(stream_open_message(
-            sid,
+            sid.get(),
             stream_id,
             local_peer_id,
             sink_peer,
@@ -195,7 +200,7 @@ pub async fn open_stream(
         .snapshot()
         .await
         .iter()
-        .find(|s| s.id == sid)
+        .find(|s| s.id.get() == sid)
         .map(|s| s.remote_peer_id)
         .ok_or_else(|| format!("session {sid} not found"))?;
     let sink_uuid = Uuid::parse_str(&sink_peer_id).map_err(|e| e.to_string())?;
@@ -224,7 +229,7 @@ pub async fn request_stream(
     source: WireSourceKind,
     sink_device_id: String,
 ) -> Result<(), String> {
-    let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let sid = SessionId(Uuid::parse_str(&session_id).map_err(|e| e.to_string())?);
     let remote = core
         .sessions
         .snapshot()
@@ -254,13 +259,13 @@ pub async fn close_stream(
     session_id: String,
     stream_id: u8,
 ) -> Result<(), String> {
-    let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let sid = SessionId(Uuid::parse_str(&session_id).map_err(|e| e.to_string())?);
     core.stream_registry
         .close(&sid, StreamId(stream_id))
         .await
         .map_err(|e| e.to_string())?;
     let _ = core.sessions.remove_stream(&sid, StreamId(stream_id)).await;
-    notify_remote(&core, sid, stream_id, StreamAction::Close).await;
+    notify_remote(&core, sid.get(), stream_id, StreamAction::Close).await;
     Ok(())
 }
 
@@ -272,7 +277,7 @@ pub async fn stream_control(
     stream_id: u8,
     action: StreamAction,
 ) -> Result<(), String> {
-    let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
+    let sid = SessionId(Uuid::parse_str(&session_id).map_err(|e| e.to_string())?);
     let signal = StreamControlSignal::from(action.clone());
     if matches!(signal, StreamControlSignal::Close) {
         core.stream_registry
@@ -291,7 +296,7 @@ pub async fn stream_control(
             .await
             .map_err(|e| e.to_string())?;
     }
-    notify_remote(&core, sid, stream_id, action).await;
+    notify_remote(&core, sid.get(), stream_id, action).await;
     Ok(())
 }
 
@@ -339,7 +344,7 @@ mod tests {
     fn session_snapshot_serializes_to_json() {
         use splitter_core::net::session::SessionState;
         let snap = SessionSnapshot {
-            id: Uuid::nil(),
+            id: SessionId(Uuid::nil()),
             remote_peer_id: Uuid::nil(),
             state: SessionState::Active,
             streams: vec![],

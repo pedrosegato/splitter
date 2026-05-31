@@ -6,12 +6,12 @@
 @theme {
   --color-gold: #e0a52f;
   --color-green: #86c440;
-  --color-s0: #e3251f;
-  --color-s1: #2247d8;
-  --color-s2: #ecb61f;
-  --color-s3: #e324bd;
-  --color-s4: #33b35a;
-  --color-s5: #dcdce2;
+  --color-s0: #cf7166;
+  --color-s1: #6f93c9;
+  --color-s2: #e0a52f;
+  --color-s3: #b87fb0;
+  --color-s4: #74b083;
+  --color-s5: #aeb0b8;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
 }
 

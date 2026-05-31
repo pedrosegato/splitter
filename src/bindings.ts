@@ -133,6 +133,14 @@ async openStream(sessionId: string, sourceDeviceId: string, sourceIsSystem: bool
     else return { status: "error", error: e  as any };
 }
 },
+async requestStream(sessionId: string, sourceDeviceId: string, sourceIsSystem: boolean, sinkDeviceId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("request_stream", { sessionId, sourceDeviceId, sourceIsSystem, sinkDeviceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async closeStream(sessionId: string, streamId: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("close_stream", { sessionId, streamId }) };

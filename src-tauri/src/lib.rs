@@ -32,6 +32,7 @@ fn build() -> Builder<tauri::Wry> {
             commands::streams::snapshot,
             commands::streams::open_session,
             commands::streams::open_stream,
+            commands::streams::request_stream,
             commands::streams::close_stream,
             commands::streams::stream_control,
             commands::ops::mute_all,

@@ -39,6 +39,37 @@ export const useOpenStream = () => {
   });
 };
 
+export const useRequestStream = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      sourceDeviceId,
+      sourceIsSystem,
+      sinkDeviceId,
+    }: {
+      sessionId: string;
+      sourceDeviceId: string;
+      sourceIsSystem: boolean;
+      sinkDeviceId: string;
+    }) =>
+      unwrap(
+        commands.requestStream(
+          sessionId,
+          sourceDeviceId,
+          sourceIsSystem,
+          sinkDeviceId,
+        ),
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+};
+
 export const useCloseStream = () => {
   const queryClient = useQueryClient();
   return useMutation({

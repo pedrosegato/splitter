@@ -57,7 +57,7 @@ async fn stream_open(
     let mut from_dev: Option<String> = None;
     let mut to_spec: Option<String> = None;
     let mut session_id: Option<Uuid> = None;
-    let mut bitrate: i32 = 64_000;
+    let mut bitrate: u32 = 64_000;
 
     let mut iter = rest.iter();
     while let Some(flag) = iter.next() {
@@ -260,12 +260,11 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
         None => snaps,
     };
 
+    let mut sys = System::new();
+    sys.refresh_cpu_usage();
+    tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
+    sys.refresh_cpu_usage();
     let cpu_pct = {
-        let mut sys = System::new();
-        sys.refresh_cpu_usage();
-        // sysinfo requires two samples to compute usage; sleep briefly between them.
-        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-        sys.refresh_cpu_usage();
         let cpus = sys.cpus();
         if cpus.is_empty() {
             0.0f32

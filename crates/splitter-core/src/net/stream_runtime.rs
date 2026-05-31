@@ -557,9 +557,9 @@ pub async fn spawn_source_pump_inner(
     socket: UdpSocket,
     mut control_rx: mpsc::Receiver<StreamControlSignal>,
     stats: Arc<StreamStats>,
-    bitrate: i32,
+    bitrate: u32,
 ) {
-    let mut encoder = match OpusEncoder::new(bitrate) {
+    let mut encoder = match OpusEncoder::new(bitrate as i32) {
         Ok(e) => e,
         Err(e) => {
             tracing::error!("opus encoder init failed: {e}");
@@ -1176,7 +1176,7 @@ pub async fn open_stream_as_sink(
 #[cfg(test)]
 mod open_sink_tests {
     use super::*;
-    use crate::net::signaling::{CodecParams, Endpoint};
+    use crate::net::signaling::{Codec, CodecParams, Endpoint};
     use crate::net::stream::StreamRoute;
     use uuid::Uuid;
 
@@ -1194,7 +1194,7 @@ mod open_sink_tests {
                 device_id: "headphones".into(),
             },
             CodecParams {
-                name: "opus".into(),
+                name: Codec::Opus,
                 bitrate: 64_000,
                 frame_ms: 20,
             },
@@ -1214,7 +1214,7 @@ mod open_sink_tests {
 #[cfg(test)]
 mod open_source_tests {
     use super::*;
-    use crate::net::signaling::{CodecParams, Endpoint};
+    use crate::net::signaling::{Codec, CodecParams, Endpoint};
     use crate::net::stream::StreamRoute;
     use std::net::SocketAddr;
     use tokio::net::UdpSocket;
@@ -1238,7 +1238,7 @@ mod open_source_tests {
                 device_id: "ignored".into(),
             },
             CodecParams {
-                name: "opus".into(),
+                name: Codec::Opus,
                 bitrate: 64_000,
                 frame_ms: 20,
             },
@@ -1262,7 +1262,7 @@ mod open_source_tests {
 mod session_registration_failure_tests {
     use super::*;
     use crate::net::manager::SessionManager;
-    use crate::net::signaling::{CodecParams, Endpoint};
+    use crate::net::signaling::{Codec, CodecParams, Endpoint};
     use crate::net::stream::StreamRoute;
     use std::net::SocketAddr;
     use tokio::net::UdpSocket;
@@ -1279,7 +1279,7 @@ mod session_registration_failure_tests {
                 device_id: "sink-dev".into(),
             },
             CodecParams {
-                name: "opus".into(),
+                name: Codec::Opus,
                 bitrate: 64_000,
                 frame_ms: 20,
             },

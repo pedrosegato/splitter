@@ -101,7 +101,7 @@ enum StreamAction {
         #[arg(long)]
         session: Option<String>,
         #[arg(long, default_value_t = 64_000)]
-        bitrate: i32,
+        bitrate: u32,
     },
 }
 
@@ -156,7 +156,7 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         stream_id: u8,
         #[arg(long, default_value_t = 64_000)]
-        bitrate: i32,
+        bitrate: u32,
         #[arg(long, value_enum, default_value_t = Source::Mic)]
         source: Source,
         #[arg(long, value_enum, default_value_t = SendFecMode::Auto)]
@@ -222,7 +222,7 @@ enum Cmd {
         #[arg(long)]
         output: String,
         #[arg(long, default_value_t = 64_000)]
-        bitrate: i32,
+        bitrate: u32,
         #[arg(long, value_enum, default_value_t = Source::Mic)]
         source: Source,
         #[arg(long, value_enum, default_value_t = SendFecMode::Auto)]

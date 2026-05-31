@@ -34,9 +34,15 @@ pub struct Endpoint {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Codec {
+    Opus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CodecParams {
-    pub name: String,
-    pub bitrate: i32,
+    pub name: Codec,
+    pub bitrate: u32,
     pub frame_ms: u32,
 }
 
@@ -78,6 +84,8 @@ pub enum SignalingMessage {
         reason: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         auth_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        peer_id: Option<String>,
     },
     SessionRequest {
         session_id: String,
@@ -171,6 +179,7 @@ mod tests {
             accepted: true,
             reason: None,
             auth_token: Some("secret-tok".into()),
+            peer_id: Some("11111111-1111-1111-1111-111111111111".into()),
         };
         let bytes = msg.encode_to_bytes().unwrap();
         let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
@@ -185,6 +194,7 @@ mod tests {
             accepted: false,
             reason: Some("rejected".into()),
             auth_token: None,
+            peer_id: None,
         };
         let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
         assert!(
@@ -239,7 +249,7 @@ mod tests {
                 device_id: "dev-b".into(),
             },
             codec: CodecParams {
-                name: "opus".into(),
+                name: Codec::Opus,
                 bitrate: 64_000,
                 frame_ms: 20,
             },

@@ -139,6 +139,7 @@ impl Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::signaling::Codec;
 
     fn sample_route() -> StreamRoute {
         StreamRoute::new(
@@ -151,7 +152,7 @@ mod tests {
                 device_id: "dev-b".into(),
             },
             CodecParams {
-                name: "opus".into(),
+                name: Codec::Opus,
                 bitrate: 64_000,
                 frame_ms: 20,
             },

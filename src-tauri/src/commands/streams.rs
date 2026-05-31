@@ -79,7 +79,7 @@ pub(crate) async fn open_stream_core(
     source_is_system: bool,
     sink_peer: Uuid,
     sink_device_id: String,
-    bitrate: i32,
+    bitrate: u32,
 ) -> Result<u8, String> {
     let local_peer_id = core.identity.read().peer_id;
 
@@ -178,7 +178,7 @@ pub async fn open_stream(
     source_is_system: bool,
     sink_peer_id: String,
     sink_device_id: String,
-    bitrate: Option<i32>,
+    bitrate: Option<u32>,
 ) -> Result<u8, String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
     let bitrate = bitrate.unwrap_or(64_000);

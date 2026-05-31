@@ -1,6 +1,6 @@
 use crate::error::NetError;
 use crate::net::signaling::{
-    CodecParams, Endpoint, PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
+    Codec, CodecParams, Endpoint, PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
 };
 use crate::net::stream::StreamRoute;
 use std::collections::HashMap;
@@ -56,9 +56,9 @@ pub async fn find_conn_tx(
         .map(|c| c.tx)
 }
 
-fn opus_codec(bitrate: i32) -> CodecParams {
+fn opus_codec(bitrate: u32) -> CodecParams {
     CodecParams {
-        name: "opus".into(),
+        name: Codec::Opus,
         bitrate,
         frame_ms: 20,
     }
@@ -69,7 +69,7 @@ pub fn build_stream_route(
     sink_peer: Uuid,
     source_dev: &str,
     sink_dev: &str,
-    bitrate: i32,
+    bitrate: u32,
 ) -> StreamRoute {
     StreamRoute::new(
         Endpoint {
@@ -93,7 +93,7 @@ pub fn stream_open_message(
     sink_peer: Uuid,
     source_dev: &str,
     sink_dev: &str,
-    bitrate: i32,
+    bitrate: u32,
 ) -> SignalingMessage {
     SignalingMessage::StreamOpen {
         session_id: session_id.to_string(),
@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(route.source.device_id, "mic0");
         assert_eq!(route.sink.peer_id, sink.to_string());
         assert_eq!(route.sink.device_id, "spk1");
-        assert_eq!(route.codec.name, "opus");
+        assert_eq!(route.codec.name, Codec::Opus);
         assert_eq!(route.codec.bitrate, 96_000);
         assert_eq!(route.codec.frame_ms, 20);
         assert_eq!(route.volume(), 1.0);
@@ -324,7 +324,7 @@ mod tests {
                 assert_eq!(source.device_id, "system");
                 assert_eq!(sink_ep.peer_id, sink.to_string());
                 assert_eq!(sink_ep.device_id, "default");
-                assert_eq!(codec.name, "opus");
+                assert_eq!(codec.name, Codec::Opus);
                 assert_eq!(codec.bitrate, 64_000);
                 assert_eq!(codec.frame_ms, 20);
                 assert_eq!(udp_port, 0);

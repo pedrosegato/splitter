@@ -9,7 +9,7 @@ use tokio::time::Duration;
 pub(crate) async fn run(
     input: &str,
     output: &str,
-    bitrate: i32,
+    bitrate: u32,
     source: crate::Source,
     fec_mode: crate::SendFecMode,
     simulated_loss_pct: u8,
@@ -28,7 +28,7 @@ pub(crate) async fn run(
     let core_fec_mode = map_fec_mode(fec_mode);
     let mut fec = splitter_core::net::fec::FecController::new(core_fec_mode, 1, 0, 10);
 
-    let mut enc = OpusEncoder::new(bitrate)?;
+    let mut enc = OpusEncoder::new(bitrate as i32)?;
     let mut dec = OpusDecoder::new()?;
     let mut payload = BytesMut::with_capacity(400);
     let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];

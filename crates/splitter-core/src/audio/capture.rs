@@ -271,8 +271,8 @@ fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
         .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))
 }
 
-// The chunk size fed into the resampler — must divide evenly into FRAME_SAMPLES at 48k.
-// 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices).
+// RESAMPLE_CHUNK is per-channel; scratch holds stereo pairs (RESAMPLE_CHUNK * 2 interleaved).
+// 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices); must divide evenly into FRAME_SAMPLES at 48k.
 const RESAMPLE_CHUNK: usize = 441;
 
 fn make_resampler(input_rate: u32) -> Result<Resampler, AudioError> {

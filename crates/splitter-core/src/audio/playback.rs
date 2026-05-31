@@ -148,6 +148,8 @@ fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
         .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))
 }
 
+// RESAMPLE_CHUNK is per-channel; src_scratch holds stereo pairs (RESAMPLE_CHUNK * 2 interleaved).
+// 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices); must divide evenly into FRAME_SAMPLES at 48k.
 const RESAMPLE_CHUNK: usize = 441;
 
 /// Reads 48k stereo-interleaved (L,R,L,R,...) samples from the ring, resamples to device rate,

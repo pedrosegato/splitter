@@ -19,6 +19,18 @@ pub struct TrustStoreFile {
     pub trusted: Vec<TrustedPeer>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LegacyTrustStoreFile {
+    #[serde(default)]
+    trusted: HashMap<String, LegacyTrustedPeer>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyTrustedPeer {
+    peer_name: String,
+    auth_token: String,
+}
+
 #[derive(Debug)]
 pub struct TrustStore {
     path: PathBuf,
@@ -30,18 +42,62 @@ impl TrustStore {
         let trusted = if path.exists() {
             let raw = std::fs::read_to_string(path)
                 .map_err(|e| NetError::ConfigIo(format!("read {}: {e}", path.display())))?;
-            let parsed: TrustStoreFile = toml::from_str(&raw)
-                .map_err(|e| NetError::ConfigIo(format!("parse {}: {e}", path.display())))?;
-            let mut map = HashMap::new();
-            for entry in parsed.trusted {
-                if map.contains_key(&entry.peer_id) {
-                    tracing::warn!(
-                        peer_id = %entry.peer_id,
-                        "trust store: duplicate peer_id entry; keeping first"
-                    );
-                    continue;
+            let (map, needs_flush) = match toml::from_str::<TrustStoreFile>(&raw) {
+                Ok(parsed) => {
+                    let mut map = HashMap::new();
+                    for entry in parsed.trusted {
+                        if map.contains_key(&entry.peer_id) {
+                            tracing::warn!(
+                                peer_id = %entry.peer_id,
+                                "trust store: duplicate peer_id entry; keeping first"
+                            );
+                            continue;
+                        }
+                        map.insert(entry.peer_id, entry);
+                    }
+                    (map, false)
                 }
-                map.insert(entry.peer_id, entry);
+                Err(_) => match toml::from_str::<LegacyTrustStoreFile>(&raw) {
+                    Ok(legacy) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            "trust store: migrating legacy HashMap format to Vec format"
+                        );
+                        let mut map = HashMap::new();
+                        for (key, entry) in legacy.trusted {
+                            match key.parse::<Uuid>() {
+                                Ok(id) => {
+                                    map.insert(
+                                        id,
+                                        TrustedPeer {
+                                            peer_id: id,
+                                            peer_name: entry.peer_name,
+                                            auth_token: entry.auth_token,
+                                        },
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "trust store: legacy key is not a valid UUID; skipping"
+                                    );
+                                }
+                            }
+                        }
+                        (map, true)
+                    }
+                    Err(e) => {
+                        return Err(NetError::ConfigIo(format!("parse {}: {e}", path.display())));
+                    }
+                },
+            };
+            if needs_flush {
+                let store = Self {
+                    path: path.to_path_buf(),
+                    trusted: map,
+                };
+                store.flush()?;
+                return Ok(store);
             }
             map
         } else {
@@ -159,5 +215,44 @@ mod tests {
         let path = dir.path().join("trusted_peers.toml");
         let store = TrustStore::load_or_create(&path).expect("create");
         assert!(!store.verify(&Uuid::new_v4(), "tok"));
+    }
+
+    #[test]
+    fn legacy_hashmap_format_migrates_and_rewrites_as_vec() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("trusted_peers.toml");
+        let peer_id = Uuid::new_v4();
+        let legacy = format!(
+            "[trusted.{}]\npeer_name = \"Alice\"\nauth_token = \"tok-legacy\"\n",
+            peer_id
+        );
+        std::fs::write(&path, legacy).unwrap();
+
+        let store = TrustStore::load_or_create(&path).expect("migrate");
+        assert!(
+            store.verify(&peer_id, "tok-legacy"),
+            "migrated peer must be verifiable"
+        );
+
+        let rewritten = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            rewritten.contains("[[trusted]]"),
+            "file must be rewritten in Vec format: {rewritten}"
+        );
+
+        let reloaded = TrustStore::load_or_create(&path).expect("reload after migration");
+        assert!(reloaded.verify(&peer_id, "tok-legacy"));
+    }
+
+    #[test]
+    fn legacy_format_with_invalid_uuid_key_warns_and_skips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("trusted_peers.toml");
+        let legacy =
+            "[trusted.not-a-uuid]\npeer_name = \"Bob\"\nauth_token = \"tok-bad\"\n".to_string();
+        std::fs::write(&path, legacy).unwrap();
+
+        let store = TrustStore::load_or_create(&path).expect("migrate with bad key");
+        assert!(store.trusted.is_empty(), "bad-uuid entry must be skipped");
     }
 }

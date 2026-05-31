@@ -296,7 +296,9 @@ pub async fn stream_control(
             .await
             .map_err(|e| e.to_string())?;
     }
-    notify_remote(&core, sid.get(), stream_id, action).await;
+    if !matches!(action, StreamAction::SetMuted { .. }) {
+        notify_remote(&core, sid.get(), stream_id, action).await;
+    }
     Ok(())
 }
 

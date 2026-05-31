@@ -18,7 +18,7 @@ pub struct DeviceDescriptor {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SourceKind {
     Mic { device_id: String },
-    System,
+    System { device_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -320,7 +320,9 @@ mod tests {
     fn stream_request_round_trips_with_system_source() {
         let msg = SignalingMessage::StreamRequest {
             session_id: "sess-1".into(),
-            source: SourceKind::System,
+            source: SourceKind::System {
+                device_id: "Output:0:Built-in".into(),
+            },
             sink_device: "dev-b".into(),
         };
         let bytes = msg.encode_to_bytes().unwrap();
@@ -328,6 +330,7 @@ mod tests {
         assert_eq!(msg, back);
         let raw = String::from_utf8(bytes.to_vec()).unwrap();
         assert!(raw.contains("\"type\":\"system\""));
+        assert!(raw.contains("\"device_id\":\"Output:0:Built-in\""));
     }
 
     #[test]

@@ -24,7 +24,6 @@ pub enum PeerEvent {
 pub struct PeerConnectionHandle {
     pub tx: mpsc::Sender<SignalingMessage>,
     pub events: broadcast::Sender<PeerEvent>,
-    pub peer_addr: std::net::SocketAddr,
     pub remote_addr: std::net::SocketAddr,
 }
 
@@ -165,7 +164,6 @@ pub fn spawn_peer_connection(
     Ok(PeerConnectionHandle {
         tx: msg_tx,
         events: event_tx.clone(),
-        peer_addr,
         remote_addr: peer_addr,
     })
 }

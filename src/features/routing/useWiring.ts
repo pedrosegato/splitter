@@ -67,11 +67,12 @@ export function useWiring() {
         });
       } else {
         const remoteDevice = peerDevices?.find((d) => d.id === src.dev);
+        // Invalid targets are visually disabled so stray clicks are ignored here.
         requestStream.mutate({
           sessionId: session.id,
           source:
             remoteDevice?.kind === "SystemAudio"
-              ? { type: "system" }
+              ? { type: "system", device_id: src.dev }
               : { type: "mic", device_id: src.dev },
           sinkDeviceId: sink.dev,
         });

@@ -138,7 +138,7 @@ describe("useWiring", () => {
     await waitFor(() => expect(requestMutate).toHaveBeenCalledOnce());
     expect(requestMutate).toHaveBeenCalledWith({
       sessionId: "sess-1",
-      source: { type: "system" },
+      source: { type: "system", device_id: "rsys-1" },
       sinkDeviceId: "spk-1",
     });
   });

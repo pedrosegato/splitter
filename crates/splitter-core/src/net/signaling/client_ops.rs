@@ -182,7 +182,6 @@ mod tests {
             PeerConnectionHandle {
                 tx,
                 events,
-                peer_addr: addr,
                 remote_addr: addr,
             },
             rx,

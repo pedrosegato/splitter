@@ -363,7 +363,7 @@ pub fn spawn_acceptor(
                         };
                         let (source_device, source_is_system) = match source {
                             SourceKind::Mic { device_id } => (device_id, false),
-                            SourceKind::System => (String::new(), true),
+                            SourceKind::System { device_id } => (device_id, true),
                         };
                         let core2 = core.clone();
                         let sink_peer = peer_id;

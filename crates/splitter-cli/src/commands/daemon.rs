@@ -1054,6 +1054,10 @@ fn spawn_stream_open_acceptor(
     });
 }
 
+fn reconnect_outcome_is_rejected(outcome: &splitter_core::net::signaling::ConnectOutcome) -> bool {
+    !outcome.accepted
+}
+
 pub(crate) struct ReconnectArgs {
     pub peer_id: Uuid,
     pub discovered: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
@@ -1160,8 +1164,17 @@ pub(crate) fn spawn_reconnect_loop(args: ReconnectArgs) {
                     }
                     return;
                 }
-                Ok(_) | Err(_) => {
-                    tracing::debug!(%peer_id, "reconnect attempt failed, retrying");
+                Ok(outcome) if reconnect_outcome_is_rejected(&outcome) => {
+                    tracing::warn!(
+                        %peer_id,
+                        reason = ?outcome.reason,
+                        "reconnect explicitly rejected by peer; giving up"
+                    );
+                    return;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::debug!(%peer_id, "reconnect attempt failed: {e}, retrying");
                 }
             }
 
@@ -1321,6 +1334,46 @@ mod tests {
             .find(|s| s.remote_peer_id == remote && s.state == SessionState::Active);
         assert!(existing.is_some(), "should find existing active session");
         assert_eq!(existing.unwrap().id, sid);
+    }
+
+    #[tokio::test]
+    async fn reconnect_predicate_rejects_non_accepted_outcome() {
+        use splitter_core::net::signaling::{spawn_peer_connection, ConnectOutcome};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let handle = spawn_peer_connection(stream, None).unwrap();
+        let rejected = ConnectOutcome {
+            remote_peer_id: None,
+            handle,
+            accepted: false,
+            reason: Some("not trusted".into()),
+        };
+        assert!(
+            reconnect_outcome_is_rejected(&rejected),
+            "accepted=false must be flagged as rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_predicate_allows_accepted_outcome() {
+        use splitter_core::net::signaling::{spawn_peer_connection, ConnectOutcome};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let handle = spawn_peer_connection(stream, None).unwrap();
+        let accepted = ConnectOutcome {
+            remote_peer_id: None,
+            handle,
+            accepted: true,
+            reason: None,
+        };
+        assert!(
+            !reconnect_outcome_is_rejected(&accepted),
+            "accepted=true must not be flagged as rejected"
+        );
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub struct JitterBuffer {
     target_depth: usize,
     next_expected_seq: Option<u32>,
     queue: BTreeMap<u32, (Packet, Instant)>,
+    arrival_order: VecDeque<u32>,
     arrival_intervals_ms: VecDeque<u32>,
     last_arrival: Option<Instant>,
     pops_since_resize: u32,
@@ -38,6 +39,7 @@ impl JitterBuffer {
             target_depth: initial_target,
             next_expected_seq: None,
             queue: BTreeMap::new(),
+            arrival_order: VecDeque::new(),
             arrival_intervals_ms: VecDeque::with_capacity(256),
             last_arrival: None,
             pops_since_resize: 0,
@@ -72,7 +74,11 @@ impl JitterBuffer {
         }
         self.last_arrival = Some(arrival);
         let seq = packet.seq;
-        self.queue.insert(packet.seq, (packet, arrival));
+        let is_new = !self.queue.contains_key(&seq);
+        self.queue.insert(seq, (packet, arrival));
+        if is_new {
+            self.arrival_order.push_back(seq);
+        }
         // Initialise next_expected_seq to the smallest seq we have buffered so
         // that out-of-order early arrivals don't skew the starting point.
         match self.next_expected_seq {
@@ -86,6 +92,7 @@ impl JitterBuffer {
         let want = self.next_expected_seq?;
         if self.queue.contains_key(&want) {
             let (pkt, _) = self.queue.remove(&want)?;
+            self.arrival_order.retain(|&s| s != want);
             self.next_expected_seq = Some(want.wrapping_add(1));
             self.bump_pops();
             return Some(JitterOutput::Packet(pkt));
@@ -93,7 +100,8 @@ impl JitterBuffer {
         if self.queue.is_empty() {
             return None;
         }
-        let oldest_arrival = self.queue.values().next().map(|(_, t)| *t)?;
+        let oldest_seq = *self.arrival_order.front()?;
+        let oldest_arrival = self.queue.get(&oldest_seq).map(|(_, t)| *t)?;
         let age_ms = now.duration_since(oldest_arrival).as_millis() as u32;
         if age_ms >= self.max_depth_ms {
             let lost = JitterOutput::Lost { seq: want };
@@ -232,5 +240,43 @@ mod tests {
     fn max_depth_clamped_to_hard_cap() {
         let jb = JitterBuffer::new(JitterMode::Auto, 10_000);
         assert!(jb.max_depth_ms <= MAX_DEPTH_MS_HARD_CAP);
+    }
+
+    #[test]
+    fn age_gating_uses_oldest_arrival_not_lowest_seq() {
+        use std::time::Duration;
+
+        // Scenario: packets arrive out-of-order relative to their seq numbers.
+        // seq=10 arrives first (t0), seq=7 arrives next (t0+20ms), seq=4 arrives last (t0+40ms).
+        // After popping seq=4, the buffer holds seq=7 and seq=10 with seq=5 missing.
+        // The OLDEST ARRIVAL is seq=10 (arrived at t0).
+        // The LOWEST SEQ (buggy path) is seq=7 (arrived at t0+20ms).
+        //
+        // At now=t0+60ms with max_depth_ms=50ms:
+        //   Correct (arrival order): age = 60ms >= 50ms → emit Lost{seq=5}
+        //   Buggy  (seq order):      age = 40ms <  50ms → return None  (wrong)
+        let mut jb = JitterBuffer::new(JitterMode::Min, 50);
+        let t0 = Instant::now();
+
+        jb.push(pkt(10), t0);
+        jb.push(pkt(7), t0 + Duration::from_millis(20));
+        jb.push(pkt(4), t0 + Duration::from_millis(40));
+
+        let popped = jb.pop_ready(t0 + Duration::from_millis(40)).unwrap();
+        match popped {
+            JitterOutput::Packet(p) => assert_eq!(p.seq, 4),
+            _ => panic!("expected Packet(seq=4)"),
+        }
+
+        let now = t0 + Duration::from_millis(60);
+        match jb.pop_ready(now) {
+            Some(JitterOutput::Lost { seq }) => assert_eq!(seq, 5),
+            Some(JitterOutput::Packet(p)) => {
+                panic!("expected Lost{{seq=5}}, got Packet(seq={})", p.seq)
+            }
+            None => {
+                panic!("expected Lost{{seq=5}} — oldest arrival is seq=10 at t0, age=60ms >= 50ms")
+            }
+        }
     }
 }

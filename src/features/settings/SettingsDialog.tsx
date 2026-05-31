@@ -18,6 +18,9 @@ import {
 import { useSettingsForm } from "./useSettingsForm";
 import { useThemeStore, applyTheme } from "@/stores/theme";
 import { useUpdater } from "@/hooks/useUpdater";
+import { useIdentity } from "@/hooks/useIdentity";
+import { useSetDeviceName } from "@/hooks/useDeviceName";
+import { useResetSettings } from "@/hooks/useSettings";
 
 function AppVersion() {
   const [v, setV] = useState("");
@@ -118,6 +121,30 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
   const { settings, isLoading, isSaved, set, setAutostart } = useSettingsForm();
   const { theme, setTheme } = useThemeStore();
   const { state: updateState, checkForUpdates } = useUpdater();
+  const { data: identity } = useIdentity();
+  const setDeviceName = useSetDeviceName();
+  const resetSettings = useResetSettings();
+  const [nameDraft, setNameDraft] = useState("");
+
+  useEffect(() => {
+    if (identity) setNameDraft(identity.peer_name);
+  }, [identity]);
+
+  const commitName = () => {
+    if (identity && nameDraft.trim() && nameDraft !== identity.peer_name) {
+      setDeviceName.mutate(nameDraft);
+    }
+  };
+
+  const handleReset = () => {
+    if (
+      window.confirm(
+        "Restaurar todas as configurações para o padrão? O nome do dispositivo não será alterado.",
+      )
+    ) {
+      resetSettings.mutate(undefined, { onSuccess: () => setAutostart(false) });
+    }
+  };
 
   const [savedVisible, setSavedVisible] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -155,6 +182,24 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
         </DialogHeader>
 
         <div className="px-[11px] py-[11px] overflow-y-auto max-h-[520px]">
+          <SectionLabel>Dispositivo</SectionLabel>
+
+          <Row>
+            <SettingLabel htmlFor="device-name">Nome do dispositivo</SettingLabel>
+            <Input
+              id="device-name"
+              aria-label="Nome do dispositivo"
+              value={nameDraft}
+              maxLength={40}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+              className="w-[170px] h-[28px] text-[12px] bg-board border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold"
+            />
+          </Row>
+
           <SectionLabel>Conexão</SectionLabel>
 
           <Row>
@@ -393,7 +438,14 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
           </Row>
         </div>
 
-        <div className="flex items-center justify-end px-[13px] py-[9px] border-t border-line">
+        <div className="flex items-center justify-between px-[13px] py-[9px] border-t border-line">
+          <button
+            type="button"
+            onClick={handleReset}
+            className="font-mono text-[11px] text-ink-3 bg-transparent border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-gold hover:border-gold"
+          >
+            Restaurar padrões
+          </button>
           <button
             type="button"
             onClick={() => onOpenChange(false)}

@@ -5,4 +5,5 @@ export const useSnapshot = () =>
   useQuery({
     queryKey: ["snapshot"],
     queryFn: () => unwrap(commands.snapshot()),
+    refetchInterval: 3000,
   });

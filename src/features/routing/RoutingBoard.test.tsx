@@ -22,7 +22,7 @@ vi.mock("@/hooks/useStreams", () => ({
 vi.mock("@/features/routing/useWiring");
 
 import { useIdentity } from "@/hooks/useIdentity";
-import { useDevices } from "@/hooks/useDevices";
+import { useDevices, usePeerDevices } from "@/hooks/useDevices";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { usePeers, usePendingPeers } from "@/hooks/usePeers";
 import { useDisconnect } from "@/hooks/useConnection";
@@ -30,6 +30,7 @@ import { useWiring } from "@/features/routing/useWiring";
 
 const mockedUseIdentity = useIdentity as ReturnType<typeof vi.fn>;
 const mockedUseDevices = useDevices as ReturnType<typeof vi.fn>;
+const mockedUsePeerDevices = usePeerDevices as ReturnType<typeof vi.fn>;
 const mockedUseSnapshot = useSnapshot as ReturnType<typeof vi.fn>;
 const mockedUsePeers = usePeers as ReturnType<typeof vi.fn>;
 const mockedUsePendingPeers = usePendingPeers as ReturnType<typeof vi.fn>;
@@ -85,6 +86,7 @@ beforeEach(() => {
 
   mockedUseIdentity.mockReturnValue({ data: IDENTITY });
   mockedUseDevices.mockReturnValue({ data: DEVICES });
+  mockedUsePeerDevices.mockReturnValue({ data: [] });
   mockedUseSnapshot.mockReturnValue({ data: [SESSION] });
   mockedUsePeers.mockReturnValue({ data: PEERS });
   mockedUsePendingPeers.mockReturnValue({ data: [] });

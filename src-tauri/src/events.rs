@@ -29,3 +29,6 @@ pub struct PeerDisconnected {
     pub peer_id: String,
     pub reason: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct SnapshotChanged;

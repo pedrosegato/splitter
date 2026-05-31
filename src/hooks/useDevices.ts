@@ -6,3 +6,10 @@ export const useDevices = () =>
     queryKey: ["devices"],
     queryFn: () => unwrap(commands.listDevices()),
   });
+
+export const usePeerDevices = (peerId: string | undefined) =>
+  useQuery({
+    queryKey: ["peerDevices", peerId],
+    queryFn: () => unwrap(commands.peerDevices(peerId!)),
+    enabled: !!peerId,
+  });

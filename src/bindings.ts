@@ -196,11 +196,13 @@ export const events = __makeEvents__<{
 incomingSession: IncomingSession,
 peerDisconnected: PeerDisconnected,
 peersChanged: PeersChanged,
+snapshotChanged: SnapshotChanged,
 statsTick: StatsTick
 }>({
 incomingSession: "incoming-session",
 peerDisconnected: "peer-disconnected",
 peersChanged: "peers-changed",
+snapshotChanged: "snapshot-changed",
 statsTick: "stats-tick"
 })
 
@@ -227,6 +229,7 @@ export type Permissions = { microphone: PermStatus; screen: PermStatus }
 export type SessionSnapshot = { id: string; remote_peer_id: string; state: SessionState; streams: StreamSnapshot[] }
 export type SessionState = "pending_outgoing" | "pending_incoming" | "active" | "closed"
 export type Settings = { auto_accept_trusted: boolean; auto_start_with_system: boolean; default_bitrate: number; fec_mode: FecMode; fec_on_threshold_pct: number; fec_off_threshold_pct: number; fec_hysteresis_secs: number; jitter_mode: JitterMode; jitter_max_depth_ms: number; log_level: LogLevel; metrics_enabled: boolean; metrics_port: number; signaling_port: number }
+export type SnapshotChanged = null
 export type StatsTick = StreamStat[]
 export type StreamSnapshot = { id: number; state: StreamState; source_peer: string; sink_peer: string; udp_port: number; source_device: string; sink_device: string; volume: number; muted: boolean }
 export type StreamStat = { session_id: string; stream_id: number; rtt_ms: number; loss_pct: number; kbps_sent: number; kbps_received: number }

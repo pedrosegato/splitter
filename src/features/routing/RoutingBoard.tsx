@@ -8,13 +8,13 @@ import { useWiring } from "./useWiring";
 import { useTrayHealth } from "./useTrayHealth";
 import { streamColor } from "./useWireGeometry";
 import { useIdentity } from "@/hooks/useIdentity";
-import { useDevices } from "@/hooks/useDevices";
+import { useDevices, usePeerDevices } from "@/hooks/useDevices";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { usePeers } from "@/hooks/usePeers";
 import { useDisconnect } from "@/hooks/useConnection";
 import { useUiStore } from "@/stores/ui";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { StreamSnapshot } from "@/bindings";
+import type { StreamSnapshot, DeviceDescriptor } from "@/bindings";
 
 function useRemoteName(remotePeerId: string | undefined): string {
   const { data: peers } = usePeers();
@@ -24,17 +24,29 @@ function useRemoteName(remotePeerId: string | undefined): string {
   return remotePeerId.slice(0, 8);
 }
 
-function deriveRemoteDevices(streams: StreamSnapshot[], remotePeerId: string) {
+function deriveRemoteDevices(
+  streams: StreamSnapshot[],
+  remotePeerId: string,
+  devices: DeviceDescriptor[],
+) {
   const sourceMap = new Map<string, string>();
   const sinkMap = new Map<string, string>();
 
   sinkMap.set("default", "Padrão");
 
+  for (const d of devices) {
+    if (d.kind === "Output") {
+      sinkMap.set(d.id, d.name);
+    } else {
+      sourceMap.set(d.id, d.name);
+    }
+  }
+
   for (const s of streams) {
-    if (s.source_peer === remotePeerId) {
+    if (s.source_peer === remotePeerId && !sourceMap.has(s.source_device)) {
       sourceMap.set(s.source_device, s.source_device);
     }
-    if (s.sink_peer === remotePeerId) {
+    if (s.sink_peer === remotePeerId && !sinkMap.has(s.sink_device)) {
       sinkMap.set(s.sink_device, s.sink_device);
     }
   }
@@ -100,9 +112,10 @@ export function RoutingBoard() {
 
   const remotePeerId = session?.remote_peer_id;
   const remoteName = useRemoteName(remotePeerId);
+  const { data: peerDevices } = usePeerDevices(remotePeerId);
 
   const { remoteSources, remoteSinks } = remotePeerId
-    ? deriveRemoteDevices(streams, remotePeerId)
+    ? deriveRemoteDevices(streams, remotePeerId, peerDevices ?? [])
     : { remoteSources: [], remoteSinks: [] };
 
   const wiredPortIds = buildWiredPortIds(streams);

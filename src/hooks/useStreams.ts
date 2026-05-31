@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import type { StreamAction } from "@/bindings";
 import { commands, unwrap } from "@/lib/api";
 
 export const useOpenStream = () => {
@@ -96,16 +97,11 @@ export const useStreamControl = () => {
       sessionId,
       streamId,
       action,
-      value,
     }: {
       sessionId: string;
       streamId: number;
-      action: string;
-      value?: number | null;
-    }) =>
-      unwrap(
-        commands.streamControl(sessionId, streamId, action, value ?? null),
-      ),
+      action: StreamAction;
+    }) => unwrap(commands.streamControl(sessionId, streamId, action)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
     },

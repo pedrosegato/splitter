@@ -230,7 +230,7 @@ async fn graceful_shutdown(
             let tx = find_conn_tx(&srv.connections, outgoing, sess.remote_peer_id).await;
             if let Some(tx) = tx {
                 for stream in &sess.streams {
-                    notify_remote_control(&tx, stream.id, StreamAction::Close, None).await;
+                    notify_remote_control(&tx, stream.id, StreamAction::Close).await;
                 }
                 let _ = tx
                     .send(SignalingMessage::SessionResponse {

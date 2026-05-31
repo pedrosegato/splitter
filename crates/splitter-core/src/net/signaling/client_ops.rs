@@ -160,15 +160,10 @@ pub async fn notify_remote_control(
     tx: &mpsc::Sender<SignalingMessage>,
     stream_id: u8,
     action: StreamAction,
-    volume: Option<f32>,
 ) {
-    tx.send(SignalingMessage::StreamControl {
-        stream_id,
-        action,
-        volume,
-    })
-    .await
-    .ok();
+    tx.send(SignalingMessage::StreamControl { stream_id, action })
+        .await
+        .ok();
 }
 
 #[cfg(test)]

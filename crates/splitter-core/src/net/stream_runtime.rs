@@ -64,6 +64,19 @@ pub enum StreamControlSignal {
     Close,
 }
 
+impl From<crate::net::signaling::StreamAction> for StreamControlSignal {
+    fn from(action: crate::net::signaling::StreamAction) -> Self {
+        use crate::net::signaling::StreamAction;
+        match action {
+            StreamAction::Pause => StreamControlSignal::Pause,
+            StreamAction::Resume => StreamControlSignal::Resume,
+            StreamAction::Close => StreamControlSignal::Close,
+            StreamAction::SetVolume { volume } => StreamControlSignal::SetVolume(volume),
+            StreamAction::SetMuted { muted } => StreamControlSignal::SetMuted(muted),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum DeviceGuard {
     None,

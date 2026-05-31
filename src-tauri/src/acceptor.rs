@@ -226,12 +226,8 @@ pub fn spawn_acceptor(
                             }
                         }
                     }
-                    SignalingMessage::StreamControl {
-                        stream_id,
-                        action,
-                        volume,
-                    } => {
-                        match action {
+                    SignalingMessage::StreamControl { stream_id, action } => {
+                        match &action {
                             StreamAction::Close => {
                                 tracing::info!(peer = %peer_id, stream_id, "remote closed stream")
                             }
@@ -241,11 +237,17 @@ pub fn spawn_acceptor(
                             StreamAction::Resume => {
                                 tracing::info!(peer = %peer_id, stream_id, "remote resumed stream")
                             }
-                            StreamAction::SetVolume => tracing::info!(
+                            StreamAction::SetVolume { volume } => tracing::info!(
                                 peer = %peer_id,
                                 stream_id,
-                                volume = volume.unwrap_or(1.0),
+                                volume,
                                 "remote set stream volume"
+                            ),
+                            StreamAction::SetMuted { muted } => tracing::info!(
+                                peer = %peer_id,
+                                stream_id,
+                                muted,
+                                "remote set stream muted"
                             ),
                         }
                         let session_ids: Vec<Uuid> = core
@@ -256,41 +258,23 @@ pub fn spawn_acceptor(
                             .filter(|s| s.remote_peer_id == peer_id)
                             .map(|s| s.id)
                             .collect();
-                        match action {
-                            StreamAction::Close => {
-                                for sid in session_ids {
-                                    let _ = core.stream_registry.close(&sid, stream_id).await;
-                                    let _ = core.sessions.remove_stream(&sid, stream_id).await;
+                        if matches!(action, StreamAction::Close) {
+                            for sid in session_ids {
+                                let _ = core.stream_registry.close(&sid, stream_id).await;
+                                let _ = core.sessions.remove_stream(&sid, stream_id).await;
+                            }
+                        } else {
+                            let signal = StreamControlSignal::from(action);
+                            if let StreamControlSignal::SetMuted(m) = signal {
+                                for sid in &session_ids {
+                                    let _ = core.sessions.set_stream_muted(sid, stream_id, m).await;
                                 }
                             }
-                            StreamAction::Pause => {
-                                for sid in &session_ids {
-                                    let _ = core
-                                        .stream_registry
-                                        .send_control(sid, stream_id, StreamControlSignal::Pause)
-                                        .await;
-                                }
-                            }
-                            StreamAction::Resume => {
-                                for sid in &session_ids {
-                                    let _ = core
-                                        .stream_registry
-                                        .send_control(sid, stream_id, StreamControlSignal::Resume)
-                                        .await;
-                                }
-                            }
-                            StreamAction::SetVolume => {
-                                let gain = volume.unwrap_or(1.0).clamp(0.0, 2.0);
-                                for sid in &session_ids {
-                                    let _ = core
-                                        .stream_registry
-                                        .send_control(
-                                            sid,
-                                            stream_id,
-                                            StreamControlSignal::SetVolume(gain),
-                                        )
-                                        .await;
-                                }
+                            for sid in &session_ids {
+                                let _ = core
+                                    .stream_registry
+                                    .send_control(sid, stream_id, signal)
+                                    .await;
                             }
                         }
                         core.emit(SnapshotChanged);

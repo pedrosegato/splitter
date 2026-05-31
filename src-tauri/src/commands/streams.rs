@@ -12,44 +12,11 @@ use std::time::Duration;
 use tauri::State;
 use uuid::Uuid;
 
-fn signal_from(action: &str, value: Option<f32>) -> Result<StreamControlSignal, String> {
-    match action {
-        "set_volume" => {
-            let v = value.ok_or_else(|| "set_volume requires a value".to_string())?;
-            Ok(StreamControlSignal::SetVolume(v))
-        }
-        "set_muted" => {
-            let v = value.ok_or_else(|| "set_muted requires a value".to_string())?;
-            Ok(StreamControlSignal::SetMuted(v != 0.0))
-        }
-        "pause" => Ok(StreamControlSignal::Pause),
-        "resume" => Ok(StreamControlSignal::Resume),
-        "close" => Ok(StreamControlSignal::Close),
-        other => Err(format!("unknown stream action: {other}")),
-    }
-}
-
-fn remote_action_from(signal: &StreamControlSignal) -> Option<(StreamAction, Option<f32>)> {
-    match signal {
-        StreamControlSignal::Pause => Some((StreamAction::Pause, None)),
-        StreamControlSignal::Resume => Some((StreamAction::Resume, None)),
-        StreamControlSignal::Close => Some((StreamAction::Close, None)),
-        StreamControlSignal::SetVolume(v) => Some((StreamAction::SetVolume, Some(*v))),
-        StreamControlSignal::SetMuted(_) => None,
-    }
-}
-
 async fn find_peer_conn(core: &AppCore, peer_id: Uuid) -> Option<ConnEndpoints> {
     find_conn(&core.server.connections, &core.outgoing, peer_id).await
 }
 
-pub(crate) async fn notify_remote(
-    core: &AppCore,
-    sid: Uuid,
-    stream_id: u8,
-    action: StreamAction,
-    volume: Option<f32>,
-) {
+pub(crate) async fn notify_remote(core: &AppCore, sid: Uuid, stream_id: u8, action: StreamAction) {
     let snap = core.sessions.snapshot().await;
     let remote = match snap.iter().find(|s| s.id == sid).map(|s| s.remote_peer_id) {
         Some(r) => r,
@@ -60,7 +27,7 @@ pub(crate) async fn notify_remote(
     };
     match find_peer_conn(core, remote).await {
         Some(conn) => {
-            notify_remote_control(&conn.tx, stream_id, action, volume).await;
+            notify_remote_control(&conn.tx, stream_id, action).await;
         }
         None => {
             tracing::warn!(%sid, %remote, "notify_remote: no live connection to remote peer, skipping remote signal");
@@ -286,7 +253,7 @@ pub async fn close_stream(
         .await
         .map_err(|e| e.to_string())?;
     let _ = core.sessions.remove_stream(&sid, stream_id).await;
-    notify_remote(&core, sid, stream_id, StreamAction::Close, None).await;
+    notify_remote(&core, sid, stream_id, StreamAction::Close).await;
     Ok(())
 }
 
@@ -296,12 +263,10 @@ pub async fn stream_control(
     core: State<'_, Arc<AppCore>>,
     session_id: String,
     stream_id: u8,
-    action: String,
-    value: Option<f32>,
+    action: StreamAction,
 ) -> Result<(), String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
-    let signal = signal_from(&action, value)?;
-    let remote_action = remote_action_from(&signal);
+    let signal = StreamControlSignal::from(action.clone());
     if matches!(signal, StreamControlSignal::Close) {
         core.stream_registry
             .close(&sid, stream_id)
@@ -319,9 +284,7 @@ pub async fn stream_control(
             .await
             .map_err(|e| e.to_string())?;
     }
-    if let Some((ra, rv)) = remote_action {
-        notify_remote(&core, sid, stream_id, ra, rv).await;
-    }
+    notify_remote(&core, sid, stream_id, action).await;
     Ok(())
 }
 
@@ -330,104 +293,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn signal_from_set_volume() {
+    fn stream_action_into_signal_set_volume() {
         assert_eq!(
-            signal_from("set_volume", Some(0.5)).unwrap(),
+            StreamControlSignal::from(StreamAction::SetVolume { volume: 0.5 }),
             StreamControlSignal::SetVolume(0.5)
         );
     }
 
     #[test]
-    fn signal_from_set_volume_missing_value_errors() {
-        assert!(signal_from("set_volume", None).is_err());
-    }
-
-    #[test]
-    fn signal_from_set_muted_true() {
+    fn stream_action_into_signal_set_muted() {
         assert_eq!(
-            signal_from("set_muted", Some(1.0)).unwrap(),
+            StreamControlSignal::from(StreamAction::SetMuted { muted: true }),
             StreamControlSignal::SetMuted(true)
         );
-    }
-
-    #[test]
-    fn signal_from_set_muted_false() {
         assert_eq!(
-            signal_from("set_muted", Some(0.0)).unwrap(),
+            StreamControlSignal::from(StreamAction::SetMuted { muted: false }),
             StreamControlSignal::SetMuted(false)
         );
     }
 
     #[test]
-    fn signal_from_pause() {
+    fn stream_action_into_signal_pause_resume_close() {
         assert_eq!(
-            signal_from("pause", None).unwrap(),
+            StreamControlSignal::from(StreamAction::Pause),
             StreamControlSignal::Pause
         );
-    }
-
-    #[test]
-    fn signal_from_resume() {
         assert_eq!(
-            signal_from("resume", None).unwrap(),
+            StreamControlSignal::from(StreamAction::Resume),
             StreamControlSignal::Resume
         );
-    }
-
-    #[test]
-    fn signal_from_close() {
         assert_eq!(
-            signal_from("close", None).unwrap(),
+            StreamControlSignal::from(StreamAction::Close),
             StreamControlSignal::Close
-        );
-    }
-
-    #[test]
-    fn signal_from_unknown_errors() {
-        assert!(signal_from("frobnicate", None).is_err());
-    }
-
-    #[test]
-    fn remote_action_from_pause() {
-        assert_eq!(
-            remote_action_from(&StreamControlSignal::Pause),
-            Some((StreamAction::Pause, None))
-        );
-    }
-
-    #[test]
-    fn remote_action_from_resume() {
-        assert_eq!(
-            remote_action_from(&StreamControlSignal::Resume),
-            Some((StreamAction::Resume, None))
-        );
-    }
-
-    #[test]
-    fn remote_action_from_close() {
-        assert_eq!(
-            remote_action_from(&StreamControlSignal::Close),
-            Some((StreamAction::Close, None))
-        );
-    }
-
-    #[test]
-    fn remote_action_from_set_volume() {
-        assert_eq!(
-            remote_action_from(&StreamControlSignal::SetVolume(0.75)),
-            Some((StreamAction::SetVolume, Some(0.75)))
-        );
-    }
-
-    #[test]
-    fn remote_action_from_set_muted_is_none() {
-        assert_eq!(
-            remote_action_from(&StreamControlSignal::SetMuted(true)),
-            None
-        );
-        assert_eq!(
-            remote_action_from(&StreamControlSignal::SetMuted(false)),
-            None
         );
     }
 

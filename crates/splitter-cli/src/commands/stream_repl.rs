@@ -159,7 +159,7 @@ async fn stream_close(
     registry.close(&sid, stream_id).await?;
     if let Some(remote) = remote {
         if let Some(conn) = find_conn(&server.connections, outgoing, remote).await {
-            notify_remote_control(&conn.tx, stream_id, StreamAction::Close, None).await;
+            notify_remote_control(&conn.tx, stream_id, StreamAction::Close).await;
         }
     }
     #[allow(clippy::print_stdout)]
@@ -188,7 +188,12 @@ async fn stream_volume(
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
         if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
-            notify_remote_control(&conn.tx, stream_id, StreamAction::SetVolume, Some(gain)).await;
+            notify_remote_control(
+                &conn.tx,
+                stream_id,
+                StreamAction::SetVolume { volume: gain },
+            )
+            .await;
         }
     }
     Ok(())
@@ -230,7 +235,7 @@ async fn stream_set_paused(
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
         if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
-            notify_remote_control(&conn.tx, stream_id, action, None).await;
+            notify_remote_control(&conn.tx, stream_id, action).await;
         }
     }
     Ok(())

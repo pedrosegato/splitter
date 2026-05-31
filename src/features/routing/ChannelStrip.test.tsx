@@ -78,8 +78,7 @@ describe("ChannelStrip", () => {
     expect(mockStreamControlMutate).toHaveBeenCalledWith({
       sessionId: "sess-1",
       streamId: 1,
-      action: "set_muted",
-      value: 1,
+      action: { type: "set_muted", muted: true },
     });
   });
 
@@ -101,8 +100,7 @@ describe("ChannelStrip", () => {
     expect(mockStreamControlMutate).toHaveBeenLastCalledWith({
       sessionId: "sess-1",
       streamId: 1,
-      action: "set_muted",
-      value: 0,
+      action: { type: "set_muted", muted: false },
     });
   });
 

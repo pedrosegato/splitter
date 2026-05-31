@@ -30,12 +30,8 @@ pub(crate) fn spawn_stream_open_acceptor(
                     msg @ SignalingMessage::StreamOpen { .. } => {
                         handle_stream_open(&ctx, peer_id, &conn_tx, &default_output, msg).await;
                     }
-                    SignalingMessage::StreamControl {
-                        stream_id,
-                        action,
-                        volume,
-                    } => {
-                        handle_stream_control(&ctx, peer_id, stream_id, action, volume).await;
+                    SignalingMessage::StreamControl { stream_id, action } => {
+                        handle_stream_control(&ctx, peer_id, stream_id, action).await;
                     }
                     SignalingMessage::SessionResponse {
                         session_id,
@@ -183,12 +179,11 @@ async fn handle_stream_control(
     peer_id: Uuid,
     stream_id: u8,
     action: StreamAction,
-    volume: Option<f32>,
 ) {
     let name = ctx.peer_display_name(&peer_id).await;
     #[allow(clippy::print_stdout)]
     {
-        match action {
+        match &action {
             StreamAction::Close => {
                 println!(">> {name} closed stream {stream_id}");
             }
@@ -198,14 +193,16 @@ async fn handle_stream_control(
             StreamAction::Resume => {
                 println!(">> {name} resumed stream {stream_id}");
             }
-            StreamAction::SetVolume => {
-                let pct = volume.map(|v| (v * 100.0).round() as u32).unwrap_or(100);
+            StreamAction::SetVolume { volume } => {
+                let pct = (volume * 100.0).round() as u32;
                 println!(">> {name} set stream {stream_id} volume to {pct}%");
+            }
+            StreamAction::SetMuted { muted } => {
+                let state = if *muted { "muted" } else { "unmuted" };
+                println!(">> {name} {state} stream {stream_id}");
             }
         }
     }
-    // Propagate the control signal to every matching local StreamRuntime
-    // (covers both source and sink runtimes on this daemon).
     let session_ids: Vec<Uuid> = ctx
         .sessions
         .snapshot()
@@ -215,33 +212,14 @@ async fn handle_stream_control(
         .map(|s| s.id)
         .collect();
     let registry = &ctx.stream_registry;
-    match action {
-        StreamAction::Close => {
-            for sid in session_ids {
-                let _ = registry.close(&sid, stream_id).await;
-            }
+    if matches!(action, StreamAction::Close) {
+        for sid in session_ids {
+            let _ = registry.close(&sid, stream_id).await;
         }
-        StreamAction::Pause => {
-            for sid in &session_ids {
-                let _ = registry
-                    .send_control(sid, stream_id, StreamControlSignal::Pause)
-                    .await;
-            }
-        }
-        StreamAction::Resume => {
-            for sid in &session_ids {
-                let _ = registry
-                    .send_control(sid, stream_id, StreamControlSignal::Resume)
-                    .await;
-            }
-        }
-        StreamAction::SetVolume => {
-            let gain = volume.unwrap_or(1.0).clamp(0.0, 2.0);
-            for sid in &session_ids {
-                let _ = registry
-                    .send_control(sid, stream_id, StreamControlSignal::SetVolume(gain))
-                    .await;
-            }
+    } else {
+        let signal = StreamControlSignal::from(action);
+        for sid in &session_ids {
+            let _ = registry.send_control(sid, stream_id, signal).await;
         }
     }
 }

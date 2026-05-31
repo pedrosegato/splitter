@@ -149,9 +149,9 @@ async closeStream(sessionId: string, streamId: number) : Promise<Result<null, st
     else return { status: "error", error: e  as any };
 }
 },
-async streamControl(sessionId: string, streamId: number, action: string, value: number | null) : Promise<Result<null, string>> {
+async streamControl(sessionId: string, streamId: number, action: StreamAction) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("stream_control", { sessionId, streamId, action, value }) };
+    return { status: "ok", data: await TAURI_INVOKE("stream_control", { sessionId, streamId, action }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -239,6 +239,7 @@ export type SessionState = "pending_outgoing" | "pending_incoming" | "active" | 
 export type Settings = { auto_accept_trusted: boolean; auto_start_with_system: boolean; default_bitrate: number; fec_mode: FecMode; fec_on_threshold_pct: number; fec_off_threshold_pct: number; fec_hysteresis_secs: number; jitter_mode: JitterMode; jitter_max_depth_ms: number; log_level: LogLevel; metrics_enabled: boolean; metrics_port: number; signaling_port: number }
 export type SnapshotChanged = null
 export type StatsTick = StreamStat[]
+export type StreamAction = { type: "pause" } | { type: "resume" } | { type: "close" } | { type: "set_volume"; volume: number } | { type: "set_muted"; muted: boolean }
 export type StreamSnapshot = { id: number; state: StreamState; source_peer: string; sink_peer: string; udp_port: number; source_device: string; sink_device: string; volume: number; muted: boolean }
 export type StreamStat = { session_id: string; stream_id: number; rtt_ms: number; loss_pct: number; kbps_sent: number; kbps_received: number }
 export type StreamState = "negotiating" | "active" | "paused" | "error" | "closed"

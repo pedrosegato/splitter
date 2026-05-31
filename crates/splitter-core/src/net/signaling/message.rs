@@ -31,13 +31,15 @@ pub struct CodecParams {
     pub frame_ms: u32,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamAction {
     Pause,
     Resume,
     Close,
-    SetVolume,
+    SetVolume { volume: f32 },
+    SetMuted { muted: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -93,8 +95,6 @@ pub enum SignalingMessage {
     StreamControl {
         stream_id: u8,
         action: StreamAction,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        volume: Option<f32>,
     },
     Heartbeat {
         timestamp_ms: u64,
@@ -260,14 +260,42 @@ mod tests {
     }
 
     #[test]
-    fn stream_control_set_volume_serializes_snake_case() {
+    fn stream_control_set_volume_carries_volume_in_variant() {
         let msg = SignalingMessage::StreamControl {
             stream_id: 0,
-            action: StreamAction::SetVolume,
-            volume: Some(0.5),
+            action: StreamAction::SetVolume { volume: 0.5 },
         };
         let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
-        assert!(raw.contains("\"action\":\"set_volume\""));
+        assert!(raw.contains("\"type\":\"set_volume\""));
+        assert!(raw.contains("\"volume\":0.5"));
+        let back = SignalingMessage::decode_from_slice(raw.as_bytes()).unwrap();
+        assert_eq!(msg, back);
+    }
+
+    #[test]
+    fn stream_control_pause_has_no_volume() {
+        let msg = SignalingMessage::StreamControl {
+            stream_id: 3,
+            action: StreamAction::Pause,
+        };
+        let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
+        assert!(raw.contains("\"type\":\"pause\""));
+        assert!(!raw.contains("volume"));
+        let back = SignalingMessage::decode_from_slice(raw.as_bytes()).unwrap();
+        assert_eq!(msg, back);
+    }
+
+    #[test]
+    fn stream_control_set_muted_carries_muted_in_variant() {
+        let msg = SignalingMessage::StreamControl {
+            stream_id: 1,
+            action: StreamAction::SetMuted { muted: true },
+        };
+        let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
+        assert!(raw.contains("\"type\":\"set_muted\""));
+        assert!(raw.contains("\"muted\":true"));
+        let back = SignalingMessage::decode_from_slice(raw.as_bytes()).unwrap();
+        assert_eq!(msg, back);
     }
 
     #[test]

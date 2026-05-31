@@ -30,8 +30,7 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
       streamControl.mutate({
         sessionId,
         streamId: stream.id,
-        action: "set_muted",
-        value: next ? 1 : 0,
+        action: { type: "set_muted", muted: next },
       });
     },
     [muted, sessionId, stream.id, streamControl],
@@ -42,8 +41,7 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
       streamControl.mutate({
         sessionId,
         streamId: stream.id,
-        action: "set_volume",
-        value: values[0] / 100,
+        action: { type: "set_volume", volume: values[0] / 100 },
       });
     },
     [sessionId, stream.id, streamControl],

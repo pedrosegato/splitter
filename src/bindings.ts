@@ -77,6 +77,14 @@ async acceptPending(index: number) : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async rejectPending(index: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reject_pending", { index }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async peerDevices(peerId: string) : Promise<Result<DeviceDescriptor[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("peer_devices", { peerId }) };

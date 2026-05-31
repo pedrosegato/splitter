@@ -11,4 +11,5 @@ export const usePendingPeers = () =>
   useQuery({
     queryKey: ["pending"],
     queryFn: () => unwrap(commands.pendingPeers()),
+    refetchInterval: 1500,
   });

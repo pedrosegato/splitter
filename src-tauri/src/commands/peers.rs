@@ -54,6 +54,13 @@ pub async fn accept_pending(core: State<'_, Arc<AppCore>>, index: u32) -> Result
 
 #[tauri::command]
 #[specta::specta]
+pub async fn reject_pending(core: State<'_, Arc<AppCore>>, index: u32) -> Result<(), String> {
+    core.server.pending.take(index as usize).await;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn connect_peer(
     core: State<'_, Arc<AppCore>>,
     host: String,

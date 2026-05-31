@@ -162,23 +162,23 @@ describe("ChannelStrip", () => {
 });
 
 describe("ChannelDock", () => {
-  it("shows 'sem streams' when streams array is empty", () => {
-    const { getByText } = render(
+  it("collapses (renders nothing) when streams array is empty", () => {
+    const { container } = render(
       <ChannelDock sessionId="sess-1" streams={[]} />,
       { wrapper: makeWrapper() },
     );
 
-    expect(getByText("sem streams")).toBeDefined();
+    expect(container.firstChild).toBeNull();
   });
 
-  it("shows 'sem streams' when sessionId is null", () => {
+  it("collapses (renders nothing) when sessionId is null", () => {
     const stream = makeStream();
-    const { getByText } = render(
+    const { container } = render(
       <ChannelDock sessionId={null} streams={[stream]} />,
       { wrapper: makeWrapper() },
     );
 
-    expect(getByText("sem streams")).toBeDefined();
+    expect(container.firstChild).toBeNull();
   });
 
   it("renders one strip per stream", () => {

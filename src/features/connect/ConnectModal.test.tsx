@@ -5,7 +5,6 @@ import { ConnectModal } from "./ConnectModal";
 
 const mockConnectMutate = vi.fn();
 const mockOpenSessionMutate = vi.fn();
-const mockAcceptPendingMutate = vi.fn();
 
 vi.mock("@/hooks/usePeers", () => ({
   usePeers: () => ({
@@ -19,30 +18,11 @@ vi.mock("@/hooks/usePeers", () => ({
       },
     ],
   }),
-  usePendingPeers: () => ({
-    data: [
-      {
-        peer_id: "pending-1",
-        peer_name: "Notebook João",
-        addr: "192.168.0.44:7373",
-      },
-    ],
-  }),
 }));
 
 vi.mock("@/hooks/useConnection", () => ({
-  useConnectPeer: () => ({
-    mutate: mockConnectMutate,
-    isPending: false,
-  }),
-  useOpenSession: () => ({
-    mutate: mockOpenSessionMutate,
-    isPending: false,
-  }),
-  useAcceptPending: () => ({
-    mutate: mockAcceptPendingMutate,
-    isPending: false,
-  }),
+  useConnectPeer: () => ({ mutate: mockConnectMutate, isPending: false }),
+  useOpenSession: () => ({ mutate: mockOpenSessionMutate, isPending: false }),
 }));
 
 function makeWrapper() {
@@ -59,25 +39,17 @@ describe("ConnectModal", () => {
     vi.clearAllMocks();
   });
 
-  it("renders peer name and parear button for discovered peer", () => {
-    const onOpenChange = vi.fn();
-    render(<ConnectModal open onOpenChange={onOpenChange} />, {
-      wrapper: makeWrapper(),
-    });
+  it("renders the discovered peer as a clickable row", () => {
+    render(<ConnectModal open onOpenChange={vi.fn()} />, { wrapper: makeWrapper() });
 
     expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
-    const content = document.body;
-    expect(within(content).getByText("Studio PC")).toBeTruthy();
-    expect(within(content).getByRole("button", { name: "parear" })).toBeTruthy();
+    expect(within(document.body).getByRole("button", { name: /Studio PC/i })).toBeTruthy();
   });
 
-  it("calls connectPeer.mutate with host, port and peerId when parear is clicked", () => {
-    render(<ConnectModal open onOpenChange={vi.fn()} />, {
-      wrapper: makeWrapper(),
-    });
+  it("pairs when the whole row is clicked", () => {
+    render(<ConnectModal open onOpenChange={vi.fn()} />, { wrapper: makeWrapper() });
 
-    const btn = within(document.body).getByRole("button", { name: "parear" });
-    fireEvent.click(btn);
+    fireEvent.click(within(document.body).getByRole("button", { name: /Studio PC/i }));
 
     expect(mockConnectMutate).toHaveBeenCalledWith(
       { host: "192.168.0.21", port: 7373, peerId: "peer-1" },
@@ -85,50 +57,12 @@ describe("ConnectModal", () => {
     );
   });
 
-  it("renders pending peer row and calls acceptPending.mutate with index 0 when aceitar is clicked", () => {
-    render(<ConnectModal open onOpenChange={vi.fn()} />, {
-      wrapper: makeWrapper(),
-    });
-
-    const content = document.body;
-    expect(within(content).getByText("Notebook João")).toBeTruthy();
-
-    const btn = within(content).getByRole("button", { name: "aceitar" });
-    fireEvent.click(btn);
-
-    expect(mockAcceptPendingMutate).toHaveBeenCalledWith({ index: 0 });
-  });
-
-  it("renders TOFU note", () => {
-    render(<ConnectModal open onOpenChange={vi.fn()} />, {
-      wrapper: makeWrapper(),
-    });
-
-    expect(
-      within(document.body).getByText("1ª conexão pede confiar no dispositivo"),
-    ).toBeTruthy();
-  });
-
   it("calls onOpenChange(false) when cancelar is clicked", () => {
     const onOpenChange = vi.fn();
-    render(<ConnectModal open onOpenChange={onOpenChange} />, {
-      wrapper: makeWrapper(),
-    });
+    render(<ConnectModal open onOpenChange={onOpenChange} />, { wrapper: makeWrapper() });
 
-    const btn = within(document.body).getByRole("button", { name: "cancelar" });
-    fireEvent.click(btn);
+    fireEvent.click(within(document.body).getByRole("button", { name: "cancelar" }));
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it("shows empty state when no discovered peers", () => {
-    vi.doMock("@/hooks/usePeers", () => ({
-      usePeers: () => ({ data: [] }),
-      usePendingPeers: () => ({ data: [] }),
-    }));
-
-    render(<ConnectModal open onOpenChange={vi.fn()} />, {
-      wrapper: makeWrapper(),
-    });
   });
 });

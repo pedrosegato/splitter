@@ -7,6 +7,7 @@ import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
+import { IncomingRequestDialog } from "@/features/connect/IncomingRequestDialog";
 import { AudioLines, Settings, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Toaster } from "@/components/ui/sonner";
@@ -105,6 +106,7 @@ export function App() {
       </main>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <OnboardingWizard />
+      <IncomingRequestDialog />
       <Toaster position="bottom-right" />
     </div>
   );

@@ -1,0 +1,37 @@
+[package]
+name = "splitter-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[test]]
+name = "end_to_end"
+path = "tests/end_to_end.rs"
+
+[[test]]
+name = "net_degradation"
+path = "tests/net_degradation.rs"
+
+[[test]]
+name = "audio_rms_sustained"
+path = "tests/audio_rms_sustained.rs"
+
+[[test]]
+name = "soak"
+path = "tests/soak.rs"
+
+[dependencies]
+splitter-core = { path = "../splitter-core" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+sysinfo = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

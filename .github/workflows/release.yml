@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# One release workflow per tag — cancel any in-flight run for the same ref.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-tauri:
+    permissions:
+      contents: write  # tauri-action needs write to create/update the GitHub Release
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Apple Silicon
+          - os: macos-latest
+            args: --target aarch64-apple-darwin
+            rust-target: aarch64-apple-darwin
+
+          # macOS Intel
+          - os: macos-latest
+            args: --target x86_64-apple-darwin
+            rust-target: x86_64-apple-darwin
+
+          # Linux (ubuntu-22.04 for glibc compatibility with older distros)
+          - os: ubuntu-22.04
+            args: ''
+            rust-target: ''
+
+          # Windows
+          - os: windows-latest
+            args: ''
+            rust-target: ''
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Add the cross-compile target for macOS matrix entries; empty string is fine for native.
+          targets: ${{ matrix.rust-target }}
+
+      # ── macOS: opus (required by cpal/opus encoder) ─────────────────────────
+      - name: Install macOS deps
+        if: runner.os == 'macOS'
+        run: brew install opus pkg-config
+
+      # ── Linux: WebKit + system tray + audio ─────────────────────────────────
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libasound2-dev \
+            libudev-dev \
+            libopus-dev \
+            pkg-config
+
+      # ── Windows: opus via vcpkg ──────────────────────────────────────────────
+      - name: Install Windows deps (opus via vcpkg)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install opus:x64-windows
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      # ── Build & publish ──────────────────────────────────────────────────────
+      - name: Build & publish (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # Updater artifact signing — if these secrets are absent the build
+          # still succeeds but updater artifacts won't carry a signature.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+          # ── Deferred: macOS code-signing & notarization (Tasks 6–7) ─────────
+          # Uncomment and provision these secrets when Apple Developer credentials
+          # are available. Without them the .app/.dmg are unsigned (Gatekeeper
+          # will warn on first launch).
+          #
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          # ── Deferred: Windows code-signing (Tasks 6–7) ───────────────────────
+          # Uncomment when a Windows Authenticode certificate is available.
+          #
+          # WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          # WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+        with:
+          # tauri-action resolves src-tauri/ automatically from the repo root.
+          projectPath: .
+
+          # The action creates/updates the GitHub Release identified by this tag,
+          # so each matrix job uploads its bundles to the same release object.
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Splitter ${{ github.ref_name }}'
+          releaseBody: 'See the assets to download and install.'
+          releaseDraft: true
+          prerelease: false
+
+          # Per-matrix build target flag (empty string = native).
+          args: ${{ matrix.args }}

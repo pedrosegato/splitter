@@ -1,0 +1,102 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import type { SourceKind, StreamAction } from "@/bindings";
+import { commands, unwrap } from "@/lib/api";
+
+export const useOpenStream = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      sourceDeviceId,
+      sourceIsSystem,
+      sinkPeerId,
+      sinkDeviceId,
+      bitrate,
+    }: {
+      sessionId: string;
+      sourceDeviceId: string;
+      sourceIsSystem: boolean;
+      sinkPeerId: string;
+      sinkDeviceId: string;
+      bitrate?: number | null;
+    }) =>
+      unwrap(
+        commands.openStream(
+          sessionId,
+          sourceDeviceId,
+          sourceIsSystem,
+          sinkPeerId,
+          sinkDeviceId,
+          bitrate ?? null,
+        ),
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+};
+
+export const useRequestStream = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      source,
+      sinkDeviceId,
+    }: {
+      sessionId: string;
+      source: SourceKind;
+      sinkDeviceId: string;
+    }) => unwrap(commands.requestStream(sessionId, source, sinkDeviceId)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+};
+
+export const useCloseStream = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      streamId,
+    }: {
+      sessionId: string;
+      streamId: number;
+    }) => unwrap(commands.closeStream(sessionId, streamId)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+};
+
+export const useStreamControl = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      streamId,
+      action,
+    }: {
+      sessionId: string;
+      streamId: number;
+      action: StreamAction;
+    }) => unwrap(commands.streamControl(sessionId, streamId, action)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["snapshot"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+};

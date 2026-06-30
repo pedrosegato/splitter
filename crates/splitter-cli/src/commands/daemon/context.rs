@@ -1,0 +1,91 @@
+use splitter_core::audio::devices::{list_devices, DeviceKind};
+use splitter_core::net::discovery::DiscoveredPeer;
+use splitter_core::net::signaling::{PeerConnectionHandle, PeerEvent};
+use splitter_core::net::stream_runtime::StreamRegistry;
+use splitter_core::net::trust::TrustStore;
+use splitter_core::{PeerIdentity, SessionManager};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+pub(crate) type PeerConnections = Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>;
+pub(crate) type DiscoveredPeers = Arc<RwLock<HashMap<String, DiscoveredPeer>>>;
+
+#[derive(Clone)]
+pub(crate) struct DaemonContext {
+    pub identity: PeerIdentity,
+    pub trust: Arc<RwLock<TrustStore>>,
+    pub sessions: Arc<SessionManager>,
+    pub stream_registry: Arc<StreamRegistry>,
+    pub discovered: DiscoveredPeers,
+    pub outgoing_connections: PeerConnections,
+    pub local_peer_id: Uuid,
+}
+
+impl DaemonContext {
+    pub(crate) async fn peer_display_name(&self, peer_id: &Uuid) -> String {
+        {
+            let map = self.discovered.read().await;
+            if let Some(p) = map.values().find(|p| p.peer_id == peer_id.to_string()) {
+                return p.peer_name.clone();
+            }
+        }
+        {
+            let t = self.trust.read().await;
+            if let Some(p) = t.peer_for(peer_id) {
+                return p.peer_name.clone();
+            }
+        }
+        short(peer_id)
+    }
+
+    pub(crate) async fn register_outgoing_connection(
+        &self,
+        peer_id: Uuid,
+        handle: PeerConnectionHandle,
+    ) {
+        super::peer_event_loop::spawn_stream_open_acceptor(
+            self.clone(),
+            handle.tx.clone(),
+            handle.events.subscribe(),
+            peer_id,
+        );
+        let mut events_rx = handle.events.subscribe();
+        self.outgoing_connections
+            .write()
+            .await
+            .insert(peer_id, handle);
+        let map = self.outgoing_connections.clone();
+        tokio::spawn(async move {
+            loop {
+                match events_rx.recv().await {
+                    Ok(PeerEvent::Disconnected { .. }) => {
+                        map.write().await.remove(&peer_id);
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "peer event stream lagged; continuing");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        map.write().await.remove(&peer_id);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+}
+
+pub(crate) fn short(u: &Uuid) -> String {
+    u.to_string().chars().take(8).collect()
+}
+
+pub(crate) fn pick_default_output_device_id() -> Option<String> {
+    list_devices()
+        .ok()?
+        .into_iter()
+        .find(|d| d.kind == DeviceKind::Output)
+        .map(|d| d.id)
+}

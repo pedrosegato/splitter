@@ -1,0 +1,12 @@
+pub(crate) mod audio_pipeline;
+pub(crate) mod autostart;
+pub(crate) mod daemon;
+pub(crate) mod devices;
+pub(crate) mod discover;
+pub(crate) mod logs;
+pub(crate) mod loop_cmd;
+pub(crate) mod metrics;
+pub(crate) mod recv;
+pub(crate) mod send;
+pub(crate) mod settings;
+pub(crate) mod stream_repl;

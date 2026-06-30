@@ -1,0 +1,23 @@
+---
+source: crates/splitter-cli/tests/help_snapshots.rs
+expression: output
+---
+Display real-time statistics for all active streams managed by the
+running daemon. Refreshes once per second. Press Ctrl-C to exit.
+
+Columns: session, stream, packets sent/recv/lost, bitrate kbps, RTT ms, bandwidth.
+
+Requires a running daemon (`splitter-cli daemon`).
+
+Examples:
+splitter-cli stats
+splitter-cli stats --stream-id 1
+
+Usage: splitter-cli stats [OPTIONS]
+
+Options:
+      --stream-id <STREAM_ID>
+          
+
+  -h, --help
+          Print help (see a summary with '-h')

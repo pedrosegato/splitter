@@ -1,0 +1,249 @@
+import { renderHook, waitFor, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { type ReactNode } from "react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useDevices } from "./useDevices";
+import { useSetSetting, useResetSettings } from "./useSettings";
+import { useConnectPeer, useDisconnect } from "./useConnection";
+import { useIdentity } from "./useIdentity";
+import { useSetDeviceName } from "./useDeviceName";
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+  Toaster: () => null,
+}));
+
+vi.mock("@/lib/api", () => ({
+  commands: {
+    identity: vi.fn(),
+    listDevices: vi.fn(),
+    settingsGet: vi.fn(),
+    settingsSet: vi.fn(),
+    settingsReset: vi.fn(),
+    setDeviceName: vi.fn(),
+    discoveredPeers: vi.fn(),
+    pendingPeers: vi.fn(),
+    connectPeer: vi.fn(),
+    acceptPending: vi.fn(),
+    disconnect: vi.fn(),
+    snapshot: vi.fn(),
+    openSession: vi.fn(),
+    openStream: vi.fn(),
+    closeStream: vi.fn(),
+    streamControl: vi.fn(),
+  },
+  unwrap: vi.fn((p: Promise<{ status: "ok"; data: unknown } | { status: "error"; error: string }>) =>
+    p.then((r) => {
+      if (r.status === "ok") return r.data;
+      throw new Error(r.status === "error" ? r.error : "unknown");
+    }),
+  ),
+}));
+
+import { commands, unwrap } from "@/lib/api";
+import { toast } from "sonner";
+
+const mockedCommands = commands as unknown as Record<string, ReturnType<typeof vi.fn>>;
+const mockedUnwrap = unwrap as unknown as ReturnType<typeof vi.fn>;
+
+function makeWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return {
+    queryClient,
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  };
+}
+
+describe("useDevices", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the mocked devices list", async () => {
+    const devices = [
+      { id: "d1", name: "Mic", kind: "Input", default_sample_rate: 44100, channels: 2 },
+    ];
+    mockedCommands.listDevices.mockResolvedValue({ status: "ok", data: devices });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDevices(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(devices);
+    expect(mockedCommands.listDevices).toHaveBeenCalledOnce();
+  });
+
+  it("exposes error when command fails", async () => {
+    mockedCommands.listDevices.mockResolvedValue({ status: "error", error: "no devices" });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; error: string }>).then((r: { status: string; error: string }) => {
+        throw new Error(r.error);
+      }),
+    );
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDevices(), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect((result.current.error as Error).message).toBe("no devices");
+  });
+});
+
+describe("useSetSetting mutation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls settingsSet with mapped args and invalidates settings", async () => {
+    const updatedSettings = { auto_accept_trusted: true };
+    mockedCommands.settingsSet.mockResolvedValue({ status: "ok", data: updatedSettings });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper, queryClient } = makeWrapper();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useSetSetting(), { wrapper });
+
+    result.current.mutate({ key: "auto_accept_trusted", value: "true" });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockedCommands.settingsSet).toHaveBeenCalledWith("auto_accept_trusted", "true");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["settings"] });
+  });
+});
+
+describe("useSetDeviceName mutation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls setDeviceName and invalidates identity and peers on success", async () => {
+    mockedCommands.setDeviceName.mockResolvedValue({
+      status: "ok",
+      data: { peer_id: "p", peer_name: "New Name" },
+    });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper, queryClient } = makeWrapper();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useSetDeviceName(), { wrapper });
+
+    result.current.mutate("New Name");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockedCommands.setDeviceName).toHaveBeenCalledWith("New Name");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["identity"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["peers"] });
+  });
+
+  it("calls toast.error when setDeviceName fails", async () => {
+    mockedUnwrap.mockRejectedValue(new Error("nome inválido"));
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useSetDeviceName(), { wrapper });
+
+    act(() => {
+      result.current.mutate("");
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith("nome inválido");
+  });
+});
+
+describe("useResetSettings mutation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls settingsReset and invalidates settings on success", async () => {
+    mockedCommands.settingsReset.mockResolvedValue({ status: "ok", data: {} });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper, queryClient } = makeWrapper();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useResetSettings(), { wrapper });
+
+    result.current.mutate();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockedCommands.settingsReset).toHaveBeenCalledOnce();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["settings"] });
+  });
+});
+
+describe("useIdentity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns local peer id and name", async () => {
+    const identity = { peer_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", peer_name: "Studio PC" };
+    mockedCommands.identity.mockResolvedValue({ status: "ok", data: identity });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useIdentity(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(identity);
+    expect(mockedCommands.identity).toHaveBeenCalledOnce();
+  });
+});
+
+describe("toast.error on mutation failure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls toast.error when useConnectPeer fails", async () => {
+    mockedUnwrap.mockRejectedValue(new Error("connection refused"));
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useConnectPeer(), { wrapper });
+
+    act(() => {
+      result.current.mutate({ host: "localhost", port: 9000, peerId: null });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith("connection refused");
+  });
+
+  it("calls toast.success when useDisconnect succeeds", async () => {
+    mockedCommands.disconnect.mockResolvedValue({ status: "ok", data: null });
+    mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
+      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+    );
+
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDisconnect(), { wrapper });
+
+    act(() => {
+      result.current.mutate({ sessionId: "sess-123" });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(toast.success).toHaveBeenCalledWith("Desconectado");
+  });
+});

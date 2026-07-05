@@ -218,8 +218,6 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
     }
   }, [isSaved]);
 
-  const debouncedSet = useDebouncedSetter(set);
-
   const jitter = settings ? parseJitterMode(settings.jitter_mode) : { base: "auto" as JitterModeString, fixedMs: 40 };
 
   if (isLoading || !settings) return null;
@@ -283,7 +281,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               value={settings.signaling_port}
               min={1024}
               max={65535}
-              set={debouncedSet}
+              set={set}
             />
           </Row>
 
@@ -356,7 +354,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               value={settings.jitter_max_depth_ms}
               min={0}
               max={1000}
-              set={debouncedSet}
+              set={set}
             />
           </Row>
 

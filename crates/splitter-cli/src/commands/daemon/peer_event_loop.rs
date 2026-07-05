@@ -146,7 +146,9 @@ impl ReconnectDriver for CliControlPlane {
 
     async fn on_reconnected(&self, _peer_id: Uuid, outcome: ConnectOutcome) {
         if let Some(pid) = outcome.remote_peer_id {
-            self.ctx.register_outgoing_connection(pid, outcome.handle).await;
+            self.ctx
+                .register_outgoing_connection(pid, outcome.handle)
+                .await;
         }
     }
 

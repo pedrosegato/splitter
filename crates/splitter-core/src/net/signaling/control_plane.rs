@@ -265,7 +265,11 @@ async fn handle_stream_open(
             .await;
         return;
     }
-    if let Err(e) = deps.sessions.activate_stream(&sid, StreamId(stream_id)).await {
+    if let Err(e) = deps
+        .sessions
+        .activate_stream(&sid, StreamId(stream_id))
+        .await
+    {
         tracing::warn!(peer = %peer_id, stream_id, "activate_stream failed — tearing down runtime: {e}");
         let _ = deps.stream_registry.close(&sid, StreamId(stream_id)).await;
         let _ = deps.sessions.remove_stream(&sid, StreamId(stream_id)).await;
@@ -327,7 +331,9 @@ async fn handle_stream_control(
                 .await;
         }
     }
-    observer.on_stream_control(peer_id, stream_id, &action).await;
+    observer
+        .on_stream_control(peer_id, stream_id, &action)
+        .await;
 }
 
 async fn handle_session_response_close(
@@ -411,24 +417,34 @@ mod tests {
     #[async_trait::async_trait]
     impl ControlPlaneObserver for Arc<Recorder> {
         async fn on_session_opened(&self, _peer: Uuid, requester: Uuid, session: SessionId) {
-            self.sessions_opened.lock().unwrap().push((requester, session));
+            self.sessions_opened
+                .lock()
+                .unwrap()
+                .push((requester, session));
         }
         async fn on_stream_opened(&self, _p: Uuid, _s: u8, _src: &str, _sink: &str) {}
         async fn on_stream_control(&self, _peer: Uuid, stream_id: u8, action: &StreamAction) {
-            self.controls.lock().unwrap().push((stream_id, action.clone()));
+            self.controls
+                .lock()
+                .unwrap()
+                .push((stream_id, action.clone()));
         }
         async fn on_session_closed(&self, _peer: Uuid, session: SessionId) {
             self.sessions_closed.lock().unwrap().push(session);
         }
         async fn on_peer_disconnected(&self, peer: Uuid, reason: &str, had: bool) {
-            self.disconnects.lock().unwrap().push((peer, reason.to_string(), had));
+            self.disconnects
+                .lock()
+                .unwrap()
+                .push((peer, reason.to_string(), had));
         }
         async fn on_devices_received(&self, peer: Uuid, devices: Vec<DeviceDescriptor>) {
             self.devices.lock().unwrap().push((peer, devices));
         }
         async fn on_peer_renamed(&self, peer_id: &str, peer_name: &str) {
             self.renames
-                .lock().unwrap()
+                .lock()
+                .unwrap()
                 .push((peer_id.to_string(), peer_name.to_string()));
         }
     }
@@ -446,7 +462,10 @@ mod tests {
         deps: Arc<ControlPlaneDeps>,
         peer: Uuid,
         rec: Arc<Recorder>,
-    ) -> (broadcast::Sender<PeerEvent>, mpsc::Receiver<SignalingMessage>) {
+    ) -> (
+        broadcast::Sender<PeerEvent>,
+        mpsc::Receiver<SignalingMessage>,
+    ) {
         let (tx, rx) = broadcast::channel(16);
         let (ctx, crx) = mpsc::channel(16);
         spawn_control_plane(deps, peer, ctx, rx, Arc::new(rec));
@@ -735,6 +754,9 @@ mod tests {
         })
         .await
         .expect("disconnect observer not called within 2s");
-        assert_eq!(rec.disconnects.lock().unwrap()[0], (peer, "test".to_string(), true));
+        assert_eq!(
+            rec.disconnects.lock().unwrap()[0],
+            (peer, "test".to_string(), true)
+        );
     }
 }

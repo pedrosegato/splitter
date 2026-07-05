@@ -137,7 +137,11 @@ impl ControlPlaneObserver for TauriControlPlane {
         peer_id: Uuid,
         devices: Vec<splitter_core::net::signaling::DeviceDescriptor>,
     ) {
-        self.core.remote_devices.write().await.insert(peer_id, devices);
+        self.core
+            .remote_devices
+            .write()
+            .await
+            .insert(peer_id, devices);
         self.core.emit(SnapshotChanged);
     }
 

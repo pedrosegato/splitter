@@ -1435,18 +1435,25 @@ pub async fn dispatch_device_events(
                     DeviceEvent::Disappeared(id) => (id, StreamControlSignal::Pause),
                     DeviceEvent::Appeared(id) => (id, StreamControlSignal::Resume),
                 };
-                let guard = registry.inner.read().await;
-                for ((sid, stream_id), rt) in guard.iter() {
-                    if rt.bound_device_id.as_deref() == Some(target_id.as_str()) {
-                        let _ = rt.control_tx.send(signal).await;
-                        tracing::info!(
-                            session = %sid,
-                            stream = %stream_id,
-                            device = %target_id,
-                            signal = ?signal,
-                            "device hot-plug -> pump notified"
-                        );
-                    }
+                let targets: Vec<(SessionId, StreamId, mpsc::Sender<StreamControlSignal>)> = {
+                    let guard = registry.inner.read().await;
+                    guard
+                        .iter()
+                        .filter(|(_, rt)| rt.bound_device_id.as_deref() == Some(target_id.as_str()))
+                        .map(|((sid, stream_id), rt)| (*sid, *stream_id, rt.control_tx.clone()))
+                        .collect()
+                };
+                // Sends happen after the read guard is dropped so a full control
+                // channel cannot block concurrent register/close (write lock).
+                for (sid, stream_id, control_tx) in targets {
+                    let _ = control_tx.send(signal).await;
+                    tracing::info!(
+                        session = %sid,
+                        stream = %stream_id,
+                        device = %target_id,
+                        signal = ?signal,
+                        "device hot-plug -> pump notified"
+                    );
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -1492,6 +1499,39 @@ mod hotplug_tests {
         let _ = probe_rx;
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        dispatcher.abort();
+    }
+
+    #[tokio::test]
+    async fn dispatch_delivers_pause_to_bound_stream_after_lock_release() {
+        let registry = StreamRegistry::new();
+        let (tx, _) = broadcast::channel::<DeviceEvent>(8);
+        let sid = SessionId::new();
+
+        let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+        let join = tokio::spawn(async {});
+        registry
+            .register(StreamRuntime {
+                session_id: sid,
+                stream_id: StreamId(0),
+                stats: Arc::new(StreamStats::default()),
+                control_tx: ctrl_tx,
+                bound_device_id: Some("Input:0:USB Headset".into()),
+                join,
+                device_guard: DeviceGuard::None,
+            })
+            .await
+            .unwrap();
+
+        let dispatcher = tokio::spawn(dispatch_device_events(registry.clone(), tx.subscribe()));
+        tx.send(DeviceEvent::Disappeared("Input:0:USB Headset".into()))
+            .unwrap();
+
+        let received = tokio::time::timeout(std::time::Duration::from_secs(1), ctrl_rx.recv())
+            .await
+            .expect("control signal should arrive within 1s");
+        assert_eq!(received, Some(StreamControlSignal::Pause));
 
         dispatcher.abort();
     }

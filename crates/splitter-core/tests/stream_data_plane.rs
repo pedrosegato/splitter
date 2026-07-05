@@ -137,3 +137,78 @@ async fn volume_change_attenuates_decoded_signal() {
     let _ = ctrl_tx.send(StreamControlSignal::Close).await;
     let _ = handle.await;
 }
+
+#[tokio::test]
+async fn out_of_order_packets_are_reordered_before_decode() {
+    let stream_id = StreamId(2);
+    let sink_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let sink_addr = sink_socket.local_addr().unwrap();
+
+    let (play_prod, mut play_cons) = AudioRing::new(FRAME_STEREO_SAMPLES * 16);
+    let stats = Arc::new(StreamStats::default());
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+    let handle = tokio::spawn(spawn_sink_pump_inner(
+        splitter_core::SessionId::new(),
+        stream_id,
+        sink_socket,
+        play_prod,
+        ctrl_rx,
+        stats.clone(),
+    ));
+
+    let mut enc = OpusEncoder::new(64_000).unwrap();
+    let mut wire_for = |amplitude: f32, seq: u32| {
+        let dc = vec![amplitude; FRAME_STEREO_SAMPLES];
+        let mut payload = BytesMut::with_capacity(400);
+        enc.encode(&dc, &mut payload).unwrap();
+        let pkt = Packet {
+            stream_id: stream_id.get(),
+            seq,
+            timestamp_ms: 0,
+            payload: Bytes::copy_from_slice(&payload[..]),
+        };
+        let mut wire = BytesMut::with_capacity(1500);
+        pkt.encode(&mut wire).unwrap();
+        wire
+    };
+
+    let w0 = wire_for(0.05, 0);
+    let w1 = wire_for(0.15, 1);
+    let w2 = wire_for(0.30, 2);
+
+    let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    for wire in [&w2, &w0, &w1] {
+        sender.send_to(&wire[..], sink_addr).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    for _ in 0..50 {
+        if play_cons.occupied() >= FRAME_STEREO_SAMPLES * 3 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        play_cons.occupied() >= FRAME_STEREO_SAMPLES * 3,
+        "expected three decoded frames, got {} samples",
+        play_cons.occupied()
+    );
+
+    let mut energy_of = || {
+        let mut chunk = vec![0.0f32; FRAME_STEREO_SAMPLES];
+        let popped = play_cons.pop_slice(&mut chunk);
+        assert_eq!(popped, FRAME_STEREO_SAMPLES);
+        chunk.iter().map(|x| x * x).sum::<f32>()
+    };
+    let e0 = energy_of();
+    let e1 = energy_of();
+    let e2 = energy_of();
+
+    assert!(
+        e0 <= e1 && e1 <= e2,
+        "frames must be emitted in seq order 0,1,2 despite arriving 2,0,1: energies {e0}, {e1}, {e2}"
+    );
+
+    let _ = ctrl_tx.send(StreamControlSignal::Close).await;
+    let _ = handle.await;
+}

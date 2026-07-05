@@ -1,11 +1,14 @@
 use crate::audio::codec::{OpusDecoder, OpusEncoder};
 use crate::audio::ring::{RingConsumer, RingProducer};
 use crate::error::NetError;
+use crate::net::fec::FecController;
+use crate::net::jitter::{JitterBuffer, JitterOutput};
 use crate::net::packet::Packet;
 use crate::net::session::SessionId;
 use crate::net::stream::StreamId;
+use crate::settings::{FecMode, JitterMode};
 use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -19,6 +22,7 @@ use tokio::task::JoinHandle;
 
 const SEQ_MASK: u32 = 0x00FF_FFFF;
 
+#[cfg(test)]
 fn seq_gap(expected: u32, got: u32) -> u32 {
     got.wrapping_sub(expected) & SEQ_MASK
 }
@@ -577,6 +581,20 @@ pub async fn spawn_source_pump_inner(
     let mut paused = false;
     let start = std::time::Instant::now();
 
+    // WHY: default FecMode mirrors Settings::default() (=Always). The source has
+    // no live packet-loss feedback in the P2P path, so Auto would never flip on;
+    // evaluating here activates negotiated in-band FEC. Loss-feedback wiring is
+    // deferred (see plan 016 Maintenance notes).
+    const FEC_REEVAL_FRAMES: u32 = 100;
+    let mut fec = FecController::new(FecMode::Always, 1, 0, 10);
+    let mut frame_count: u32 = 0;
+    {
+        let setting = fec.evaluate(std::time::Instant::now());
+        if let Err(e) = encoder.set_fec(setting.enable, setting.packet_loss_perc) {
+            tracing::warn!("initial set_fec failed: {e}");
+        }
+    }
+
     loop {
         tokio::select! {
             biased;
@@ -589,6 +607,13 @@ pub async fn spawn_source_pump_inner(
             _ = frame_ready.notified() => {
                 if consumer.occupied() >= FRAME_STEREO_SAMPLES {
                     consumer.pop_slice(&mut frame);
+                    frame_count = frame_count.wrapping_add(1);
+                    if frame_count.is_multiple_of(FEC_REEVAL_FRAMES) {
+                        let setting = fec.evaluate(std::time::Instant::now());
+                        if let Err(e) = encoder.set_fec(setting.enable, setting.packet_loss_perc) {
+                            tracing::warn!("set_fec failed: {e}");
+                        }
+                    }
                     if !paused {
                         let effective_gain = if muted.load(Ordering::Relaxed) { 0.0 } else { gain };
                         if (effective_gain - 1.0).abs() > f32::EPSILON {
@@ -645,10 +670,15 @@ pub async fn spawn_sink_pump_inner(
     };
     let mut decoded = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let mut buf = vec![0u8; 1500];
-    let mut last_seq: Option<u32> = None;
     let mut gain: f32 = 1.0;
     let muted = Arc::new(AtomicBool::new(false));
     let mut paused = false;
+
+    // WHY: defaults mirror Settings::default(); a follow-up plan threads the
+    // real SettingsHandle through open_stream_as_* into the pump.
+    const MAX_DEPTH_MS: u32 = 200;
+    let mut jitter = JitterBuffer::new(JitterMode::Auto, MAX_DEPTH_MS);
+    let mut pending_fec_recover = false;
 
     loop {
         tokio::select! {
@@ -667,7 +697,7 @@ pub async fn spawn_sink_pump_inner(
                         continue;
                     }
                 };
-                let pkt = match Packet::decode_ref(&buf[..n]) {
+                let pkt = match Packet::decode(Bytes::copy_from_slice(&buf[..n])) {
                     Ok(p) if p.stream_id == stream_id.get() => p,
                     Ok(_) => continue,
                     Err(e) => {
@@ -679,24 +709,26 @@ pub async fn spawn_sink_pump_inner(
                 stats.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
                 stats.last_seq_received.store(pkt.seq, Ordering::Relaxed);
 
-                if let Some(prev) = last_seq {
-                    let expected = prev.wrapping_add(1) & SEQ_MASK;
-                    if pkt.seq != expected {
-                        let lost = seq_gap(expected, pkt.seq) as u64;
-                        if lost > 0 && lost < 100 {
-                            for _ in 0..lost {
-                                if decoder.decode(None, &mut decoded).is_ok() {
-                                    stats.packets_lost.fetch_add(1, Ordering::Relaxed);
+                let now = std::time::Instant::now();
+                jitter.push(pkt, now);
+                while let Some(out) = jitter.pop_ready(now) {
+                    match out {
+                        JitterOutput::Lost { .. } => {
+                            pending_fec_recover = true;
+                            stats.packets_lost.fetch_add(1, Ordering::Relaxed);
+                        }
+                        JitterOutput::Packet(p) => {
+                            if pending_fec_recover {
+                                if decoder.decode_with_fec(Some(&p.payload[..]), &mut decoded, true).is_ok() {
                                     apply_gain_and_push(&mut decoded, gain, muted.load(Ordering::Relaxed), paused, &mut producer);
                                 }
+                                pending_fec_recover = false;
+                            }
+                            if decoder.decode_with_fec(Some(&p.payload[..]), &mut decoded, false).is_ok() {
+                                apply_gain_and_push(&mut decoded, gain, muted.load(Ordering::Relaxed), paused, &mut producer);
                             }
                         }
                     }
-                }
-                last_seq = Some(pkt.seq);
-
-                if decoder.decode(Some(pkt.payload), &mut decoded).is_ok() {
-                    apply_gain_and_push(&mut decoded, gain, muted.load(Ordering::Relaxed), paused, &mut producer);
                 }
             }
         }
@@ -782,7 +814,7 @@ mod sink_pump_tests {
     }
 
     #[tokio::test]
-    async fn sink_pump_records_lost_packets_on_seq_gap() {
+    async fn sink_pump_records_lost_packet_after_max_depth() {
         let (prod, _cons) = AudioRing::new(FRAME_SAMPLES * 20);
         let stats = Arc::new(StreamStats::default());
 
@@ -805,26 +837,36 @@ mod sink_pump_tests {
         let mut payload = BytesMut::with_capacity(400);
         enc.encode(&frame, &mut payload).unwrap();
 
-        let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        for seq in [0u32, 3] {
-            let pkt = Packet {
-                stream_id: 5,
-                seq,
-                timestamp_ms: 0,
-                payload: Bytes::copy_from_slice(&payload[..]),
-            };
-            let mut wire = BytesMut::with_capacity(1500);
-            pkt.encode(&mut wire).unwrap();
-            sender.send_to(&wire[..], sink_addr).await.unwrap();
-        }
+        let send_seq = |seq: u32| {
+            let payload = payload.clone();
+            async move {
+                let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+                let pkt = Packet {
+                    stream_id: 5,
+                    seq,
+                    timestamp_ms: 0,
+                    payload: Bytes::copy_from_slice(&payload[..]),
+                };
+                let mut wire = BytesMut::with_capacity(1500);
+                pkt.encode(&mut wire).unwrap();
+                sender.send_to(&wire[..], sink_addr).await.unwrap();
+            }
+        };
+
+        // seq 0 drains immediately; seq 2 leaves seq 1 missing. After the missing
+        // slot ages past MAX_DEPTH_MS a later pop_ready (triggered by seq 3) declares it Lost.
+        send_seq(0).await;
+        send_seq(2).await;
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        send_seq(3).await;
 
         for _ in 0..30 {
-            if stats.packets_lost.load(Ordering::Relaxed) >= 2 {
+            if stats.packets_lost.load(Ordering::Relaxed) >= 1 {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        assert_eq!(stats.packets_lost.load(Ordering::Relaxed), 2);
+        assert!(stats.packets_lost.load(Ordering::Relaxed) >= 1);
 
         let _ = ctrl_tx.send(StreamControlSignal::Close).await;
         let _ = pump.await;

@@ -35,7 +35,7 @@ parallel (different files). Later phases depend on earlier ones — see notes.
 | 018 | Characterization tests: command layer + acceptor | tests | P1 | L | — | DONE |
 | 019 | Characterization tests: daemon orchestration | tests | P1 | M | — | DONE |
 | 016 | Wire JitterBuffer + FEC into session path | bug | P2 | L | — | DONE |
-| 017 | Split `stream_runtime.rs` god-module | tech-debt | P2 | M | 016 | TODO |
+| 017 | Split `stream_runtime.rs` god-module | tech-debt | P2 | M | 016 | DONE |
 | 020 | Unify CLI/Tauri control plane into core | tech-debt | P2 | L | 018, 019 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)

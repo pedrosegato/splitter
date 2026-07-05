@@ -288,3 +288,167 @@ async fn handle_peer_disconnected(ctx: &DaemonContext, peer_id: Uuid, reason: &s
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::context::test_ctx;
+    use super::*;
+    use splitter_core::net::session::SessionState;
+    use splitter_core::net::signaling::Codec;
+    use splitter_core::net::stream::Stream;
+    use std::time::Duration;
+
+    async fn seed_active_session(ctx: &DaemonContext, remote: Uuid) -> SessionId {
+        let sid = ctx.sessions.open_outgoing(ctx.local_peer_id, remote).await;
+        ctx.sessions.accept(&sid).await.unwrap();
+        sid
+    }
+
+    async fn seed_active_session_with_stream(ctx: &DaemonContext, remote: Uuid) -> SessionId {
+        let sid = seed_active_session(ctx, remote).await;
+        let route = StreamRoute::new(
+            Endpoint {
+                peer_id: remote.to_string(),
+                device_id: "src".into(),
+            },
+            Endpoint {
+                peer_id: ctx.local_peer_id.to_string(),
+                device_id: "sink".into(),
+            },
+            CodecParams {
+                name: Codec::Opus,
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            1.0,
+        );
+        ctx.sessions
+            .add_stream(&sid, Stream::new_negotiating(StreamId(0), route, 5004))
+            .await
+            .unwrap();
+        ctx.sessions
+            .activate_stream(&sid, StreamId(0))
+            .await
+            .unwrap();
+        sid
+    }
+
+    #[tokio::test]
+    async fn session_request_registers_new_active_session() {
+        let ctx = test_ctx();
+        let peer = Uuid::new_v4();
+        let requester = Uuid::new_v4();
+        let sid = Uuid::new_v4();
+
+        handle_session_request(&ctx, peer, &sid.to_string(), &requester.to_string()).await;
+
+        let snap = ctx.sessions.snapshot().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].remote_peer_id, requester);
+        assert_eq!(snap[0].state, SessionState::Active);
+    }
+
+    #[tokio::test]
+    async fn session_request_with_existing_active_session_is_noop() {
+        let ctx = test_ctx();
+        let peer = Uuid::new_v4();
+        let requester = Uuid::new_v4();
+        let existing = seed_active_session(&ctx, requester).await;
+        let new_sid = Uuid::new_v4();
+
+        handle_session_request(&ctx, peer, &new_sid.to_string(), &requester.to_string()).await;
+
+        let snap = ctx.sessions.snapshot().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].id, existing);
+    }
+
+    #[tokio::test]
+    async fn session_request_bad_uuid_changes_nothing() {
+        let ctx = test_ctx();
+        let peer = Uuid::new_v4();
+        let requester = Uuid::new_v4();
+
+        handle_session_request(&ctx, peer, "not-a-uuid", &requester.to_string()).await;
+
+        assert!(ctx.sessions.snapshot().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stream_control_set_muted_does_not_touch_session_state() {
+        let ctx = test_ctx();
+        let remote = Uuid::new_v4();
+        seed_active_session_with_stream(&ctx, remote).await;
+
+        handle_stream_control(&ctx, remote, 0, StreamAction::SetMuted { muted: true }).await;
+
+        let snap = ctx.sessions.snapshot().await;
+        assert!(!snap[0].streams[0].muted);
+    }
+
+    #[tokio::test]
+    async fn stream_control_close_closes_registry_entry() {
+        let ctx = test_ctx();
+        let remote = Uuid::new_v4();
+        let sid = seed_active_session_with_stream(&ctx, remote).await;
+
+        handle_stream_control(&ctx, remote, 0, StreamAction::Close).await;
+
+        let snap = ctx.sessions.snapshot().await;
+        assert!(snap.iter().any(|s| s.id == sid));
+    }
+
+    #[tokio::test]
+    async fn session_response_close_closes_session() {
+        let ctx = test_ctx();
+        let remote = Uuid::new_v4();
+        let sid = seed_active_session(&ctx, remote).await;
+
+        handle_session_response_close(&ctx, remote, &sid.get().to_string()).await;
+
+        let snap = ctx.sessions.snapshot().await;
+        let session = snap.iter().find(|s| s.id == sid).unwrap();
+        assert_eq!(session.state, SessionState::Closed);
+    }
+
+    #[tokio::test]
+    async fn peer_disconnected_tears_down_all_sessions_for_peer() {
+        let ctx = test_ctx();
+        let remote = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let a = seed_active_session(&ctx, remote).await;
+        let b = seed_active_session(&ctx, remote).await;
+        let untouched = seed_active_session(&ctx, other).await;
+
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            handle_peer_disconnected(&ctx, remote, "test"),
+        )
+        .await
+        .expect("teardown must not hang");
+
+        let snap = ctx.sessions.snapshot().await;
+        let state_of = |id: SessionId| snap.iter().find(|s| s.id == id).unwrap().state;
+        assert_eq!(state_of(a), SessionState::Closed);
+        assert_eq!(state_of(b), SessionState::Closed);
+        assert_eq!(state_of(untouched), SessionState::Active);
+    }
+
+    #[tokio::test]
+    async fn peer_disconnected_without_discovery_entry_does_not_reconnect() {
+        let ctx = test_ctx();
+        let remote = Uuid::new_v4();
+        let sid = seed_active_session(&ctx, remote).await;
+
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            handle_peer_disconnected(&ctx, remote, "test"),
+        )
+        .await
+        .expect("call must return promptly with empty discovered map");
+
+        let snap = ctx.sessions.snapshot().await;
+        let session = snap.iter().find(|s| s.id == sid).unwrap();
+        assert_eq!(session.state, SessionState::Closed);
+    }
+}

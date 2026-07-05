@@ -4629,6 +4629,7 @@ dependencies = [
  "socket2 0.5.10",
  "splitter-core",
  "sysinfo",
+ "tempfile",
  "tokio",
  "toml 0.8.23",
  "tracing",

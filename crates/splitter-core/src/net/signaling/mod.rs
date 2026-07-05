@@ -1,11 +1,17 @@
 pub mod client;
 pub mod client_ops;
 pub mod connection;
+pub mod control_plane;
 pub mod heartbeat;
 pub mod message;
+pub mod reconnect;
 pub mod server;
+pub mod supervisor;
 
 pub use client::{connect_to_peer, ConnectOutcome};
+pub use control_plane::{spawn_control_plane, ControlPlaneDeps, ControlPlaneObserver};
+pub use reconnect::{spawn_reconnect, ReconnectDriver};
+pub use supervisor::{spawn_connection_supervisor, ControlPlaneHost};
 pub use client_ops::{
     build_stream_route, find_conn, find_conn_tx, notify_remote_control, stream_open_message,
     wait_for_stream_open_ack, ConnEndpoints, ConnectionMap,

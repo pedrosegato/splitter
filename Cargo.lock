@@ -4641,6 +4641,7 @@ dependencies = [
 name = "splitter-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "audio_thread_priority",
  "audiopus",
  "base64 0.22.1",

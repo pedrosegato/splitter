@@ -179,43 +179,58 @@ pub(crate) async fn teardown_session(
     sid: splitter_core::SessionId,
 ) -> Result<(), String> {
     let snap = core.sessions.snapshot().await;
-    if let Some(sess) = snap.iter().find(|s| s.id == sid) {
-        for stream in &sess.streams {
-            if let Err(e) = core.stream_registry.close(&sid, stream.id).await {
-                tracing::warn!(%sid, stream_id = %stream.id, "teardown_session: stream_registry.close error: {e}");
-            }
-            crate::commands::streams::notify_remote(
-                core,
-                sid.get(),
-                stream.id.get(),
-                StreamAction::Close,
-            )
-            .await;
+    let Some(sess) = snap.iter().find(|s| s.id == sid) else {
+        return Ok(());
+    };
+    for stream in &sess.streams {
+        if let Err(e) = core.stream_registry.close(&sid, stream.id).await {
+            tracing::warn!(%sid, stream_id = %stream.id, "teardown_session: stream_registry.close error: {e}");
         }
-        let remote = sess.remote_peer_id;
-        let tx = {
-            let g = core.server.connections.read().await;
-            g.get(&remote).map(|c| c.tx.clone())
-        };
-        let tx = match tx {
-            Some(t) => Some(t),
-            None => core
-                .outgoing
-                .read()
-                .await
-                .get(&remote)
-                .map(|c| c.tx.clone()),
-        };
-        if let Some(tx) = tx {
-            let _ = tx
-                .send(SignalingMessage::SessionResponse {
-                    session_id: sid.to_string(),
-                    accepted: false,
-                })
-                .await;
-        }
+        crate::commands::streams::notify_remote(
+            core,
+            sid.get(),
+            stream.id.get(),
+            StreamAction::Close,
+        )
+        .await;
     }
-    core.sessions.close(&sid).await.map_err(|e| e.to_string())
+
+    let remote = sess.remote_peer_id;
+    let tx = {
+        let g = core.server.connections.read().await;
+        g.get(&remote).map(|c| c.tx.clone())
+    };
+    let tx = match tx {
+        Some(t) => Some(t),
+        None => core
+            .outgoing
+            .read()
+            .await
+            .get(&remote)
+            .map(|c| c.tx.clone()),
+    };
+    if let Some(tx) = tx {
+        let _ = tx
+            .send(SignalingMessage::SessionResponse {
+                session_id: sid.to_string(),
+                accepted: false,
+            })
+            .await;
+    }
+
+    core.sessions.remove(&sid).await;
+
+    // shutdown() aborts the connection task so the socket dies now, even if some
+    // other task still holds a tx clone. The abort emits no Disconnected event,
+    // so the acceptor sees the broadcast close and exits without reconnecting.
+    if let Some(handle) = core.server.connections.write().await.remove(&remote) {
+        handle.shutdown();
+    }
+    if let Some(handle) = core.outgoing.write().await.remove(&remote) {
+        handle.shutdown();
+    }
+    core.remote_devices.write().await.remove(&remote);
+    Ok(())
 }
 
 #[tauri::command]
@@ -228,7 +243,10 @@ pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::validate_device_name;
+    use super::*;
+    use splitter_core::net::signaling::connection::spawn_peer_connection;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::{TcpListener, TcpStream};
 
     #[test]
     fn validate_trims_and_rejects_empty_and_too_long() {
@@ -236,5 +254,52 @@ mod tests {
         assert!(validate_device_name("   ").is_err());
         assert!(validate_device_name(&"x".repeat(41)).is_err());
         assert_eq!(validate_device_name(&"x".repeat(40)).unwrap().len(), 40);
+    }
+
+    #[tokio::test]
+    async fn teardown_evicts_session_drops_handle_and_closes_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = AppCore::init(dir.path()).await.unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, accepted) =
+            tokio::join!(TcpStream::connect(addr), async { listener.accept().await });
+        let client = client.unwrap();
+        let mut peer_end = accepted.unwrap().0;
+
+        let remote = uuid::Uuid::new_v4();
+        let handle = spawn_peer_connection(client, None).unwrap();
+        // A lingering tx clone (as CLI's stream-open acceptor holds) must not
+        // keep the socket alive: shutdown() aborts the task regardless.
+        let _lingering_tx = handle.tx.clone();
+        core.outgoing.write().await.insert(remote, handle);
+
+        let local = core.identity.read().peer_id;
+        let sid = core.sessions.open_outgoing(local, remote).await;
+
+        teardown_session(&core, sid).await.unwrap();
+
+        assert!(
+            core.sessions.snapshot().await.is_empty(),
+            "session must be evicted from the snapshot"
+        );
+        assert!(
+            !core.outgoing.read().await.contains_key(&remote),
+            "connection handle must be removed so its socket can die"
+        );
+
+        let socket_closed = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut buf = [0u8; 1024];
+            loop {
+                match peer_end.read(&mut buf).await {
+                    Ok(0) | Err(_) => break true,
+                    Ok(_) => continue,
+                }
+            }
+        })
+        .await
+        .expect("socket should reach EOF within the timeout");
+        assert!(socket_closed, "peer end must see the socket close");
     }
 }

@@ -119,6 +119,30 @@ reconnects are automatic (with `auto_accept_trusted = true` in settings).
 
 ## Build
 
+### System dependencies
+
+The workspace links against libopus (all platforms) plus, on Linux, the Tauri
+GUI/audio stack. Install them before building:
+
+**macOS**
+```sh
+brew install opus pkg-config
+```
+
+**Linux (Debian/Ubuntu)**
+```sh
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+  libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
+  libudev-dev libopus-dev pkg-config
+```
+
+**Windows** (via [vcpkg](https://vcpkg.io))
+```sh
+vcpkg install opus:x64-windows
+```
+
+### Compile
+
 ```sh
 cargo build --workspace --release
 ```

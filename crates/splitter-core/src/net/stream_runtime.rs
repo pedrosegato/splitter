@@ -5,7 +5,7 @@ use crate::net::packet::Packet;
 use crate::net::session::SessionId;
 use crate::net::stream::StreamId;
 use crate::{FRAME_SAMPLES, FRAME_STEREO_SAMPLES};
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -599,13 +599,14 @@ pub async fn spawn_source_pump_inner(
                         if let Err(e) = encoder.encode(&frame, &mut payload) {
                             tracing::warn!("opus encode failed: {e}");
                         } else {
-                            let pkt = Packet {
-                                stream_id: stream_id.get(),
-                                seq: seq & SEQ_MASK,
-                                timestamp_ms: start.elapsed().as_millis() as u32,
-                                payload: Bytes::copy_from_slice(&payload[..]),
-                            };
-                            if pkt.encode(&mut packet_buf).is_ok() {
+                            let encoded = Packet::encode_from_parts(
+                                stream_id.get(),
+                                seq & SEQ_MASK,
+                                start.elapsed().as_millis() as u32,
+                                &payload[..],
+                                &mut packet_buf,
+                            );
+                            if encoded.is_ok() {
                                 match socket.send(&packet_buf[..]).await {
                                     Ok(n) => {
                                         stats.packets_sent.fetch_add(1, Ordering::Relaxed);
@@ -666,8 +667,7 @@ pub async fn spawn_sink_pump_inner(
                         continue;
                     }
                 };
-                let bytes = Bytes::copy_from_slice(&buf[..n]);
-                let pkt = match Packet::decode(bytes) {
+                let pkt = match Packet::decode_ref(&buf[..n]) {
                     Ok(p) if p.stream_id == stream_id.get() => p,
                     Ok(_) => continue,
                     Err(e) => {
@@ -695,7 +695,7 @@ pub async fn spawn_sink_pump_inner(
                 }
                 last_seq = Some(pkt.seq);
 
-                if decoder.decode(Some(&pkt.payload[..]), &mut decoded).is_ok() {
+                if decoder.decode(Some(pkt.payload), &mut decoded).is_ok() {
                     apply_gain_and_push(&mut decoded, gain, muted.load(Ordering::Relaxed), paused, &mut producer);
                 }
             }

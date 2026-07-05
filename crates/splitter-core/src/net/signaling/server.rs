@@ -44,6 +44,13 @@ impl PendingPeers {
     pub async fn push(&self, p: PendingPeer) {
         self.inner.lock().await.push(p);
     }
+
+    pub async fn remove_peer(&self, peer_id: &Uuid) -> bool {
+        let mut guard = self.inner.lock().await;
+        let before = guard.len();
+        guard.retain(|p| &p.peer_id != peer_id);
+        guard.len() != before
+    }
 }
 
 #[derive(Debug)]
@@ -205,7 +212,28 @@ impl SignalingServer {
                             proposed_token: auth_token.clone(),
                         })
                         .await;
+                    let mut pre_accept_events = handle.events.subscribe();
+                    let pending_for_watch = p_inner.clone();
+                    let conns_for_watch = c_inner.clone();
                     c_inner.write().await.insert(peer_uuid, handle);
+                    tokio::spawn(async move {
+                        loop {
+                            match pre_accept_events.recv().await {
+                                Ok(PeerEvent::Disconnected { .. })
+                                | Err(broadcast::error::RecvError::Closed) => {
+                                    // Once accepted, `accept_pending_as` has taken the peer out
+                                    // of pending and the acceptor owns cleanup; only evict while
+                                    // still pending.
+                                    if pending_for_watch.remove_peer(&peer_uuid).await {
+                                        conns_for_watch.write().await.remove(&peer_uuid);
+                                    }
+                                    break;
+                                }
+                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                                Ok(_) => {}
+                            }
+                        }
+                    });
                 });
             }
         });
@@ -702,5 +730,98 @@ mod tests {
             "empty client-proposed token must not become the stored credential"
         );
         assert!(t.verify(&peer_id, &token), "the minted token must verify");
+    }
+
+    #[tokio::test]
+    async fn pending_peers_remove_peer_removes_matching() {
+        let pending = PendingPeers::default();
+        let p1 = Uuid::new_v4();
+        let p2 = Uuid::new_v4();
+        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        pending
+            .push(PendingPeer {
+                peer_id: p1,
+                peer_name: "a".into(),
+                remote_addr: addr,
+                proposed_token: String::new(),
+            })
+            .await;
+        pending
+            .push(PendingPeer {
+                peer_id: p2,
+                peer_name: "b".into(),
+                remote_addr: addr,
+                proposed_token: String::new(),
+            })
+            .await;
+
+        assert!(
+            pending.remove_peer(&p1).await,
+            "removing p1 must report true"
+        );
+        assert!(
+            !pending.remove_peer(&p1).await,
+            "removing an absent peer must report false"
+        );
+        let list = pending.list().await;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].peer_id, p2, "the other peer must survive");
+    }
+
+    #[tokio::test]
+    async fn pre_accept_drop_evicts_pending_and_connections() {
+        let (server, _identity, _trust, _sessions, _dir) = setup().await;
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None).unwrap();
+        let client_peer_id = Uuid::new_v4();
+        client
+            .tx
+            .send(SignalingMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                peer_id: client_peer_id.to_string(),
+                peer_name: "client".into(),
+                app_version: "0".into(),
+                capabilities: local_capabilities(),
+                auth_token: String::new(),
+            })
+            .await
+            .unwrap();
+
+        let mut queued = false;
+        for _ in 0..50 {
+            if !server.pending.list().await.is_empty()
+                && server
+                    .connections
+                    .read()
+                    .await
+                    .contains_key(&client_peer_id)
+            {
+                queued = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(queued, "peer must be queued in pending and connections");
+
+        drop(client);
+
+        let mut evicted = false;
+        for _ in 0..50 {
+            if server.pending.list().await.is_empty()
+                && !server
+                    .connections
+                    .read()
+                    .await
+                    .contains_key(&client_peer_id)
+            {
+                evicted = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            evicted,
+            "dropped pre-accept connection must be evicted from pending and connections"
+        );
     }
 }

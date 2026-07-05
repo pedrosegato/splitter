@@ -420,6 +420,26 @@ pub fn spawn_acceptor(
                     if had_active_session {
                         crate::reconnect::spawn_reconnect(core.clone(), peer_id, addr);
                     }
+                    // A concurrent reconnect may have re-inserted a live handle under the
+                    // same peer_id; only evict the entry that belongs to this dead
+                    // connection (its tx is closed, the reconnected handle's is open).
+                    {
+                        let mut conns = core.server.connections.write().await;
+                        if conns
+                            .get(&peer_id)
+                            .map(|h| h.tx.is_closed())
+                            .unwrap_or(false)
+                        {
+                            conns.remove(&peer_id);
+                        }
+                    }
+                    {
+                        let mut out = core.outgoing.write().await;
+                        if out.get(&peer_id).map(|h| h.tx.is_closed()).unwrap_or(false) {
+                            out.remove(&peer_id);
+                        }
+                    }
+                    core.remote_devices.write().await.remove(&peer_id);
                     break;
                 }
                 Ok(PeerEvent::Connected { .. }) => {}

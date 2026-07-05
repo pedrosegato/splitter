@@ -108,6 +108,14 @@ impl AppCore {
 }
 
 impl AppCore {
+    pub async fn evict_peer_connection(&self, peer_id: &Uuid) {
+        self.server.connections.write().await.remove(peer_id);
+        self.outgoing.write().await.remove(peer_id);
+        self.remote_devices.write().await.remove(peer_id);
+    }
+}
+
+impl AppCore {
     pub fn emit<E>(&self, ev: E)
     where
         E: tauri_specta::Event + serde::Serialize + Clone,
@@ -253,6 +261,57 @@ mod tests {
         assert!(changed);
         assert_eq!(map.get("id1").unwrap().peer_name, "New");
         assert!(!apply_peer_rename(&mut map, "missing", "X"));
+    }
+
+    async fn loopback_handle() -> PeerConnectionHandle {
+        use splitter_core::net::signaling::connection::spawn_peer_connection;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let laddr = listener.local_addr().unwrap();
+        let (client, accepted) =
+            tokio::join!(tokio::net::TcpStream::connect(laddr), listener.accept());
+        accepted.unwrap();
+        spawn_peer_connection(client.unwrap(), None).unwrap()
+    }
+
+    #[tokio::test]
+    async fn evict_peer_connection_removes_from_all_connection_maps() {
+        let dir = tempdir().unwrap();
+        let core = AppCore::init(dir.path()).await.expect("init");
+        let peer_id = Uuid::new_v4();
+
+        core.server
+            .connections
+            .write()
+            .await
+            .insert(peer_id, loopback_handle().await);
+        core.outgoing
+            .write()
+            .await
+            .insert(peer_id, loopback_handle().await);
+        core.remote_devices
+            .write()
+            .await
+            .insert(peer_id, Vec::new());
+        core.peers.write().await.insert(
+            "mdns-peer".to_string(),
+            DiscoveredPeer {
+                peer_id: "mdns-peer".into(),
+                peer_name: "keep".into(),
+                host: "10.0.0.9".into(),
+                port: 7000,
+                version: "0.1.0".into(),
+            },
+        );
+
+        core.evict_peer_connection(&peer_id).await;
+
+        assert!(!core.server.connections.read().await.contains_key(&peer_id));
+        assert!(!core.outgoing.read().await.contains_key(&peer_id));
+        assert!(!core.remote_devices.read().await.contains_key(&peer_id));
+        assert!(
+            core.peers.read().await.contains_key("mdns-peer"),
+            "mDNS discovery map must not be evicted on connection drop"
+        );
     }
 
     #[tokio::test]

@@ -359,7 +359,7 @@ async fn cmd_disconnect<'a>(
     let id = splitter_core::SessionId(Uuid::parse_str(key)?);
     // Close all local stream runtimes for this session and notify the remote peer.
     let snap = ctx.sessions.snapshot().await;
-    if let Some(sess) = snap.iter().find(|s| s.id == id) {
+    let remote = if let Some(sess) = snap.iter().find(|s| s.id == id) {
         let conn_tx = find_conn_tx(
             &server.connections,
             &ctx.outgoing_connections,
@@ -372,8 +372,22 @@ async fn cmd_disconnect<'a>(
                 notify_remote_control(tx, stream.id.get(), StreamAction::Close).await;
             }
         }
+        Some(sess.remote_peer_id)
+    } else {
+        None
+    };
+    ctx.sessions.remove(&id).await;
+    // shutdown() aborts the connection task so the socket closes even though the
+    // stream-open acceptor still holds a tx clone; the abort fires no Disconnected
+    // event, so no reconnect is scheduled.
+    if let Some(remote) = remote {
+        if let Some(handle) = server.connections.write().await.remove(&remote) {
+            handle.shutdown();
+        }
+        if let Some(handle) = ctx.outgoing_connections.write().await.remove(&remote) {
+            handle.shutdown();
+        }
     }
-    ctx.sessions.close(&id).await?;
     #[allow(clippy::print_stdout)]
     {
         println!(">> session {} closed", short(&id.get()));

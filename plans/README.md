@@ -30,8 +30,8 @@ parallel (different files). Later phases depend on earlier ones — see notes.
 | 010 | `useActiveSession()` hook dedup | tech-debt | P2 | S | — | DONE |
 | 011 | Remove redundant polling (event-driven) | perf | P2 | S | — | DONE |
 | 012 | SettingsDialog double-debounce | bug | P2 | S | — | DONE |
-| 014 | Server-minted auth token | security | P1 | M | coord. 015 | TODO |
-| 015 | Evict registries on disconnect + pre-auth flood | security | P1 | M | coord. 014 | TODO |
+| 014 | Server-minted auth token | security | P1 | M | coord. 015 | DONE |
+| 015 | Evict registries on disconnect + pre-auth flood | security | P1 | M | coord. 014 | DONE |
 | 018 | Characterization tests: command layer + acceptor | tests | P1 | L | — | TODO |
 | 019 | Characterization tests: daemon orchestration | tests | P1 | M | — | TODO |
 | 016 | Wire JitterBuffer + FEC into session path | bug | P2 | L | — | TODO |

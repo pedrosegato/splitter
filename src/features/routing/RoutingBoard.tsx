@@ -9,8 +9,9 @@ import { useWiring } from "./useWiring";
 import { useTrayHealth } from "./useTrayHealth";
 import { streamColor } from "./useWireGeometry";
 import { useIdentity } from "@/hooks/useIdentity";
-import { useDevices, usePeerDevices } from "@/hooks/useDevices";
+import { useDevices } from "@/hooks/useDevices";
 import { useSnapshot } from "@/hooks/useSnapshot";
+import { useActiveSession } from "@/hooks/useActiveSession";
 import { usePeers } from "@/hooks/usePeers";
 import { useDisconnect } from "@/hooks/useConnection";
 import { useUiStore } from "@/stores/ui";
@@ -122,9 +123,8 @@ export function RoutingBoard() {
 
   const [modalOpen, setModalOpen] = useState(false);
 
-  const session = snapshots?.find((s) => s.state === "active") ?? null;
+  const { session, streams, remotePeerId, peerDevices } = useActiveSession();
   const connected = !!session;
-  const streams = useMemo(() => session?.streams ?? [], [session]);
 
   const selfPeerId = identity?.peer_id ?? "";
   const selfName = identity?.peer_name ?? "Este Mac";
@@ -142,9 +142,7 @@ export function RoutingBoard() {
     [devices],
   );
 
-  const remotePeerId = session?.remote_peer_id;
   const remoteName = useRemoteName(remotePeerId);
-  const { data: peerDevices } = usePeerDevices(remotePeerId);
 
   const { remoteSources, remoteSinks } = useMemo(
     () =>

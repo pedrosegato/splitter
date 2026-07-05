@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { useUiStore } from "@/stores/ui";
-import { useSnapshot } from "@/hooks/useSnapshot";
-import { useDevices, usePeerDevices } from "@/hooks/useDevices";
+import { useDevices } from "@/hooks/useDevices";
+import { useActiveSession } from "@/hooks/useActiveSession";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useOpenStream, useRequestStream } from "@/hooks/useStreams";
 
@@ -9,15 +9,13 @@ export function useWiring() {
   const arm = useUiStore((s) => s.arm);
   const armSource = useUiStore((s) => s.armSource);
   const clearArm = useUiStore((s) => s.clearArm);
-  const { data: snap } = useSnapshot();
   const { data: devices } = useDevices();
   const { data: identity } = useIdentity();
   const openStream = useOpenStream();
   const requestStream = useRequestStream();
   const selfPeerId = identity?.peer_id;
 
-  const session = (snap ?? []).find((s) => s.state === "active") ?? null;
-  const { data: peerDevices } = usePeerDevices(session?.remote_peer_id);
+  const { session, peerDevices } = useActiveSession();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

@@ -188,20 +188,26 @@ pub(crate) async fn run(
         let conns = server.connections.clone();
         let acceptor_ctx = ctx.clone();
         tokio::spawn(async move {
-            while let Ok(peer_id) = conn_est_rx.recv().await {
-                let name = acceptor_ctx.peer_display_name(&peer_id).await;
-                #[allow(clippy::print_stdout)]
-                {
-                    println!(">> {name} connected (peer_id {})", context::short(&peer_id));
-                }
-                let guard = conns.read().await;
-                if let Some(conn) = guard.get(&peer_id) {
-                    spawn_stream_open_acceptor(
-                        acceptor_ctx.clone(),
-                        conn.tx.clone(),
-                        conn.events.subscribe(),
-                        peer_id,
-                    );
+            loop {
+                match conn_est_rx.recv().await {
+                    Ok(peer_id) => {
+                        let name = acceptor_ctx.peer_display_name(&peer_id).await;
+                        #[allow(clippy::print_stdout)]
+                        {
+                            println!(">> {name} connected (peer_id {})", context::short(&peer_id));
+                        }
+                        let guard = conns.read().await;
+                        if let Some(conn) = guard.get(&peer_id) {
+                            spawn_stream_open_acceptor(
+                                acceptor_ctx.clone(),
+                                conn.tx.clone(),
+                                conn.events.subscribe(),
+                                peer_id,
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -309,6 +315,37 @@ mod tests {
         let registry = splitter_core::StreamRegistry::new();
         let outgoing = Arc::new(RwLock::new(HashMap::new()));
         graceful_shutdown(&sessions, &registry, None, &outgoing).await;
+    }
+
+    #[tokio::test]
+    async fn acceptor_loop_shape_survives_lagged_receiver() {
+        use tokio::sync::broadcast::{self, error::RecvError};
+
+        let (tx, mut rx) = broadcast::channel::<Uuid>(2);
+        for _ in 0..5 {
+            let _ = tx.send(Uuid::new_v4());
+        }
+        let wanted = Uuid::new_v4();
+        tx.send(wanted).unwrap();
+
+        let mut delivered = None;
+        loop {
+            match rx.recv().await {
+                Ok(id) => {
+                    delivered = Some(id);
+                    if id == wanted {
+                        break;
+                    }
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+        assert_eq!(
+            delivered,
+            Some(wanted),
+            "loop must continue past a Lagged error and still deliver later values"
+        );
     }
 
     #[tokio::test]

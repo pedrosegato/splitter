@@ -221,7 +221,12 @@ pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::validate_device_name;
+    use super::*;
+    use splitter_core::net::signaling::{Codec, CodecParams, Endpoint};
+    use splitter_core::net::stream::{Stream, StreamRoute};
+    use splitter_core::{SessionId, SessionState, StreamId};
+    use tempfile::tempdir;
+    use uuid::Uuid;
 
     #[test]
     fn validate_trims_and_rejects_empty_and_too_long() {
@@ -229,5 +234,68 @@ mod tests {
         assert!(validate_device_name("   ").is_err());
         assert!(validate_device_name(&"x".repeat(41)).is_err());
         assert_eq!(validate_device_name(&"x".repeat(40)).unwrap().len(), 40);
+    }
+
+    async fn new_core() -> Arc<AppCore> {
+        AppCore::init(tempdir().unwrap().path())
+            .await
+            .expect("init")
+    }
+
+    async fn seed_active_session_with_stream(core: &AppCore, remote: Uuid) -> SessionId {
+        let local = core.identity.read().peer_id;
+        let sid = core.sessions.open_outgoing(local, remote).await;
+        core.sessions.accept(&sid).await.unwrap();
+        let route = StreamRoute::new(
+            Endpoint {
+                peer_id: local.to_string(),
+                device_id: "in".into(),
+            },
+            Endpoint {
+                peer_id: remote.to_string(),
+                device_id: "out".into(),
+            },
+            CodecParams {
+                name: Codec::Opus,
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            1.0,
+        );
+        core.sessions
+            .add_stream(&sid, Stream::new_negotiating(StreamId(0), route, 0))
+            .await
+            .unwrap();
+        core.sessions
+            .activate_stream(&sid, StreamId(0))
+            .await
+            .unwrap();
+        sid
+    }
+
+    #[tokio::test]
+    async fn teardown_session_closes_streams_and_session() {
+        let core = new_core().await;
+        let sid = seed_active_session_with_stream(&core, Uuid::new_v4()).await;
+
+        assert!(teardown_session(&core, sid).await.is_ok());
+
+        let snap = core.sessions.snapshot().await;
+        let sess = snap.iter().find(|s| s.id == sid).unwrap();
+        assert_eq!(sess.state, SessionState::Closed);
+        assert!(sess
+            .streams
+            .iter()
+            .all(|st| st.state == splitter_core::StreamState::Closed));
+    }
+
+    #[tokio::test]
+    async fn teardown_session_unknown_session_errors() {
+        let core = new_core().await;
+        let unknown = SessionId(Uuid::new_v4());
+        let err = teardown_session(&core, unknown)
+            .await
+            .expect_err("closing an unknown session surfaces UnknownSession");
+        assert!(err.contains("unknown session"));
     }
 }

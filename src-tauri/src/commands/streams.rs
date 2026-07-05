@@ -344,4 +344,57 @@ mod tests {
         assert!(json.contains("\"state\":\"active\""));
         assert!(json.contains("\"streams\":[]"));
     }
+
+    async fn new_core() -> Arc<AppCore> {
+        use tempfile::tempdir;
+        AppCore::init(tempdir().unwrap().path())
+            .await
+            .expect("init")
+    }
+
+    #[tokio::test]
+    async fn open_stream_core_session_not_found_errors() {
+        let core = new_core().await;
+        let err = open_stream_core(
+            &core,
+            Uuid::new_v4(),
+            "mic".into(),
+            false,
+            Uuid::new_v4(),
+            "spk".into(),
+            64_000,
+        )
+        .await
+        .expect_err("missing session must error");
+        assert!(err.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn open_stream_core_session_not_bound_to_peer_errors() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer_a = Uuid::new_v4();
+        let sid = core.sessions.open_outgoing(local, peer_a).await;
+        core.sessions.accept(&sid).await.unwrap();
+
+        let peer_b = Uuid::new_v4();
+        let err = open_stream_core(
+            &core,
+            sid.get(),
+            "mic".into(),
+            false,
+            peer_b,
+            "spk".into(),
+            64_000,
+        )
+        .await
+        .expect_err("session bound to a different peer must error");
+        assert!(err.contains("not bound to peer"));
+    }
+
+    #[tokio::test]
+    async fn notify_remote_no_session_is_noop() {
+        let core = new_core().await;
+        notify_remote(&core, Uuid::new_v4(), 0, StreamAction::Close).await;
+    }
 }

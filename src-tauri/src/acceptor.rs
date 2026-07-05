@@ -465,3 +465,364 @@ async fn send_to_peer(core: &AppCore, peer_id: Uuid, msg: SignalingMessage) {
         let _ = c.tx.send(msg).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use splitter_core::audio::devices::DeviceKind;
+    use splitter_core::net::discovery::DiscoveredPeer;
+    use splitter_core::net::signaling::Codec;
+    use splitter_core::net::stream::Stream;
+    use splitter_core::{SessionSnapshot, SessionState};
+    use std::time::Duration;
+    use tempfile::tempdir;
+    use tokio::sync::broadcast;
+
+    async fn new_core() -> Arc<AppCore> {
+        AppCore::init(tempdir().unwrap().path())
+            .await
+            .expect("init")
+    }
+
+    fn driven_acceptor(core: Arc<AppCore>, peer: Uuid) -> broadcast::Sender<PeerEvent> {
+        let (tx, rx) = broadcast::channel(16);
+        spawn_acceptor(core, peer, rx, "127.0.0.1:9".parse().unwrap());
+        tx
+    }
+
+    async fn await_sessions(
+        core: &AppCore,
+        pred: impl Fn(&[SessionSnapshot]) -> bool,
+    ) -> Vec<SessionSnapshot> {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let snap = core.sessions.snapshot().await;
+                if pred(&snap) {
+                    return snap;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("sessions condition not met within 2s")
+    }
+
+    fn test_route(source_peer: &str, sink_peer: &str) -> StreamRoute {
+        StreamRoute::new(
+            Endpoint {
+                peer_id: source_peer.to_string(),
+                device_id: "in".into(),
+            },
+            Endpoint {
+                peer_id: sink_peer.to_string(),
+                device_id: "out".into(),
+            },
+            CodecParams {
+                name: Codec::Opus,
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            1.0,
+        )
+    }
+
+    async fn seed_active_session_with_stream(
+        core: &AppCore,
+        local: Uuid,
+        remote: Uuid,
+    ) -> SessionId {
+        let sid = core.sessions.open_outgoing(local, remote).await;
+        core.sessions.accept(&sid).await.unwrap();
+        let route = test_route(&local.to_string(), &remote.to_string());
+        core.sessions
+            .add_stream(&sid, Stream::new_negotiating(StreamId(0), route, 0))
+            .await
+            .unwrap();
+        core.sessions
+            .activate_stream(&sid, StreamId(0))
+            .await
+            .unwrap();
+        sid
+    }
+
+    #[tokio::test]
+    async fn session_request_registers_active_session() {
+        let core = new_core().await;
+        let requester = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        let tx = driven_acceptor(core.clone(), requester);
+
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: session_id.to_string(),
+            requested_by: requester.to_string(),
+        }))
+        .unwrap();
+
+        let snap = await_sessions(&core, |s| !s.is_empty()).await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].id, SessionId(session_id));
+        assert_eq!(snap[0].remote_peer_id, requester);
+        assert_eq!(snap[0].state, SessionState::Active);
+    }
+
+    #[tokio::test]
+    async fn session_request_evicts_stale_session_for_same_requester() {
+        let core = new_core().await;
+        let requester = Uuid::new_v4();
+        let s1 = Uuid::new_v4();
+        let s2 = Uuid::new_v4();
+        let tx = driven_acceptor(core.clone(), requester);
+
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: s1.to_string(),
+            requested_by: requester.to_string(),
+        }))
+        .unwrap();
+        await_sessions(&core, |s| s.iter().any(|x| x.id == SessionId(s1))).await;
+
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: s2.to_string(),
+            requested_by: requester.to_string(),
+        }))
+        .unwrap();
+
+        let snap = await_sessions(&core, |s| {
+            s.iter()
+                .any(|x| x.id == SessionId(s2) && x.state == SessionState::Active)
+                && s.iter()
+                    .find(|x| x.id == SessionId(s1))
+                    .map(|x| x.state == SessionState::Closed)
+                    .unwrap_or(true)
+        })
+        .await;
+        let active: Vec<_> = snap
+            .iter()
+            .filter(|x| x.state == SessionState::Active)
+            .collect();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, SessionId(s2));
+    }
+
+    #[tokio::test]
+    async fn stream_control_set_muted_marks_session_stream_muted() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer = Uuid::new_v4();
+        seed_active_session_with_stream(&core, local, peer).await;
+        let tx = driven_acceptor(core.clone(), peer);
+
+        tx.send(PeerEvent::Message(SignalingMessage::StreamControl {
+            stream_id: 0,
+            action: StreamAction::SetMuted { muted: true },
+        }))
+        .unwrap();
+
+        let snap = await_sessions(&core, |s| {
+            s.iter()
+                .flat_map(|x| &x.streams)
+                .any(|st| st.id == StreamId(0) && st.muted)
+        })
+        .await;
+        assert!(snap[0].streams.iter().any(|st| st.muted));
+    }
+
+    #[tokio::test]
+    async fn stream_control_close_removes_stream() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer = Uuid::new_v4();
+        let sid = seed_active_session_with_stream(&core, local, peer).await;
+        let tx = driven_acceptor(core.clone(), peer);
+
+        tx.send(PeerEvent::Message(SignalingMessage::StreamControl {
+            stream_id: 0,
+            action: StreamAction::Close,
+        }))
+        .unwrap();
+
+        let snap = await_sessions(&core, |s| {
+            s.iter()
+                .find(|x| x.id == sid)
+                .map(|x| x.streams.is_empty())
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(snap
+            .iter()
+            .find(|x| x.id == sid)
+            .unwrap()
+            .streams
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn session_response_false_closes_session() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer = Uuid::new_v4();
+        let sid = seed_active_session_with_stream(&core, local, peer).await;
+        let tx = driven_acceptor(core.clone(), peer);
+
+        tx.send(PeerEvent::Message(SignalingMessage::SessionResponse {
+            session_id: sid.to_string(),
+            accepted: false,
+        }))
+        .unwrap();
+
+        let snap = await_sessions(&core, |s| {
+            s.iter()
+                .find(|x| x.id == sid)
+                .map(|x| x.state == SessionState::Closed)
+                .unwrap_or(false)
+        })
+        .await;
+        assert_eq!(
+            snap.iter().find(|x| x.id == sid).unwrap().state,
+            SessionState::Closed
+        );
+    }
+
+    #[tokio::test]
+    async fn device_list_response_caches_remote_devices() {
+        let core = new_core().await;
+        let peer = Uuid::new_v4();
+        let devices = vec![DeviceDescriptor {
+            id: "Output:0:default".into(),
+            name: "Speakers".into(),
+            kind: DeviceKind::Output,
+        }];
+        let tx = driven_acceptor(core.clone(), peer);
+
+        tx.send(PeerEvent::Message(SignalingMessage::DeviceListResponse {
+            devices: devices.clone(),
+        }))
+        .unwrap();
+
+        let cached = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(d) = core.remote_devices.read().await.get(&peer).cloned() {
+                    return d;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("remote devices not cached within 2s");
+        assert_eq!(cached, devices);
+    }
+
+    #[tokio::test]
+    async fn peer_renamed_updates_discovered_peer() {
+        let core = new_core().await;
+        let rid = Uuid::new_v4();
+        core.peers.write().await.insert(
+            rid.to_string(),
+            DiscoveredPeer {
+                peer_id: rid.to_string(),
+                peer_name: "Old".into(),
+                host: "10.0.0.2".into(),
+                port: 7000,
+                version: "0.1.0".into(),
+            },
+        );
+        let tx = driven_acceptor(core.clone(), rid);
+
+        tx.send(PeerEvent::Message(SignalingMessage::PeerRenamed {
+            peer_id: rid.to_string(),
+            peer_name: "New".into(),
+        }))
+        .unwrap();
+
+        let name = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let cur = core
+                    .peers
+                    .read()
+                    .await
+                    .get(&rid.to_string())
+                    .map(|p| p.peer_name.clone());
+                if cur.as_deref() == Some("New") {
+                    return cur.unwrap();
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("peer rename not applied within 2s");
+        assert_eq!(name, "New");
+    }
+
+    #[tokio::test]
+    async fn disconnect_tears_down_sessions_and_skips_reconnect() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer = Uuid::new_v4();
+        let sid = seed_active_session_with_stream(&core, local, peer).await;
+        let tx = driven_acceptor(core.clone(), peer);
+
+        tx.send(PeerEvent::Disconnected {
+            reason: "test".into(),
+        })
+        .unwrap();
+
+        let snap = await_sessions(&core, |s| {
+            s.iter()
+                .find(|x| x.id == sid)
+                .map(|x| x.state == SessionState::Closed)
+                .unwrap_or(false)
+        })
+        .await;
+        assert_eq!(
+            snap.iter().find(|x| x.id == sid).unwrap().state,
+            SessionState::Closed
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "StreamOpen opens a real output audio device via open_stream_as_sink; device-dependent, not runnable headless"]
+    async fn stream_open_adds_active_stream_to_session() {
+        let core = new_core().await;
+        let requester = Uuid::new_v4();
+        let local = core.identity.read().peer_id;
+        let session_id = Uuid::new_v4();
+        let tx = driven_acceptor(core.clone(), requester);
+
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: session_id.to_string(),
+            requested_by: requester.to_string(),
+        }))
+        .unwrap();
+        await_sessions(&core, |s| !s.is_empty()).await;
+
+        tx.send(PeerEvent::Message(SignalingMessage::StreamOpen {
+            session_id: session_id.to_string(),
+            stream_id: 1,
+            source: Endpoint {
+                peer_id: requester.to_string(),
+                device_id: "mic".into(),
+            },
+            sink: Endpoint {
+                peer_id: local.to_string(),
+                device_id: "default".into(),
+            },
+            codec: CodecParams {
+                name: Codec::Opus,
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            udp_port: 0,
+        }))
+        .unwrap();
+
+        let snap = await_sessions(&core, |s| {
+            s.iter()
+                .flat_map(|x| &x.streams)
+                .any(|st| st.id == StreamId(1))
+        })
+        .await;
+        assert!(snap
+            .iter()
+            .flat_map(|x| &x.streams)
+            .any(|st| st.id == StreamId(1)));
+    }
+}

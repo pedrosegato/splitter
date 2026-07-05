@@ -189,7 +189,7 @@ async fn connection_established_fires_on_both_accept_paths() {
         TrustStore::load_or_create(&dir.path().join("c2-trust.toml")).unwrap(),
     ));
     {
-        let token = "shared-auto-tok".to_string();
+        let token = "a".repeat(43);
         // Server trusts the client by peer_id + token.
         at_server_trust
             .write()

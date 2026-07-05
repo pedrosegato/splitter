@@ -249,7 +249,7 @@ pub async fn accept_pending_as(
         .ok_or_else(|| NetError::SignalingProtocol {
             reason: format!("no pending peer at index {idx}"),
         })?;
-    let token = p.proposed_token.clone();
+    let token = generate_auth_token();
     {
         let mut t = trust.write().await;
         t.add(TrustedPeer {
@@ -288,6 +288,7 @@ pub fn local_capabilities() -> Capabilities {
 mod tests {
     use super::*;
     use crate::net::signaling::message::PROTOCOL_VERSION;
+    use crate::net::trust::MIN_AUTH_TOKEN_LEN;
     use crate::settings::Settings;
     use tempfile::tempdir;
     use tokio::net::TcpStream;
@@ -424,7 +425,7 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        let (accepted_id, _token) = accept_pending(
+        let (accepted_id, token) = accept_pending(
             &server.pending,
             &trust,
             &server.connections,
@@ -434,6 +435,12 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(accepted_id, peer_id);
+        assert!(!token.is_empty(), "minted token must not be empty");
+        assert!(token.len() >= MIN_AUTH_TOKEN_LEN);
+        assert_ne!(
+            token, "proposed",
+            "server must mint its own token, not echo the client-proposed value"
+        );
         let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 if let Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, .. })) =
@@ -457,14 +464,14 @@ mod tests {
         let (server, _identity, trust, _sessions, _dir) = setup_with_settings(settings).await;
 
         let peer_id = Uuid::new_v4();
-        // Pre-register the peer as trusted
+        let token = generate_auth_token();
         trust
             .write()
             .await
             .add(TrustedPeer {
                 peer_id,
                 peer_name: "trusted-client".into(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .unwrap();
 
@@ -480,7 +487,7 @@ mod tests {
                 peer_name: "trusted-client".into(),
                 app_version: "0".into(),
                 capabilities: local_capabilities(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .await
             .unwrap();
@@ -518,13 +525,14 @@ mod tests {
         let (server, _identity, trust, _sessions, _dir) = setup_with_settings(off).await;
 
         let peer_id = Uuid::new_v4();
+        let token = generate_auth_token();
         trust
             .write()
             .await
             .add(TrustedPeer {
                 peer_id,
                 peer_name: "trusted-client".into(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .unwrap();
 
@@ -539,7 +547,7 @@ mod tests {
                 peer_name: "trusted-client".into(),
                 app_version: "0".into(),
                 capabilities: local_capabilities(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .await
             .unwrap();
@@ -576,7 +584,7 @@ mod tests {
             .add(TrustedPeer {
                 peer_id,
                 peer_name: "trusted-client".into(),
-                auth_token: "correct-tok".into(),
+                auth_token: generate_auth_token(),
             })
             .unwrap();
 
@@ -623,5 +631,76 @@ mod tests {
             server.pending.list().await.is_empty(),
             "rejected peer must not appear in pending queue"
         );
+    }
+
+    async fn queue_hello_with_empty_token(
+        server: &SignalingServerHandle,
+        peer_id: Uuid,
+    ) -> PeerConnectionHandle {
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None).unwrap();
+        client
+            .tx
+            .send(SignalingMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                peer_id: peer_id.to_string(),
+                peer_name: "client".into(),
+                app_version: "0".into(),
+                capabilities: local_capabilities(),
+                auth_token: String::new(),
+            })
+            .await
+            .unwrap();
+        for _ in 0..50 {
+            if !server.pending.list().await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        client
+    }
+
+    #[tokio::test]
+    async fn accept_mints_non_empty_high_entropy_token() {
+        let (server, _identity, trust, _sessions, _dir) = setup().await;
+        let peer_id = Uuid::new_v4();
+        let _client = queue_hello_with_empty_token(&server, peer_id).await;
+
+        let (accepted_id, token) = accept_pending(
+            &server.pending,
+            &trust,
+            &server.connections,
+            &server.connection_established_tx,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(accepted_id, peer_id);
+        assert!(!token.is_empty(), "minted token must not be empty");
+        assert!(token.len() >= MIN_AUTH_TOKEN_LEN);
+    }
+
+    #[tokio::test]
+    async fn empty_proposed_token_is_not_the_stored_credential() {
+        let (server, _identity, trust, _sessions, _dir) = setup().await;
+        let peer_id = Uuid::new_v4();
+        let _client = queue_hello_with_empty_token(&server, peer_id).await;
+
+        let (_accepted_id, token) = accept_pending(
+            &server.pending,
+            &trust,
+            &server.connections,
+            &server.connection_established_tx,
+            0,
+        )
+        .await
+        .unwrap();
+
+        let t = trust.read().await;
+        assert!(
+            !t.verify(&peer_id, ""),
+            "empty client-proposed token must not become the stored credential"
+        );
+        assert!(t.verify(&peer_id, &token), "the minted token must verify");
     }
 }

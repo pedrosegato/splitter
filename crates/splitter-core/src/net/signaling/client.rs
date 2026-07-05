@@ -311,7 +311,7 @@ mod tests {
             TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
         ));
         {
-            let token = "shared-tok".to_string();
+            let token = "a".repeat(43);
             server_trust
                 .write()
                 .await
@@ -437,7 +437,7 @@ mod tests {
         ));
 
         let known_name = "My Server";
-        let shared_token = "shared-tok".to_string();
+        let shared_token = "a".repeat(43);
 
         server_trust
             .write()

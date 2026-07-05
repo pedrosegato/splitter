@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+pub const MIN_AUTH_TOKEN_LEN: usize = 32;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrustedPeer {
     pub peer_id: Uuid,
@@ -114,6 +116,11 @@ impl TrustStore {
     }
 
     pub fn add(&mut self, peer: TrustedPeer) -> Result<(), NetError> {
+        if peer.auth_token.len() < MIN_AUTH_TOKEN_LEN {
+            return Err(NetError::SignalingProtocol {
+                reason: "auth token below minimum entropy length".into(),
+            });
+        }
         self.trusted.insert(peer.peer_id, peer);
         self.flush()
     }
@@ -174,6 +181,10 @@ mod tests {
         }
     }
 
+    fn valid_token() -> String {
+        "a".repeat(MIN_AUTH_TOKEN_LEN + 11)
+    }
+
     #[test]
     fn load_or_create_returns_empty_when_missing() {
         let dir = tempdir().unwrap();
@@ -188,12 +199,13 @@ mod tests {
         let path = dir.path().join("trusted_peers.toml");
         let mut store = TrustStore::load_or_create(&path).expect("create");
         let peer_id = Uuid::new_v4();
-        store.add(sample(peer_id, "tok-xyz")).unwrap();
-        assert!(store.verify(&peer_id, "tok-xyz"));
+        let token = valid_token();
+        store.add(sample(peer_id, &token)).unwrap();
+        assert!(store.verify(&peer_id, &token));
         assert!(!store.verify(&peer_id, "wrong"));
 
         let reloaded = TrustStore::load_or_create(&path).expect("reload");
-        assert!(reloaded.verify(&peer_id, "tok-xyz"));
+        assert!(reloaded.verify(&peer_id, &token));
     }
 
     #[test]
@@ -202,11 +214,12 @@ mod tests {
         let path = dir.path().join("trusted_peers.toml");
         let mut store = TrustStore::load_or_create(&path).expect("create");
         let peer_id = Uuid::new_v4();
-        store.add(sample(peer_id, "tok-abc")).unwrap();
+        let token = valid_token();
+        store.add(sample(peer_id, &token)).unwrap();
         let tmp = path.with_extension("toml.tmp");
         assert!(!tmp.exists(), "no tmp file after flush");
         let reloaded = TrustStore::load_or_create(&path).expect("reload");
-        assert!(reloaded.verify(&peer_id, "tok-abc"));
+        assert!(reloaded.verify(&peer_id, &token));
     }
 
     #[test]
@@ -254,5 +267,26 @@ mod tests {
 
         let store = TrustStore::load_or_create(&path).expect("migrate with bad key");
         assert!(store.trusted.is_empty(), "bad-uuid entry must be skipped");
+    }
+
+    #[test]
+    fn add_rejects_below_min_length() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("trusted_peers.toml");
+        let mut store = TrustStore::load_or_create(&path).expect("create");
+        let peer_id = Uuid::new_v4();
+
+        assert!(
+            store.add(sample(peer_id, "short")).is_err(),
+            "token below MIN_AUTH_TOKEN_LEN must be rejected"
+        );
+        assert!(!store.contains(&peer_id));
+
+        let token = valid_token();
+        assert!(
+            store.add(sample(peer_id, &token)).is_ok(),
+            "token at or above MIN_AUTH_TOKEN_LEN must be accepted"
+        );
+        assert!(store.verify(&peer_id, &token));
     }
 }

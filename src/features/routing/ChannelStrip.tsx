@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import type { StreamSnapshot } from "@/bindings";
 import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
 import { useUiStore } from "@/stores/ui";
@@ -17,23 +17,20 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
   const streamControl = useStreamControl();
   const closeStream = useCloseStream();
 
-  const [muted, setMuted] = useState(false);
+  const muted = stream.muted;
 
   const color = streamColor(stream.id);
-  const initialVolume = Math.round(stream.volume * 100);
 
   const handleMute = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      const next = !muted;
-      setMuted(next);
       streamControl.mutate({
         sessionId,
         streamId: stream.id,
-        action: { type: "set_muted", muted: next },
+        action: { type: "set_muted", muted: !stream.muted },
       });
     },
-    [muted, sessionId, stream.id, streamControl],
+    [sessionId, stream.id, stream.muted, streamControl],
   );
 
   const handleVolumeChange = useCallback(
@@ -109,7 +106,7 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
           style={{ "--primary": color } as React.CSSProperties}
         >
           <Slider
-            defaultValue={[initialVolume]}
+            value={[Math.round(stream.volume * 100)]}
             min={0}
             max={100}
             onValueChange={handleVolumeChange}

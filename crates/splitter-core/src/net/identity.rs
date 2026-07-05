@@ -13,7 +13,7 @@ pub struct PeerIdentity {
 impl PeerIdentity {
     pub fn save_atomic(&self, path: &Path) -> Result<(), NetError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            crate::net::fs_util::ensure_private_dir(parent)
                 .map_err(|e| NetError::ConfigIo(format!("mkdir {}: {e}", parent.display())))?;
         }
         let raw = toml::to_string_pretty(self)
@@ -31,7 +31,7 @@ impl PeerIdentity {
             return Ok(parsed);
         }
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            crate::net::fs_util::ensure_private_dir(parent)
                 .map_err(|e| NetError::ConfigIo(format!("mkdir {}: {e}", parent.display())))?;
         }
         let hostname = gethostname::gethostname().to_string_lossy().to_string();

@@ -1,4 +1,5 @@
 use crate::error::NetError;
+use crate::net::fs_util::{ensure_private_dir, write_atomic};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -125,21 +126,13 @@ impl Settings {
 
     pub fn save_atomic(&self, path: &Path) -> Result<(), NetError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            ensure_private_dir(parent)
                 .map_err(|e| NetError::ConfigIo(format!("mkdir {}: {e}", parent.display())))?;
         }
         let raw = toml::to_string_pretty(self)
             .map_err(|e| NetError::ConfigIo(format!("serialize settings: {e}")))?;
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, raw)
-            .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", tmp.display())))?;
-        std::fs::rename(&tmp, path).map_err(|e| {
-            NetError::ConfigIo(format!(
-                "rename {} -> {}: {e}",
-                tmp.display(),
-                path.display()
-            ))
-        })?;
+        write_atomic(path, raw.as_bytes())
+            .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", path.display())))?;
         Ok(())
     }
 }

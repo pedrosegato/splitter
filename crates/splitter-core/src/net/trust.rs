@@ -102,7 +102,7 @@ impl TrustStore {
             map
         } else {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
+                crate::net::fs_util::ensure_private_dir(parent)
                     .map_err(|e| NetError::ConfigIo(format!("mkdir {}: {e}", parent.display())))?;
             }
             HashMap::new()

@@ -1,6 +1,6 @@
 use crate::core::AppCore;
 use splitter_core::net::signaling::client_ops::{
-    build_stream_route, find_conn, notify_remote_control, stream_open_message,
+    build_stream_route, find_conn, notify_remote_by_session, stream_open_message,
     wait_for_stream_open_ack, ConnEndpoints,
 };
 use splitter_core::net::signaling::SourceKind as WireSourceKind;
@@ -18,26 +18,15 @@ async fn find_peer_conn(core: &AppCore, peer_id: Uuid) -> Option<ConnEndpoints> 
 }
 
 pub(crate) async fn notify_remote(core: &AppCore, sid: Uuid, stream_id: u8, action: StreamAction) {
-    let snap = core.sessions.snapshot().await;
-    let remote = match snap
-        .iter()
-        .find(|s| s.id.get() == sid)
-        .map(|s| s.remote_peer_id)
-    {
-        Some(r) => r,
-        None => {
-            tracing::warn!(%sid, "notify_remote: session not found, skipping remote signal");
-            return;
-        }
-    };
-    match find_peer_conn(core, remote).await {
-        Some(conn) => {
-            notify_remote_control(&conn.tx, stream_id, action).await;
-        }
-        None => {
-            tracing::warn!(%sid, %remote, "notify_remote: no live connection to remote peer, skipping remote signal");
-        }
-    }
+    notify_remote_by_session(
+        &core.sessions,
+        &core.server.connections,
+        &core.outgoing,
+        sid,
+        stream_id,
+        action,
+    )
+    .await;
 }
 
 #[tauri::command]

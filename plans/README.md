@@ -17,16 +17,16 @@ parallel (different files). Later phases depend on earlier ones — see notes.
 
 | Plan | Title | Cat | Prio | Effort | Depends on | Status |
 |------|-------|-----|------|--------|------------|--------|
-| 001 | Frontend + cargo-audit CI jobs | dx | P1 | S | — | TODO |
-| 003 | CLI daemon broadcast-lag hang | bug | P1 | S | — | TODO |
+| 001 | Frontend + cargo-audit CI jobs | dx | P1 | S | — | DONE |
+| 003 | CLI daemon broadcast-lag hang | bug | P1 | S | — | DONE |
 | 004 | Hot-plug dispatcher: lock held across await | perf | P1 | S | — | TODO |
-| 007 | RT callback allocations (capture/playback/macOS) | perf | P1 | S | — | TODO |
+| 007 | RT callback allocations (capture/playback/macOS) | perf | P1 | S | — | DONE |
 | 009 | ChannelStrip controlled mute/volume | bug | P1 | S | — | TODO |
-| 013 | Token file permissions 0600 | security | P1 | S | — | TODO |
-| 002 | Docs: SPEC §5.5 shape + README build deps | docs | P2 | S | — | TODO |
+| 013 | Token file permissions 0600 | security | P1 | S | — | DONE |
+| 002 | Docs: SPEC §5.5 shape + README build deps | docs | P2 | S | — | DONE |
 | 005 | Dedup notify-remote / conn lookup | tech-debt | P2 | S | — | TODO |
 | 006 | UDP hot-path per-packet alloc | perf | P2 | S | — | TODO |
-| 008 | JitterBuffer O(n) scan + unbounded cap | perf | P2 | S | — | TODO |
+| 008 | JitterBuffer O(n) scan + unbounded cap | perf | P2 | S | — | DONE |
 | 010 | `useActiveSession()` hook dedup | tech-debt | P2 | S | — | TODO |
 | 011 | Remove redundant polling (event-driven) | perf | P2 | S | — | TODO |
 | 012 | SettingsDialog double-debounce | bug | P2 | S | — | TODO |

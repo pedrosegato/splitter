@@ -11,6 +11,7 @@ sck = ["splitter-core/sck"]
 
 [dependencies]
 splitter-core = { path = "../splitter-core" }
+async-trait = { workspace = true }
 tokio = { workspace = true, features = ["io-std"] }
 clap = { workspace = true }
 tracing = { workspace = true }

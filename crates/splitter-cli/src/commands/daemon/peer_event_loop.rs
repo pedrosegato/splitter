@@ -1,290 +1,188 @@
 use super::context::{pick_default_output_device_id, short, DaemonContext};
-use super::reconnect::spawn_reconnect_loop;
+use splitter_core::net::signaling::client_ops::ConnEndpoints;
 use splitter_core::net::signaling::{
-    CodecParams, Endpoint, PeerEvent, SignalingMessage, StreamAction,
+    spawn_control_plane, spawn_reconnect, ConnectOutcome, ControlPlaneDeps, ControlPlaneHost,
+    ControlPlaneObserver, PeerEvent, ReconnectDriver, SignalingMessage, StreamAction,
 };
-use splitter_core::net::stream_runtime::{open_stream_as_sink, StreamControlSignal};
-use splitter_core::{SessionId, StreamId, StreamRoute};
+use splitter_core::{PeerIdentity, SessionId, TrustStore};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 type ConnTx = tokio::sync::mpsc::Sender<SignalingMessage>;
 
-pub(crate) fn spawn_stream_open_acceptor(
-    ctx: DaemonContext,
-    conn_tx: ConnTx,
-    mut events: tokio::sync::broadcast::Receiver<PeerEvent>,
-    peer_id: Uuid,
-) {
-    let default_output =
-        pick_default_output_device_id().unwrap_or_else(|| "Output:0:default".into());
-    tokio::spawn(async move {
-        loop {
-            match events.recv().await {
-                Ok(PeerEvent::Message(msg)) => match msg {
-                    SignalingMessage::SessionRequest {
-                        session_id,
-                        requested_by,
-                    } => {
-                        handle_session_request(&ctx, peer_id, &session_id, &requested_by).await;
-                    }
-                    msg @ SignalingMessage::StreamOpen { .. } => {
-                        handle_stream_open(&ctx, peer_id, &conn_tx, &default_output, msg).await;
-                    }
-                    SignalingMessage::StreamControl { stream_id, action } => {
-                        handle_stream_control(&ctx, peer_id, stream_id, action).await;
-                    }
-                    SignalingMessage::SessionResponse {
-                        session_id,
-                        accepted: false,
-                    } => {
-                        handle_session_response_close(&ctx, peer_id, &session_id).await;
-                    }
-                    _ => {}
-                },
-                Ok(PeerEvent::Disconnected { reason }) => {
-                    handle_peer_disconnected(&ctx, peer_id, &reason).await;
-                    break;
-                }
-                Ok(PeerEvent::Connected { .. }) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(skipped = n, "peer event stream lagged; continuing");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
+#[derive(Clone)]
+pub(crate) struct CliControlPlane {
+    pub ctx: DaemonContext,
 }
 
-async fn handle_session_request(
-    ctx: &DaemonContext,
-    peer_id: Uuid,
-    session_id: &str,
-    requested_by: &str,
-) {
-    let Ok(sid_uuid) = Uuid::parse_str(session_id).map(SessionId) else {
-        return;
-    };
-    let Ok(requester_uuid) = Uuid::parse_str(requested_by) else {
-        return;
-    };
+fn make_deps(ctx: &DaemonContext) -> Arc<ControlPlaneDeps> {
+    Arc::new(ControlPlaneDeps {
+        sessions: ctx.sessions.clone(),
+        stream_registry: ctx.stream_registry.clone(),
+        local_peer_id: ctx.local_peer_id,
+        default_output: pick_default_output_device_id()
+            .unwrap_or_else(|| "Output:0:default".into()),
+    })
+}
 
-    let existing = ctx.sessions.snapshot().await.into_iter().find(|s| {
-        s.remote_peer_id == requester_uuid
-            && s.state == splitter_core::net::session::SessionState::Active
-    });
-    if let Some(ref ex) = existing {
-        let name = ctx.peer_display_name(&peer_id).await;
+pub(crate) fn spawn_control_plane_loop(
+    ctx: DaemonContext,
+    conn_tx: ConnTx,
+    events: tokio::sync::broadcast::Receiver<PeerEvent>,
+    peer_id: Uuid,
+) {
+    let deps = make_deps(&ctx);
+    spawn_control_plane(
+        deps,
+        peer_id,
+        conn_tx,
+        events,
+        Arc::new(CliControlPlane { ctx }),
+    );
+}
+
+#[async_trait::async_trait]
+impl ControlPlaneObserver for CliControlPlane {
+    async fn on_session_opened(&self, peer_id: Uuid, _requester: Uuid, session: SessionId) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> {name} opened session {}", short(&session.get()));
+        }
+    }
+
+    async fn on_stream_opened(
+        &self,
+        peer_id: Uuid,
+        stream_id: u8,
+        source_device: &str,
+        sink_device: &str,
+    ) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
         #[allow(clippy::print_stdout)]
         {
             println!(
-                ">> {name} re-opened existing session {}",
-                short(&ex.id.get())
+                ">> {name} opened stream {stream_id} from {source_device} \u{2192} local {sink_device}"
             );
         }
-        return;
     }
 
-    let _ = ctx
-        .sessions
-        .register_incoming(sid_uuid, ctx.local_peer_id, requester_uuid)
-        .await;
-    let _ = ctx.sessions.accept(&sid_uuid).await;
-    let name = ctx.peer_display_name(&peer_id).await;
-    #[allow(clippy::print_stdout)]
-    {
-        println!(">> {name} opened session {}", short(&sid_uuid.get()));
-    }
-}
-
-async fn handle_stream_open(
-    ctx: &DaemonContext,
-    peer_id: Uuid,
-    conn_tx: &ConnTx,
-    default_output: &str,
-    msg: SignalingMessage,
-) {
-    let SignalingMessage::StreamOpen {
-        session_id,
-        stream_id,
-        source,
-        sink,
-        codec,
-        ..
-    } = msg
-    else {
-        return;
-    };
-    let Ok(sid_uuid) = Uuid::parse_str(&session_id).map(SessionId) else {
-        return;
-    };
-    let route = StreamRoute::new(
-        Endpoint {
-            peer_id: source.peer_id.clone(),
-            device_id: source.device_id.clone(),
-        },
-        Endpoint {
-            peer_id: sink.peer_id.clone(),
-            device_id: sink.device_id.clone(),
-        },
-        CodecParams {
-            name: codec.name.clone(),
-            bitrate: codec.bitrate,
-            frame_ms: codec.frame_ms,
-        },
-        1.0,
-    );
-    let chosen_output = if sink.device_id == "default" {
-        default_output.to_string()
-    } else {
-        sink.device_id.clone()
-    };
-    match open_stream_as_sink(
-        ctx.stream_registry.clone(),
-        sid_uuid,
-        StreamId(stream_id),
-        route,
-        chosen_output.clone(),
-    )
-    .await
-    {
-        Ok(port) => {
-            let _ = conn_tx
-                .send(SignalingMessage::StreamOpenAck {
-                    stream_id,
-                    accepted: true,
-                    udp_port: Some(port),
-                })
-                .await;
-            let name = ctx.peer_display_name(&peer_id).await;
-            #[allow(clippy::print_stdout)]
-            {
-                println!(
-                    ">> {name} opened stream {stream_id} from {} \u{2192} local {chosen_output}",
-                    source.device_id
-                );
+    async fn on_stream_control(&self, peer_id: Uuid, stream_id: u8, action: &StreamAction) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
+        #[allow(clippy::print_stdout)]
+        {
+            match action {
+                StreamAction::Close => println!(">> {name} closed stream {stream_id}"),
+                StreamAction::Pause => println!(">> {name} paused stream {stream_id}"),
+                StreamAction::Resume => println!(">> {name} resumed stream {stream_id}"),
+                StreamAction::SetVolume { volume } => {
+                    let pct = (volume * 100.0).round() as u32;
+                    println!(">> {name} set stream {stream_id} volume to {pct}%");
+                }
+                StreamAction::SetMuted { muted } => {
+                    let state = if *muted { "muted" } else { "unmuted" };
+                    println!(">> {name} {state} stream {stream_id}");
+                }
             }
         }
-        Err(e) => {
-            tracing::warn!("stream_open accept failed: {e}");
-            let _ = conn_tx
-                .send(SignalingMessage::StreamOpenAck {
-                    stream_id,
-                    accepted: false,
-                    udp_port: None,
-                })
-                .await;
+    }
+
+    async fn on_session_closed(&self, peer_id: Uuid, session: SessionId) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> {name} closed session {}", short(&session.get()));
+        }
+    }
+
+    async fn on_peer_disconnected(&self, peer_id: Uuid, reason: &str, had_active_session: bool) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> {name} disconnected (reason: {reason})");
+        }
+        if had_active_session {
+            let still_present = self
+                .ctx
+                .discovered
+                .read()
+                .await
+                .values()
+                .any(|p| p.peer_id == peer_id.to_string());
+            if still_present {
+                spawn_reconnect(peer_id, Arc::new(self.clone()));
+            }
         }
     }
 }
 
-async fn handle_stream_control(
-    ctx: &DaemonContext,
-    peer_id: Uuid,
-    stream_id: u8,
-    action: StreamAction,
-) {
-    let name = ctx.peer_display_name(&peer_id).await;
-    #[allow(clippy::print_stdout)]
-    {
-        match &action {
-            StreamAction::Close => {
-                println!(">> {name} closed stream {stream_id}");
-            }
-            StreamAction::Pause => {
-                println!(">> {name} paused stream {stream_id}");
-            }
-            StreamAction::Resume => {
-                println!(">> {name} resumed stream {stream_id}");
-            }
-            StreamAction::SetVolume { volume } => {
-                let pct = (volume * 100.0).round() as u32;
-                println!(">> {name} set stream {stream_id} volume to {pct}%");
-            }
-            StreamAction::SetMuted { muted } => {
-                let state = if *muted { "muted" } else { "unmuted" };
-                println!(">> {name} {state} stream {stream_id}");
-            }
-        }
+#[async_trait::async_trait]
+impl ReconnectDriver for CliControlPlane {
+    fn identity(&self) -> PeerIdentity {
+        self.ctx.identity.clone()
     }
-    let session_ids: Vec<SessionId> = ctx
-        .sessions
-        .snapshot()
-        .await
-        .into_iter()
-        .filter(|s| s.remote_peer_id == peer_id)
-        .map(|s| s.id)
-        .collect();
-    let registry = &ctx.stream_registry;
-    if matches!(action, StreamAction::Close) {
-        for sid in session_ids {
-            let _ = registry.close(&sid, StreamId(stream_id)).await;
-        }
-    } else {
-        let signal = StreamControlSignal::from(action);
-        for sid in &session_ids {
-            let _ = registry
-                .send_control(sid, StreamId(stream_id), signal)
-                .await;
-        }
-    }
-}
 
-async fn handle_session_response_close(ctx: &DaemonContext, peer_id: Uuid, session_id: &str) {
-    let Ok(sid_uuid) = Uuid::parse_str(session_id).map(SessionId) else {
-        return;
-    };
-    // Remote is shutting down this session; close local streams + session.
-    let stream_ids: Vec<StreamId> = ctx
-        .sessions
-        .snapshot()
-        .await
-        .into_iter()
-        .find(|s| s.id == sid_uuid)
-        .map(|s| s.streams.iter().map(|st| st.id).collect())
-        .unwrap_or_default();
-    for sid_stream in stream_ids {
-        let _ = ctx.stream_registry.close(&sid_uuid, sid_stream).await;
+    fn trust(&self) -> Arc<RwLock<TrustStore>> {
+        self.ctx.trust.clone()
     }
-    let _ = ctx.sessions.close(&sid_uuid).await;
-    let name = ctx.peer_display_name(&peer_id).await;
-    #[allow(clippy::print_stdout)]
-    {
-        println!(">> {name} closed session {}", short(&sid_uuid.get()));
-    }
-}
 
-async fn handle_peer_disconnected(ctx: &DaemonContext, peer_id: Uuid, reason: &str) {
-    let name = ctx.peer_display_name(&peer_id).await;
-    #[allow(clippy::print_stdout)]
-    {
-        println!(">> {name} disconnected (reason: {reason})");
+    async fn resolve_addr(&self, peer_id: Uuid) -> Option<SocketAddr> {
+        let map = self.ctx.discovered.read().await;
+        map.values()
+            .find(|p| p.peer_id == peer_id.to_string())
+            .and_then(|p| format!("{}:{}", p.host, p.port).parse::<SocketAddr>().ok())
     }
-    // Tear down all streams and sessions for this peer so the registry and
-    // SessionManager don't accumulate stale entries after an abrupt disconnect.
-    let session_streams: Vec<(SessionId, Vec<StreamId>)> = ctx
-        .sessions
-        .snapshot()
-        .await
-        .into_iter()
-        .filter(|s| s.remote_peer_id == peer_id)
-        .map(|s| (s.id, s.streams.iter().map(|st| st.id).collect()))
-        .collect();
-    let had_active_session = !session_streams.is_empty();
-    for (sid, stream_ids) in &session_streams {
-        for stream_id in stream_ids {
-            let _ = ctx.stream_registry.close(sid, *stream_id).await;
-        }
-        let _ = ctx.sessions.close(sid).await;
-    }
-    if had_active_session {
-        let still_present = ctx
+
+    async fn still_discoverable(&self, peer_id: Uuid) -> bool {
+        self.ctx
             .discovered
             .read()
             .await
             .values()
-            .any(|p| p.peer_id == peer_id.to_string());
-        if still_present {
-            spawn_reconnect_loop(ctx.clone(), peer_id);
+            .any(|p| p.peer_id == peer_id.to_string())
+    }
+
+    async fn on_reconnected(&self, _peer_id: Uuid, outcome: ConnectOutcome) {
+        if let Some(pid) = outcome.remote_peer_id {
+            self.ctx.register_outgoing_connection(pid, outcome.handle).await;
+        }
+    }
+
+    async fn on_reconnected_display(&self, peer_id: Uuid) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> reconnected to {name}");
+        }
+    }
+
+    async fn on_reconnect_failed_display(&self, peer_id: Uuid) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> reconnect to {name} failed");
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ControlPlaneHost for CliControlPlane {
+    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) {
+        spawn_control_plane_loop(
+            self.ctx.clone(),
+            endpoints.tx,
+            endpoints.events.subscribe(),
+            peer_id,
+        );
+    }
+
+    async fn on_peer_connected(&self, peer_id: Uuid) {
+        let name = self.ctx.peer_display_name(&peer_id).await;
+        #[allow(clippy::print_stdout)]
+        {
+            println!(">> {name} connected (peer_id {})", short(&peer_id));
         }
     }
 }
@@ -294,9 +192,41 @@ mod tests {
     use super::super::context::test_ctx;
     use super::*;
     use splitter_core::net::session::SessionState;
-    use splitter_core::net::signaling::Codec;
+    use splitter_core::net::signaling::{Codec, CodecParams, Endpoint};
     use splitter_core::net::stream::Stream;
+    use splitter_core::{StreamId, StreamRoute};
     use std::time::Duration;
+    use tokio::sync::{broadcast, mpsc};
+
+    fn driven(
+        ctx: DaemonContext,
+        peer: Uuid,
+    ) -> (
+        broadcast::Sender<PeerEvent>,
+        mpsc::Receiver<SignalingMessage>,
+    ) {
+        let (tx, rx) = broadcast::channel(16);
+        let (conn_tx, conn_rx) = mpsc::channel(16);
+        spawn_control_plane_loop(ctx, conn_tx, rx, peer);
+        (tx, conn_rx)
+    }
+
+    async fn await_sessions(
+        ctx: &DaemonContext,
+        pred: impl Fn(&[splitter_core::SessionSnapshot]) -> bool,
+    ) -> Vec<splitter_core::SessionSnapshot> {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let snap = ctx.sessions.snapshot().await;
+                if pred(&snap) {
+                    return snap;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("sessions condition not met within 2s")
+    }
 
     async fn seed_active_session(ctx: &DaemonContext, remote: Uuid) -> SessionId {
         let sid = ctx.sessions.open_outgoing(ctx.local_peer_id, remote).await;
@@ -336,65 +266,115 @@ mod tests {
     #[tokio::test]
     async fn session_request_registers_new_active_session() {
         let ctx = test_ctx();
-        let peer = Uuid::new_v4();
         let requester = Uuid::new_v4();
         let sid = Uuid::new_v4();
+        let (tx, _rx) = driven(ctx.clone(), requester);
 
-        handle_session_request(&ctx, peer, &sid.to_string(), &requester.to_string()).await;
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: sid.to_string(),
+            requested_by: requester.to_string(),
+        }))
+        .unwrap();
 
-        let snap = ctx.sessions.snapshot().await;
+        let snap = await_sessions(&ctx, |s| !s.is_empty()).await;
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].remote_peer_id, requester);
         assert_eq!(snap[0].state, SessionState::Active);
     }
 
+    // Unification convergence (was `..._is_noop`): the CLI now evicts a stale
+    // active session from the same requester instead of dedup-returning early,
+    // matching the Tauri acceptor's safer policy.
     #[tokio::test]
-    async fn session_request_with_existing_active_session_is_noop() {
+    async fn session_request_with_existing_active_session_evicts_it() {
         let ctx = test_ctx();
-        let peer = Uuid::new_v4();
         let requester = Uuid::new_v4();
         let existing = seed_active_session(&ctx, requester).await;
         let new_sid = Uuid::new_v4();
+        let (tx, _rx) = driven(ctx.clone(), requester);
 
-        handle_session_request(&ctx, peer, &new_sid.to_string(), &requester.to_string()).await;
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: new_sid.to_string(),
+            requested_by: requester.to_string(),
+        }))
+        .unwrap();
 
-        let snap = ctx.sessions.snapshot().await;
-        assert_eq!(snap.len(), 1);
-        assert_eq!(snap[0].id, existing);
+        let snap = await_sessions(&ctx, |s| {
+            s.iter()
+                .any(|x| x.id == SessionId(new_sid) && x.state == SessionState::Active)
+                && s.iter()
+                    .find(|x| x.id == existing)
+                    .map(|x| x.state == SessionState::Closed)
+                    .unwrap_or(false)
+        })
+        .await;
+        let active: Vec<_> = snap
+            .iter()
+            .filter(|x| x.state == SessionState::Active)
+            .collect();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, SessionId(new_sid));
     }
 
     #[tokio::test]
     async fn session_request_bad_uuid_changes_nothing() {
         let ctx = test_ctx();
-        let peer = Uuid::new_v4();
         let requester = Uuid::new_v4();
+        let (tx, _rx) = driven(ctx.clone(), requester);
 
-        handle_session_request(&ctx, peer, "not-a-uuid", &requester.to_string()).await;
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: "not-a-uuid".into(),
+            requested_by: requester.to_string(),
+        }))
+        .unwrap();
 
+        tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(ctx.sessions.snapshot().await.is_empty());
     }
 
+    // Unification convergence (was `..._does_not_touch_session_state`): the CLI
+    // now mirrors a remote SetMuted into session state like the Tauri acceptor.
     #[tokio::test]
-    async fn stream_control_set_muted_does_not_touch_session_state() {
+    async fn stream_control_set_muted_marks_session_stream_muted() {
         let ctx = test_ctx();
         let remote = Uuid::new_v4();
         seed_active_session_with_stream(&ctx, remote).await;
+        let (tx, _rx) = driven(ctx.clone(), remote);
 
-        handle_stream_control(&ctx, remote, 0, StreamAction::SetMuted { muted: true }).await;
+        tx.send(PeerEvent::Message(SignalingMessage::StreamControl {
+            stream_id: 0,
+            action: StreamAction::SetMuted { muted: true },
+        }))
+        .unwrap();
 
-        let snap = ctx.sessions.snapshot().await;
-        assert!(!snap[0].streams[0].muted);
+        await_sessions(&ctx, |s| {
+            s.iter()
+                .flat_map(|x| &x.streams)
+                .any(|st| st.id == StreamId(0) && st.muted)
+        })
+        .await;
     }
 
     #[tokio::test]
-    async fn stream_control_close_closes_registry_entry() {
+    async fn stream_control_close_removes_stream_from_session() {
         let ctx = test_ctx();
         let remote = Uuid::new_v4();
         let sid = seed_active_session_with_stream(&ctx, remote).await;
+        let (tx, _rx) = driven(ctx.clone(), remote);
 
-        handle_stream_control(&ctx, remote, 0, StreamAction::Close).await;
+        tx.send(PeerEvent::Message(SignalingMessage::StreamControl {
+            stream_id: 0,
+            action: StreamAction::Close,
+        }))
+        .unwrap();
 
-        let snap = ctx.sessions.snapshot().await;
+        let snap = await_sessions(&ctx, |s| {
+            s.iter()
+                .find(|x| x.id == sid)
+                .map(|x| x.streams.is_empty())
+                .unwrap_or(false)
+        })
+        .await;
         assert!(snap.iter().any(|s| s.id == sid));
     }
 
@@ -403,12 +383,25 @@ mod tests {
         let ctx = test_ctx();
         let remote = Uuid::new_v4();
         let sid = seed_active_session(&ctx, remote).await;
+        let (tx, _rx) = driven(ctx.clone(), remote);
 
-        handle_session_response_close(&ctx, remote, &sid.get().to_string()).await;
+        tx.send(PeerEvent::Message(SignalingMessage::SessionResponse {
+            session_id: sid.get().to_string(),
+            accepted: false,
+        }))
+        .unwrap();
 
-        let snap = ctx.sessions.snapshot().await;
-        let session = snap.iter().find(|s| s.id == sid).unwrap();
-        assert_eq!(session.state, SessionState::Closed);
+        let snap = await_sessions(&ctx, |s| {
+            s.iter()
+                .find(|x| x.id == sid)
+                .map(|x| x.state == SessionState::Closed)
+                .unwrap_or(false)
+        })
+        .await;
+        assert_eq!(
+            snap.iter().find(|s| s.id == sid).unwrap().state,
+            SessionState::Closed
+        );
     }
 
     #[tokio::test]
@@ -419,15 +412,20 @@ mod tests {
         let a = seed_active_session(&ctx, remote).await;
         let b = seed_active_session(&ctx, remote).await;
         let untouched = seed_active_session(&ctx, other).await;
+        let (tx, _rx) = driven(ctx.clone(), remote);
 
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            handle_peer_disconnected(&ctx, remote, "test"),
-        )
-        .await
-        .expect("teardown must not hang");
+        tx.send(PeerEvent::Disconnected {
+            reason: "test".into(),
+        })
+        .unwrap();
 
-        let snap = ctx.sessions.snapshot().await;
+        let snap = await_sessions(&ctx, |s| {
+            s.iter()
+                .find(|x| x.id == a)
+                .map(|x| x.state == SessionState::Closed)
+                .unwrap_or(false)
+        })
+        .await;
         let state_of = |id: SessionId| snap.iter().find(|s| s.id == id).unwrap().state;
         assert_eq!(state_of(a), SessionState::Closed);
         assert_eq!(state_of(b), SessionState::Closed);
@@ -439,16 +437,23 @@ mod tests {
         let ctx = test_ctx();
         let remote = Uuid::new_v4();
         let sid = seed_active_session(&ctx, remote).await;
+        let (tx, _rx) = driven(ctx.clone(), remote);
 
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            handle_peer_disconnected(&ctx, remote, "test"),
-        )
-        .await
-        .expect("call must return promptly with empty discovered map");
+        tx.send(PeerEvent::Disconnected {
+            reason: "test".into(),
+        })
+        .unwrap();
 
-        let snap = ctx.sessions.snapshot().await;
-        let session = snap.iter().find(|s| s.id == sid).unwrap();
-        assert_eq!(session.state, SessionState::Closed);
+        let snap = await_sessions(&ctx, |s| {
+            s.iter()
+                .find(|x| x.id == sid)
+                .map(|x| x.state == SessionState::Closed)
+                .unwrap_or(false)
+        })
+        .await;
+        assert_eq!(
+            snap.iter().find(|s| s.id == sid).unwrap().state,
+            SessionState::Closed
+        );
     }
 }

@@ -1,11 +1,10 @@
 mod context;
 mod peer_event_loop;
-mod reconnect;
 mod repl;
 mod ui;
 
 use context::DaemonContext;
-use peer_event_loop::spawn_stream_open_acceptor;
+use peer_event_loop::CliControlPlane;
 use splitter_core::net::device_watcher;
 use splitter_core::net::discovery::Discovery;
 use splitter_core::net::signaling::client_ops::{find_conn_tx, notify_remote_control};
@@ -180,38 +179,14 @@ pub(crate) async fn run(
         local_peer_id,
     };
 
-    // Spawn the stream-open acceptor for every newly established peer connection,
+    // Spawn the shared control-plane loop for every newly established peer connection,
     // regardless of whether it came through the manual `accept` branch or the
     // auto-accept-trusted shortcut.
-    {
-        let mut conn_est_rx = server.connection_established_tx.subscribe();
-        let conns = server.connections.clone();
-        let acceptor_ctx = ctx.clone();
-        tokio::spawn(async move {
-            loop {
-                match conn_est_rx.recv().await {
-                    Ok(peer_id) => {
-                        let name = acceptor_ctx.peer_display_name(&peer_id).await;
-                        #[allow(clippy::print_stdout)]
-                        {
-                            println!(">> {name} connected (peer_id {})", context::short(&peer_id));
-                        }
-                        let guard = conns.read().await;
-                        if let Some(conn) = guard.get(&peer_id) {
-                            spawn_stream_open_acceptor(
-                                acceptor_ctx.clone(),
-                                conn.tx.clone(),
-                                conn.events.subscribe(),
-                                peer_id,
-                            );
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-    }
+    splitter_core::net::signaling::spawn_connection_supervisor(
+        server.connection_established_tx.subscribe(),
+        server.connections.clone(),
+        Arc::new(CliControlPlane { ctx: ctx.clone() }),
+    );
 
     repl::run_repl(&ctx, server, discovery).await
 }

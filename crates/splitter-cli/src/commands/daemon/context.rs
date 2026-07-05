@@ -45,7 +45,7 @@ impl DaemonContext {
         peer_id: Uuid,
         handle: PeerConnectionHandle,
     ) {
-        super::peer_event_loop::spawn_stream_open_acceptor(
+        super::peer_event_loop::spawn_control_plane_loop(
             self.clone(),
             handle.tx.clone(),
             handle.events.subscribe(),

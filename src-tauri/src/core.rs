@@ -174,27 +174,12 @@ impl AppCore {
 
 impl AppCore {
     pub fn spawn_acceptor_supervisor(self: &Arc<Self>) {
-        let core = self.clone();
-        let mut established = self.server.connection_established_tx.subscribe();
-        tauri::async_runtime::spawn(async move {
-            loop {
-                match established.recv().await {
-                    Ok(peer_id) => {
-                        let conn_info = {
-                            let conns = core.server.connections.read().await;
-                            conns
-                                .get(&peer_id)
-                                .map(|c| (c.events.subscribe(), c.remote_addr))
-                        };
-                        if let Some((events, addr)) = conn_info {
-                            crate::acceptor::spawn_acceptor(core.clone(), peer_id, events, addr);
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
+        let host = Arc::new(crate::acceptor::TauriControlPlane { core: self.clone() });
+        splitter_core::net::signaling::spawn_connection_supervisor(
+            self.server.connection_established_tx.subscribe(),
+            self.server.connections.clone(),
+            host,
+        );
     }
 }
 

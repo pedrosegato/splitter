@@ -4,7 +4,6 @@ pub use core::AppCore;
 mod commands;
 mod dto;
 pub mod events;
-mod reconnect;
 mod tray;
 
 use specta_typescript::Typescript;

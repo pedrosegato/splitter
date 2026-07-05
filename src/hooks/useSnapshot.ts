@@ -5,5 +5,6 @@ export const useSnapshot = () =>
   useQuery({
     queryKey: ["snapshot"],
     queryFn: () => unwrap(commands.snapshot()),
-    refetchInterval: 3000,
+    // Backstop only: internal stream→Error/recovery transitions (splitter-core) emit no SnapshotChanged yet; events drive normal updates. Remove once that event exists.
+    refetchInterval: 15000,
   });

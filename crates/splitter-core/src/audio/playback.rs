@@ -44,6 +44,7 @@ impl PlaybackHandle {
         let channels = supported.channels();
         let sample_rate = supported.sample_rate().0;
         let sample_format = supported.sample_format();
+        let max_frames = max_callback_frames(supported.buffer_size());
 
         let config: cpal::StreamConfig = supported.into();
         let consumer = Arc::new(Mutex::new(consumer));
@@ -54,7 +55,7 @@ impl PlaybackHandle {
             cpal::SampleFormat::F32 => {
                 let cons = consumer.clone();
                 let notify = frame_consumed.clone();
-                let mut filler = PlaybackFiller::new(sample_rate, channels)?;
+                let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
                 device
                     .build_output_stream(
                         &config,
@@ -71,7 +72,7 @@ impl PlaybackHandle {
             cpal::SampleFormat::I16 => {
                 let cons = consumer.clone();
                 let notify = frame_consumed.clone();
-                let mut filler = PlaybackFiller::new(sample_rate, channels)?;
+                let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
                 device
                     .build_output_stream(
                         &config,
@@ -88,7 +89,7 @@ impl PlaybackHandle {
             cpal::SampleFormat::U16 => {
                 let cons = consumer.clone();
                 let notify = frame_consumed.clone();
-                let mut filler = PlaybackFiller::new(sample_rate, channels)?;
+                let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
                 device
                     .build_output_stream(
                         &config,
@@ -152,6 +153,20 @@ fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
 // 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices); must divide evenly into FRAME_SAMPLES at 48k.
 const RESAMPLE_CHUNK: usize = 441;
 
+// SAFETY.md #1 forbids callback-time allocation, so scratch is pre-sized to the largest
+// buffer the driver can hand us. Drivers that report Unknown give no bound; 4096 matches
+// the max already assumed for WASAPI shared mode and acts as a clamped safety net.
+const FALLBACK_MAX_CALLBACK_FRAMES: usize = 4096;
+
+fn max_callback_frames(buffer_size: &cpal::SupportedBufferSize) -> usize {
+    match buffer_size {
+        cpal::SupportedBufferSize::Range { max, .. } => {
+            (*max as usize).max(FALLBACK_MAX_CALLBACK_FRAMES)
+        }
+        cpal::SupportedBufferSize::Unknown => FALLBACK_MAX_CALLBACK_FRAMES,
+    }
+}
+
 /// Reads 48k stereo-interleaved (L,R,L,R,...) samples from the ring, resamples to device rate,
 /// and fans to output channels. Mono output devices downmix L+R to avg.
 /// All buffers are pre-allocated; no heap work inside the cpal callback.
@@ -169,7 +184,7 @@ struct PlaybackFiller {
 }
 
 impl PlaybackFiller {
-    fn new(device_rate: u32, channels: u16) -> Result<Self, AudioError> {
+    fn new(device_rate: u32, channels: u16, max_frames: usize) -> Result<Self, AudioError> {
         let (resampler_l, resampler_r) = if device_rate != SAMPLE_RATE {
             // Resampler converts FROM 48k (ring) TO device_rate (output).
             let l = Resampler::new(SAMPLE_RATE, device_rate, RESAMPLE_CHUNK).map_err(|e| {
@@ -191,13 +206,13 @@ impl PlaybackFiller {
             channels: channels as usize,
             resampler_l,
             resampler_r,
-            reservoir: Vec::with_capacity(4096),
+            reservoir: Vec::with_capacity(max_frames * 2 + RESAMPLE_CHUNK * 4),
             src_scratch: Vec::with_capacity(RESAMPLE_CHUNK * 8),
             l_in: Vec::with_capacity(RESAMPLE_CHUNK),
             r_in: Vec::with_capacity(RESAMPLE_CHUNK),
             l_out: Vec::with_capacity(RESAMPLE_CHUNK * 2),
             r_out: Vec::with_capacity(RESAMPLE_CHUNK * 2),
-            stereo_buf: Vec::with_capacity(4096),
+            stereo_buf: Vec::with_capacity(max_frames * 2),
         })
     }
 
@@ -250,6 +265,12 @@ impl PlaybackFiller {
     fn produce_stereo(&mut self, frames: usize, cons: &Mutex<RingConsumer>, notify: &Notify) {
         let stereo_needed = frames * 2;
         self.stereo_buf.clear();
+        debug_assert!(
+            stereo_needed <= self.stereo_buf.capacity(),
+            "playback stereo_buf too small: need {} have {}",
+            stereo_needed,
+            self.stereo_buf.capacity()
+        );
         self.stereo_buf.resize(stereo_needed, 0.0);
 
         if self.resampler_l.is_none() {
@@ -315,6 +336,10 @@ impl PlaybackFiller {
             }
         }
 
+        debug_assert!(
+            self.reservoir.len() <= self.reservoir.capacity(),
+            "playback reservoir grew past reservation"
+        );
         let available = self.reservoir.len().min(stereo_needed);
         self.stereo_buf[..available].copy_from_slice(&self.reservoir[..available]);
         self.reservoir.drain(..available);
@@ -405,7 +430,7 @@ mod tests {
 
         let cons = Arc::new(Mutex::new(cons));
         let notify = Arc::new(Notify::new());
-        let mut filler = PlaybackFiller::new(48_000, 2).expect("filler init");
+        let mut filler = PlaybackFiller::new(48_000, 2, 4096).expect("filler init");
 
         let mut out = vec![0.0f32; FRAME_STEREO_SAMPLES];
         filler.fill_f32(&mut out, &cons, &notify);
@@ -428,7 +453,7 @@ mod tests {
 
         let cons = Arc::new(Mutex::new(cons));
         let notify = Arc::new(Notify::new());
-        let mut filler = PlaybackFiller::new(48_000, 1).expect("filler init");
+        let mut filler = PlaybackFiller::new(48_000, 1, 4096).expect("filler init");
 
         let mut out = vec![0.0f32; crate::FRAME_SAMPLES];
         filler.fill_f32(&mut out, &cons, &notify);
@@ -447,7 +472,7 @@ mod tests {
         let (_prod, cons) = AudioRing::new(4096);
         let cons = Arc::new(Mutex::new(cons));
         let notify = Arc::new(Notify::new());
-        let mut filler = PlaybackFiller::new(48_000, 2).expect("filler init");
+        let mut filler = PlaybackFiller::new(48_000, 2, 4096).expect("filler init");
 
         let mut out = vec![1.0f32; FRAME_STEREO_SAMPLES]; // pre-fill with non-zero
         filler.fill_f32(&mut out, &cons, &notify);
@@ -455,6 +480,30 @@ mod tests {
         for (i, s) in out.iter().enumerate() {
             assert_eq!(*s, 0.0, "sample {i} should be silence on underrun, got {s}");
         }
+    }
+
+    #[test]
+    fn playback_filler_produce_stereo_no_realloc_within_max() {
+        let (_prod, cons) = AudioRing::new(4096);
+        let cons = Arc::new(Mutex::new(cons));
+        let notify = Arc::new(Notify::new());
+        let mut filler = PlaybackFiller::new(48_000, 2, 4096).expect("filler init");
+
+        let stereo_cap = filler.stereo_buf.capacity();
+        let reservoir_cap = filler.reservoir.capacity();
+
+        filler.produce_stereo(4096, &cons, &notify);
+
+        assert_eq!(
+            filler.stereo_buf.capacity(),
+            stereo_cap,
+            "stereo_buf must not reallocate within max_frames"
+        );
+        assert_eq!(
+            filler.reservoir.capacity(),
+            reservoir_cap,
+            "reservoir must not reallocate within max_frames"
+        );
     }
 
     #[test]
@@ -489,7 +538,7 @@ mod tests {
 
         let cons = Arc::new(Mutex::new(cons));
         let notify = Arc::new(Notify::new());
-        let mut filler = PlaybackFiller::new(44_100, 2).expect("filler init");
+        let mut filler = PlaybackFiller::new(44_100, 2, 4410).expect("filler init");
 
         let mut out = vec![0.0f32; 8820];
         filler.fill_f32(&mut out, &cons, &notify);
@@ -513,8 +562,8 @@ mod tests {
         let notify1 = Arc::new(Notify::new());
         let notify2 = Arc::new(Notify::new());
 
-        let mut filler1 = PlaybackFiller::new(44_100, 2).expect("filler init");
-        let mut filler2 = PlaybackFiller::new(44_100, 2).expect("filler init");
+        let mut filler1 = PlaybackFiller::new(44_100, 2, 4410).expect("filler init");
+        let mut filler2 = PlaybackFiller::new(44_100, 2, 4410).expect("filler init");
 
         let mut out1 = vec![0.0f32; 8820];
         let mut out2 = vec![0.0f32; 8820];

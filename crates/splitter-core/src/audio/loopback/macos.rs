@@ -69,6 +69,7 @@ pub(crate) fn deinterleave_to_stereo(samples: &[f32], channels: usize, out: &mut
 struct AudioHandler {
     producer: Arc<Mutex<RingProducer>>,
     frame_notify: Arc<Notify>,
+    stereo: Mutex<Vec<f32>>,
 }
 
 impl SCStreamOutputTrait for AudioHandler {
@@ -81,7 +82,10 @@ impl SCStreamOutputTrait for AudioHandler {
             return;
         };
 
-        let mut stereo: Vec<f32> = Vec::new();
+        let Ok(mut stereo) = self.stereo.try_lock() else {
+            return;
+        };
+        stereo.clear();
 
         for buf in abl.iter() {
             let channels = buf.number_channels as usize;
@@ -184,9 +188,13 @@ impl MacosLoopbackHandle {
             .with_minimum_frame_interval(&one_fps)
             .with_queue_depth(3);
 
+        // WHY: SCK delivers audio on a single serialized thread; pre-reserving avoids
+        // per-callback allocation (SAFETY.md #1). 8192 stereo frames covers the largest
+        // SCK audio buffer observed (see deinterleave large-input tests).
         let handler = AudioHandler {
             producer: Arc::new(Mutex::new(producer)),
             frame_notify: frame_notify.clone(),
+            stereo: Mutex::new(Vec::with_capacity(8192 * 2)),
         };
 
         let mut stream = SCStream::new(&filter, &config);

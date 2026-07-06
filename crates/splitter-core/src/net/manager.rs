@@ -117,6 +117,10 @@ impl SessionManager {
         .await
     }
 
+    pub async fn remove(&self, id: &SessionId) -> bool {
+        self.sessions.write().await.remove(id).is_some()
+    }
+
     pub async fn set_stream_muted(
         &self,
         id: &SessionId,
@@ -242,6 +246,24 @@ mod tests {
         let snap = mgr.snapshot().await;
         assert_eq!(snap[0].state, SessionState::Closed);
         assert_eq!(snap[0].streams[0].state, StreamState::Closed);
+    }
+
+    #[tokio::test]
+    async fn remove_evicts_session_from_snapshot() {
+        let mgr = SessionManager::new();
+        let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
+        assert!(
+            mgr.remove(&id).await,
+            "removing a live session reports true"
+        );
+        assert!(
+            mgr.snapshot().await.is_empty(),
+            "removed session must not appear in snapshot"
+        );
+        assert!(
+            !mgr.remove(&id).await,
+            "removing an absent session reports false"
+        );
     }
 
     #[tokio::test]

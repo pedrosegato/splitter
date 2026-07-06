@@ -212,6 +212,7 @@ mod tests {
                 tx,
                 events,
                 remote_addr: addr,
+                abort: tokio::spawn(async {}).abort_handle(),
             },
             rx,
         )

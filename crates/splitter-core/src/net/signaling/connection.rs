@@ -25,6 +25,16 @@ pub struct PeerConnectionHandle {
     pub tx: mpsc::Sender<SignalingMessage>,
     pub events: broadcast::Sender<PeerEvent>,
     pub remote_addr: std::net::SocketAddr,
+    pub(crate) abort: tokio::task::AbortHandle,
+}
+
+impl PeerConnectionHandle {
+    /// Force the connection task to stop, dropping its `TcpStream` and closing
+    /// the socket immediately. Needed because a lingering `tx` clone anywhere
+    /// would otherwise keep the task's `recv()` alive and the socket open.
+    pub fn shutdown(&self) {
+        self.abort.abort();
+    }
 }
 
 pub fn spawn_peer_connection(
@@ -42,7 +52,7 @@ pub fn spawn_peer_connection(
     let (event_tx, _) = broadcast::channel::<PeerEvent>(64);
     let event_tx_task = event_tx.clone();
 
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         let codec = LengthDelimitedCodec::builder()
             .max_frame_length(1 << 20)
             .new_codec();
@@ -165,6 +175,7 @@ pub fn spawn_peer_connection(
         tx: msg_tx,
         events: event_tx.clone(),
         remote_addr: peer_addr,
+        abort: task.abort_handle(),
     })
 }
 

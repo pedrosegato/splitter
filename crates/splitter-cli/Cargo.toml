@@ -11,6 +11,7 @@ sck = ["splitter-core/sck"]
 
 [dependencies]
 splitter-core = { path = "../splitter-core" }
+async-trait = { workspace = true }
 tokio = { workspace = true, features = ["io-std"] }
 clap = { workspace = true }
 tracing = { workspace = true }
@@ -30,6 +31,7 @@ path = "tests/help_snapshots.rs"
 [dev-dependencies]
 assert_cmd = { workspace = true }
 insta = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

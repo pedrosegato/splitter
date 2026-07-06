@@ -60,3 +60,76 @@ pub async fn set_tray_state(
     let _ = (app, state);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use splitter_core::net::signaling::{Codec, CodecParams, Endpoint};
+    use splitter_core::net::stream::{Stream, StreamRoute};
+    use splitter_core::{SessionId, SessionState, StreamId};
+    use tempfile::tempdir;
+    use uuid::Uuid;
+
+    async fn seed_active_session_with_stream(core: &AppCore, remote: Uuid) -> SessionId {
+        let local = core.identity.read().peer_id;
+        let sid = core.sessions.open_outgoing(local, remote).await;
+        core.sessions.accept(&sid).await.unwrap();
+        let route = StreamRoute::new(
+            Endpoint {
+                peer_id: local.to_string(),
+                device_id: "in".into(),
+            },
+            Endpoint {
+                peer_id: remote.to_string(),
+                device_id: "out".into(),
+            },
+            CodecParams {
+                name: Codec::Opus,
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            1.0,
+        );
+        core.sessions
+            .add_stream(&sid, Stream::new_negotiating(StreamId(0), route, 0))
+            .await
+            .unwrap();
+        core.sessions
+            .activate_stream(&sid, StreamId(0))
+            .await
+            .unwrap();
+        sid
+    }
+
+    async fn new_core() -> Arc<AppCore> {
+        AppCore::init(tempdir().unwrap().path())
+            .await
+            .expect("init")
+    }
+
+    #[tokio::test]
+    async fn mute_all_core_mutes_every_stream() {
+        let core = new_core().await;
+        seed_active_session_with_stream(&core, Uuid::new_v4()).await;
+        seed_active_session_with_stream(&core, Uuid::new_v4()).await;
+
+        mute_all_core(&core).await;
+
+        let snap = core.sessions.snapshot().await;
+        let streams: Vec<_> = snap.iter().flat_map(|s| &s.streams).collect();
+        assert_eq!(streams.len(), 2);
+        assert!(streams.iter().all(|st| st.muted));
+    }
+
+    #[tokio::test]
+    async fn disconnect_all_core_closes_all_sessions() {
+        let core = new_core().await;
+        seed_active_session_with_stream(&core, Uuid::new_v4()).await;
+        seed_active_session_with_stream(&core, Uuid::new_v4()).await;
+
+        disconnect_all_core(&core).await;
+
+        let snap = core.sessions.snapshot().await;
+        assert!(snap.iter().all(|s| s.state == SessionState::Closed));
+    }
+}

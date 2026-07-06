@@ -9,5 +9,8 @@ pub mod packet;
 pub mod session;
 pub mod signaling;
 pub mod stream;
+pub mod stream_pump;
+pub mod stream_registry;
 pub mod stream_runtime;
+pub mod stream_stats;
 pub mod trust;

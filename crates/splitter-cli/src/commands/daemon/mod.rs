@@ -1,11 +1,10 @@
 mod context;
 mod peer_event_loop;
-mod reconnect;
 mod repl;
 mod ui;
 
 use context::DaemonContext;
-use peer_event_loop::spawn_stream_open_acceptor;
+use peer_event_loop::CliControlPlane;
 use splitter_core::net::device_watcher;
 use splitter_core::net::discovery::Discovery;
 use splitter_core::net::signaling::client_ops::{find_conn_tx, notify_remote_control};
@@ -180,32 +179,14 @@ pub(crate) async fn run(
         local_peer_id,
     };
 
-    // Spawn the stream-open acceptor for every newly established peer connection,
+    // Spawn the shared control-plane loop for every newly established peer connection,
     // regardless of whether it came through the manual `accept` branch or the
     // auto-accept-trusted shortcut.
-    {
-        let mut conn_est_rx = server.connection_established_tx.subscribe();
-        let conns = server.connections.clone();
-        let acceptor_ctx = ctx.clone();
-        tokio::spawn(async move {
-            while let Ok(peer_id) = conn_est_rx.recv().await {
-                let name = acceptor_ctx.peer_display_name(&peer_id).await;
-                #[allow(clippy::print_stdout)]
-                {
-                    println!(">> {name} connected (peer_id {})", context::short(&peer_id));
-                }
-                let guard = conns.read().await;
-                if let Some(conn) = guard.get(&peer_id) {
-                    spawn_stream_open_acceptor(
-                        acceptor_ctx.clone(),
-                        conn.tx.clone(),
-                        conn.events.subscribe(),
-                        peer_id,
-                    );
-                }
-            }
-        });
-    }
+    splitter_core::net::signaling::spawn_connection_supervisor(
+        server.connection_established_tx.subscribe(),
+        server.connections.clone(),
+        Arc::new(CliControlPlane { ctx: ctx.clone() }),
+    );
 
     repl::run_repl(&ctx, server, discovery).await
 }
@@ -309,6 +290,37 @@ mod tests {
         let registry = splitter_core::StreamRegistry::new();
         let outgoing = Arc::new(RwLock::new(HashMap::new()));
         graceful_shutdown(&sessions, &registry, None, &outgoing).await;
+    }
+
+    #[tokio::test]
+    async fn acceptor_loop_shape_survives_lagged_receiver() {
+        use tokio::sync::broadcast::{self, error::RecvError};
+
+        let (tx, mut rx) = broadcast::channel::<Uuid>(2);
+        for _ in 0..5 {
+            let _ = tx.send(Uuid::new_v4());
+        }
+        let wanted = Uuid::new_v4();
+        tx.send(wanted).unwrap();
+
+        let mut delivered = None;
+        loop {
+            match rx.recv().await {
+                Ok(id) => {
+                    delivered = Some(id);
+                    if id == wanted {
+                        break;
+                    }
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+        assert_eq!(
+            delivered,
+            Some(wanted),
+            "loop must continue past a Lagged error and still deliver later values"
+        );
     }
 
     #[tokio::test]

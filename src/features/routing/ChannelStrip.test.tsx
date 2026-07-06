@@ -82,16 +82,12 @@ describe("ChannelStrip", () => {
     });
   });
 
-  it("clicking M again toggles mute off and calls set_muted with value 0", () => {
-    const stream = makeStream();
+  it("clicking M on a muted stream sends set_muted false", () => {
+    const stream = makeStream({ muted: true });
     const { getByLabelText } = render(
       <ChannelStrip sessionId="sess-1" stream={stream} selected={false} />,
       { wrapper: makeWrapper() },
     );
-
-    act(() => {
-      fireEvent.click(getByLabelText("mutar"));
-    });
 
     act(() => {
       fireEvent.click(getByLabelText("desmutar"));
@@ -102,6 +98,36 @@ describe("ChannelStrip", () => {
       streamId: 1,
       action: { type: "set_muted", muted: false },
     });
+  });
+
+  it("slider follows a re-rendered stream prop", () => {
+    const { getByRole, rerender } = render(
+      <ChannelStrip sessionId="sess-1" stream={makeStream({ volume: 0.3 })} selected={false} />,
+      { wrapper: makeWrapper() },
+    );
+
+    expect(getByRole("slider").getAttribute("aria-valuenow")).toBe("30");
+
+    rerender(
+      <ChannelStrip sessionId="sess-1" stream={makeStream({ volume: 0.9 })} selected={false} />,
+    );
+
+    expect(getByRole("slider").getAttribute("aria-valuenow")).toBe("90");
+  });
+
+  it("M button reflects stream.muted from the prop", () => {
+    const { getByLabelText, rerender } = render(
+      <ChannelStrip sessionId="sess-1" stream={makeStream({ muted: true })} selected={false} />,
+      { wrapper: makeWrapper() },
+    );
+
+    expect(getByLabelText("desmutar")).toBeDefined();
+
+    rerender(
+      <ChannelStrip sessionId="sess-1" stream={makeStream({ muted: false })} selected={false} />,
+    );
+
+    expect(getByLabelText("mutar")).toBeDefined();
   });
 
   it("close button calls closeStream.mutate with correct args", () => {

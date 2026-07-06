@@ -45,7 +45,7 @@ impl DaemonContext {
         peer_id: Uuid,
         handle: PeerConnectionHandle,
     ) {
-        super::peer_event_loop::spawn_stream_open_acceptor(
+        super::peer_event_loop::spawn_control_plane_loop(
             self.clone(),
             handle.tx.clone(),
             handle.events.subscribe(),
@@ -88,4 +88,58 @@ pub(crate) fn pick_default_output_device_id() -> Option<String> {
         .into_iter()
         .find(|d| d.kind == DeviceKind::Output)
         .map(|d| d.id)
+}
+
+#[cfg(test)]
+pub(crate) fn test_ctx() -> DaemonContext {
+    let dir = tempfile::tempdir().unwrap();
+    let identity = PeerIdentity {
+        peer_id: Uuid::new_v4(),
+        peer_name: "test".into(),
+    };
+    let local = identity.peer_id;
+    DaemonContext {
+        identity,
+        trust: Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("trust.toml")).unwrap(),
+        )),
+        sessions: SessionManager::new(),
+        stream_registry: StreamRegistry::new(),
+        discovered: Arc::default(),
+        outgoing_connections: Arc::default(),
+        local_peer_id: local,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn discovered_peer(peer_id: Uuid, name: &str) -> DiscoveredPeer {
+        DiscoveredPeer {
+            peer_id: peer_id.to_string(),
+            peer_name: name.into(),
+            host: "127.0.0.1".into(),
+            port: 5000,
+            version: "test".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn peer_display_name_prefers_discovered() {
+        let ctx = test_ctx();
+        let peer = Uuid::new_v4();
+        ctx.discovered
+            .write()
+            .await
+            .insert(peer.to_string(), discovered_peer(peer, "Alice"));
+        assert_eq!(ctx.peer_display_name(&peer).await, "Alice");
+    }
+
+    #[tokio::test]
+    async fn peer_display_name_falls_back_to_short_uuid() {
+        let ctx = test_ctx();
+        let peer = Uuid::new_v4();
+        assert_eq!(ctx.peer_display_name(&peer).await, short(&peer));
+    }
 }

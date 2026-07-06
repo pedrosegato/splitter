@@ -1,4 +1,5 @@
 use crate::error::NetError;
+use crate::net::manager::SessionManager;
 use crate::net::signaling::{
     Codec, CodecParams, Endpoint, PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
 };
@@ -166,6 +167,34 @@ pub async fn notify_remote_control(
         .ok();
 }
 
+pub async fn notify_remote_by_session(
+    sessions: &SessionManager,
+    server_conns: &ConnectionMap,
+    outgoing_conns: &ConnectionMap,
+    session_id: Uuid,
+    stream_id: u8,
+    action: StreamAction,
+) {
+    let snap = sessions.snapshot().await;
+    let remote = match snap
+        .iter()
+        .find(|s| s.id.get() == session_id)
+        .map(|s| s.remote_peer_id)
+    {
+        Some(r) => r,
+        None => {
+            tracing::warn!(%session_id, "notify_remote_by_session: session not found, skipping remote signal");
+            return;
+        }
+    };
+    match find_conn_tx(server_conns, outgoing_conns, remote).await {
+        Some(tx) => notify_remote_control(&tx, stream_id, action).await,
+        None => {
+            tracing::warn!(%session_id, %remote, "notify_remote_by_session: no live connection to remote peer, skipping remote signal");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +245,38 @@ mod tests {
         assert!(find_conn_tx(&server, &outgoing, Uuid::new_v4())
             .await
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn notify_by_session_sends_control_to_remote() {
+        let sessions = crate::net::manager::SessionManager::new();
+        let local = Uuid::new_v4();
+        let remote = Uuid::new_v4();
+        let sid = sessions.open_outgoing(local, remote).await;
+        sessions.accept(&sid).await.unwrap();
+
+        let server = empty_map();
+        let outgoing = empty_map();
+        let (handle, mut rx) = fake_handle();
+        server.write().await.insert(remote, handle);
+
+        notify_remote_by_session(
+            &sessions,
+            &server,
+            &outgoing,
+            sid.get(),
+            7,
+            StreamAction::Close,
+        )
+        .await;
+
+        match rx.recv().await {
+            Some(SignalingMessage::StreamControl { stream_id, action }) => {
+                assert_eq!(stream_id, 7);
+                assert_eq!(action, StreamAction::Close);
+            }
+            other => panic!("expected StreamControl, got {other:?}"),
+        }
     }
 
     #[tokio::test]

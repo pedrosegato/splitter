@@ -1,6 +1,7 @@
 use crate::core::AppCore;
 use crate::dto::{IdentityDto, PendingPeerDto};
 use splitter_core::net::discovery::DiscoveredPeer;
+use splitter_core::net::signaling::client_ops::find_conn_tx;
 use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage, StreamAction};
 use std::sync::Arc;
 use std::time::Duration;
@@ -106,15 +107,7 @@ pub async fn peer_devices(
     let pid = uuid::Uuid::parse_str(&peer_id).map_err(|e| e.to_string())?;
     let cached = core.remote_devices.read().await.get(&pid).cloned();
     if cached.is_none() {
-        let g = core.server.connections.read().await;
-        let tx = g.get(&pid).map(|c| c.tx.clone());
-        drop(g);
-        let tx = if let Some(t) = tx {
-            Some(t)
-        } else {
-            core.outgoing.read().await.get(&pid).map(|c| c.tx.clone())
-        };
-        if let Some(tx) = tx {
+        if let Some(tx) = find_conn_tx(&core.server.connections, &core.outgoing, pid).await {
             tx.send(SignalingMessage::DeviceListRequest {}).await.ok();
         }
     }

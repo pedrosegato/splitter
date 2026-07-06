@@ -171,6 +171,7 @@ fn build_capture_stream(
     let channels = supported.channels();
     let sample_rate = supported.sample_rate().0;
     let sample_format = supported.sample_format();
+    let max_frames = max_callback_frames(supported.buffer_size());
     let config: cpal::StreamConfig = supported.into();
 
     let producer = Arc::new(Mutex::new(producer));
@@ -181,7 +182,7 @@ fn build_capture_stream(
         cpal::SampleFormat::F32 => {
             let prod = producer.clone();
             let n = notify.clone();
-            let mut router = SampleRouter::new(sample_rate, channels)?;
+            let mut router = SampleRouter::new(sample_rate, channels, max_frames)?;
             device
                 .build_input_stream(
                     &config,
@@ -198,7 +199,7 @@ fn build_capture_stream(
         cpal::SampleFormat::I16 => {
             let prod = producer.clone();
             let n = notify.clone();
-            let mut router = SampleRouter::new(sample_rate, channels)?;
+            let mut router = SampleRouter::new(sample_rate, channels, max_frames)?;
             device
                 .build_input_stream(
                     &config,
@@ -215,7 +216,7 @@ fn build_capture_stream(
         cpal::SampleFormat::U16 => {
             let prod = producer.clone();
             let n = notify.clone();
-            let mut router = SampleRouter::new(sample_rate, channels)?;
+            let mut router = SampleRouter::new(sample_rate, channels, max_frames)?;
             device
                 .build_input_stream(
                     &config,
@@ -275,6 +276,20 @@ fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
 // 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices); must divide evenly into FRAME_SAMPLES at 48k.
 const RESAMPLE_CHUNK: usize = 441;
 
+// SAFETY.md #1 forbids callback-time allocation, so scratch is pre-sized to the largest
+// buffer the driver can hand us. Drivers that report Unknown give no bound; 4096 matches
+// the max already assumed for WASAPI shared mode and acts as a clamped safety net.
+const FALLBACK_MAX_CALLBACK_FRAMES: usize = 4096;
+
+fn max_callback_frames(buffer_size: &cpal::SupportedBufferSize) -> usize {
+    match buffer_size {
+        cpal::SupportedBufferSize::Range { max, .. } => {
+            (*max as usize).max(FALLBACK_MAX_CALLBACK_FRAMES)
+        }
+        cpal::SupportedBufferSize::Unknown => FALLBACK_MAX_CALLBACK_FRAMES,
+    }
+}
+
 fn make_resampler(input_rate: u32) -> Result<Resampler, AudioError> {
     Resampler::new(input_rate, SAMPLE_RATE, RESAMPLE_CHUNK).map_err(|e| AudioError::BuildStream {
         source: Box::new(e),
@@ -313,7 +328,7 @@ struct SampleRouter {
 }
 
 impl SampleRouter {
-    fn new(sample_rate: u32, channels: u16) -> Result<Self, AudioError> {
+    fn new(sample_rate: u32, channels: u16, max_frames: usize) -> Result<Self, AudioError> {
         let (resampler_l, resampler_r) = if sample_rate != SAMPLE_RATE {
             let l = make_resampler(sample_rate)?;
             let r = make_resampler(sample_rate)?;
@@ -325,7 +340,7 @@ impl SampleRouter {
         let scratch_cap = if resampler_l.is_some() {
             RESAMPLE_CHUNK * 4
         } else {
-            1024
+            max_frames * 2
         };
 
         Ok(Self {
@@ -365,7 +380,12 @@ impl SampleRouter {
 
         if self.resampler_l.is_none() {
             self.scratch.clear();
-            self.scratch.reserve(frame_count * 2);
+            debug_assert!(
+                frame_count * 2 <= self.scratch.capacity(),
+                "capture scratch too small: need {} have {}",
+                frame_count * 2,
+                self.scratch.capacity()
+            );
             for i in 0..frame_count {
                 let (l, r) = deinterleave_stereo_frame(interleaved, i * ch, ch, &to_f32);
                 self.scratch.push(l);
@@ -541,7 +561,7 @@ mod tests {
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
-        let mut router = SampleRouter::new(48_000, 2).expect("router init");
+        let mut router = SampleRouter::new(48_000, 2, 4096).expect("router init");
 
         // Feed FRAME_STEREO_SAMPLES/2 stereo frames (L=0.4, R=0.8)
         use crate::FRAME_SAMPLES;
@@ -572,7 +592,7 @@ mod tests {
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
-        let mut router = SampleRouter::new(48_000, 1).expect("router init");
+        let mut router = SampleRouter::new(48_000, 1, 4096).expect("router init");
 
         use crate::FRAME_SAMPLES;
         let mono: Vec<f32> = vec![0.5f32; FRAME_SAMPLES];
@@ -604,7 +624,7 @@ mod tests {
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
-        let mut router = SampleRouter::new(44_100, 1).expect("router init");
+        let mut router = SampleRouter::new(44_100, 1, 4096).expect("router init");
 
         // Feed 4410 mono samples at 44100 Hz -> expect ~4800 stereo pairs = ~9600 samples at 48000 Hz
         let input = vec![0.5f32; 4410];
@@ -645,12 +665,12 @@ mod tests {
         let notify1 = Arc::new(Notify::new());
         let notify2 = Arc::new(Notify::new());
 
-        let mut router = SampleRouter::new(44_100, 1).expect("router init");
+        let mut router = SampleRouter::new(44_100, 1, 4096).expect("router init");
 
         let input = vec![0.6f32; 4410];
         router.push_f32(&input, &prod1, &notify1);
 
-        let mut router2 = SampleRouter::new(44_100, 1).expect("router init");
+        let mut router2 = SampleRouter::new(44_100, 1, 4096).expect("router init");
         router2.push_f32(&input, &prod2, &notify2);
 
         let avail1 = cons1.occupied();
@@ -686,7 +706,7 @@ mod tests {
         let (prod_ref_b, mut cons_ref_b) = AudioRing::new(ring_cap);
         let prod_ref_b = Arc::new(Mutex::new(prod_ref_b));
         let notify_ref_b = Arc::new(Notify::new());
-        let mut router_ref = SampleRouter::new(44_100, 1).expect("router init");
+        let mut router_ref = SampleRouter::new(44_100, 1, 4096).expect("router init");
         router_ref.push_f32(&input, &prod_ref_a, &notify_ref_a);
         router_ref.push_f32(&input, &prod_ref_b, &notify_ref_b);
         let avail_ref = cons_ref_b.occupied();
@@ -714,7 +734,7 @@ mod tests {
         let prod = Arc::new(Mutex::new(prod));
         let notify = Arc::new(Notify::new());
 
-        let mut router = SampleRouter::new(48_000, 2).expect("router init");
+        let mut router = SampleRouter::new(48_000, 2, 4096).expect("router init");
 
         let input: Vec<f32> = (0..frame_count).flat_map(|_| [0.3f32, 0.7f32]).collect();
         router.push_f32(&input, &prod, &notify);
@@ -740,5 +760,26 @@ mod tests {
                 out[i * 2 + 1]
             );
         }
+    }
+
+    #[test]
+    fn sample_router_fast_path_no_realloc_within_max() {
+        let frame_count = 4096;
+        let ring_cap = frame_count * 2 * 2;
+        let (prod, _cons) = AudioRing::new(ring_cap);
+        let prod = Arc::new(Mutex::new(prod));
+        let notify = Arc::new(Notify::new());
+
+        let mut router = SampleRouter::new(48_000, 2, 4096).expect("router init");
+        let cap_before = router.scratch.capacity();
+
+        let input: Vec<f32> = (0..frame_count).flat_map(|_| [0.3f32, 0.7f32]).collect();
+        router.push_f32(&input, &prod, &notify);
+
+        assert_eq!(
+            router.scratch.capacity(),
+            cap_before,
+            "fast-path scratch must not reallocate within max_frames"
+        );
     }
 }

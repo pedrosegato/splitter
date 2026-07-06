@@ -44,6 +44,13 @@ impl PendingPeers {
     pub async fn push(&self, p: PendingPeer) {
         self.inner.lock().await.push(p);
     }
+
+    pub async fn remove_peer(&self, peer_id: &Uuid) -> bool {
+        let mut guard = self.inner.lock().await;
+        let before = guard.len();
+        guard.retain(|p| &p.peer_id != peer_id);
+        guard.len() != before
+    }
 }
 
 #[derive(Debug)]
@@ -205,7 +212,28 @@ impl SignalingServer {
                             proposed_token: auth_token.clone(),
                         })
                         .await;
+                    let mut pre_accept_events = handle.events.subscribe();
+                    let pending_for_watch = p_inner.clone();
+                    let conns_for_watch = c_inner.clone();
                     c_inner.write().await.insert(peer_uuid, handle);
+                    tokio::spawn(async move {
+                        loop {
+                            match pre_accept_events.recv().await {
+                                Ok(PeerEvent::Disconnected { .. })
+                                | Err(broadcast::error::RecvError::Closed) => {
+                                    // Once accepted, `accept_pending_as` has taken the peer out
+                                    // of pending and the acceptor owns cleanup; only evict while
+                                    // still pending.
+                                    if pending_for_watch.remove_peer(&peer_uuid).await {
+                                        conns_for_watch.write().await.remove(&peer_uuid);
+                                    }
+                                    break;
+                                }
+                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                                Ok(_) => {}
+                            }
+                        }
+                    });
                 });
             }
         });
@@ -249,7 +277,7 @@ pub async fn accept_pending_as(
         .ok_or_else(|| NetError::SignalingProtocol {
             reason: format!("no pending peer at index {idx}"),
         })?;
-    let token = p.proposed_token.clone();
+    let token = generate_auth_token();
     {
         let mut t = trust.write().await;
         t.add(TrustedPeer {
@@ -288,6 +316,7 @@ pub fn local_capabilities() -> Capabilities {
 mod tests {
     use super::*;
     use crate::net::signaling::message::PROTOCOL_VERSION;
+    use crate::net::trust::MIN_AUTH_TOKEN_LEN;
     use crate::settings::Settings;
     use tempfile::tempdir;
     use tokio::net::TcpStream;
@@ -424,7 +453,7 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        let (accepted_id, _token) = accept_pending(
+        let (accepted_id, token) = accept_pending(
             &server.pending,
             &trust,
             &server.connections,
@@ -434,6 +463,12 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(accepted_id, peer_id);
+        assert!(!token.is_empty(), "minted token must not be empty");
+        assert!(token.len() >= MIN_AUTH_TOKEN_LEN);
+        assert_ne!(
+            token, "proposed",
+            "server must mint its own token, not echo the client-proposed value"
+        );
         let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 if let Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, .. })) =
@@ -457,14 +492,14 @@ mod tests {
         let (server, _identity, trust, _sessions, _dir) = setup_with_settings(settings).await;
 
         let peer_id = Uuid::new_v4();
-        // Pre-register the peer as trusted
+        let token = generate_auth_token();
         trust
             .write()
             .await
             .add(TrustedPeer {
                 peer_id,
                 peer_name: "trusted-client".into(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .unwrap();
 
@@ -480,7 +515,7 @@ mod tests {
                 peer_name: "trusted-client".into(),
                 app_version: "0".into(),
                 capabilities: local_capabilities(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .await
             .unwrap();
@@ -518,13 +553,14 @@ mod tests {
         let (server, _identity, trust, _sessions, _dir) = setup_with_settings(off).await;
 
         let peer_id = Uuid::new_v4();
+        let token = generate_auth_token();
         trust
             .write()
             .await
             .add(TrustedPeer {
                 peer_id,
                 peer_name: "trusted-client".into(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .unwrap();
 
@@ -539,7 +575,7 @@ mod tests {
                 peer_name: "trusted-client".into(),
                 app_version: "0".into(),
                 capabilities: local_capabilities(),
-                auth_token: "tok-xyz".into(),
+                auth_token: token.clone(),
             })
             .await
             .unwrap();
@@ -576,7 +612,7 @@ mod tests {
             .add(TrustedPeer {
                 peer_id,
                 peer_name: "trusted-client".into(),
-                auth_token: "correct-tok".into(),
+                auth_token: generate_auth_token(),
             })
             .unwrap();
 
@@ -622,6 +658,170 @@ mod tests {
         assert!(
             server.pending.list().await.is_empty(),
             "rejected peer must not appear in pending queue"
+        );
+    }
+
+    async fn queue_hello_with_empty_token(
+        server: &SignalingServerHandle,
+        peer_id: Uuid,
+    ) -> PeerConnectionHandle {
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None).unwrap();
+        client
+            .tx
+            .send(SignalingMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                peer_id: peer_id.to_string(),
+                peer_name: "client".into(),
+                app_version: "0".into(),
+                capabilities: local_capabilities(),
+                auth_token: String::new(),
+            })
+            .await
+            .unwrap();
+        for _ in 0..50 {
+            if !server.pending.list().await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        client
+    }
+
+    #[tokio::test]
+    async fn accept_mints_non_empty_high_entropy_token() {
+        let (server, _identity, trust, _sessions, _dir) = setup().await;
+        let peer_id = Uuid::new_v4();
+        let _client = queue_hello_with_empty_token(&server, peer_id).await;
+
+        let (accepted_id, token) = accept_pending(
+            &server.pending,
+            &trust,
+            &server.connections,
+            &server.connection_established_tx,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(accepted_id, peer_id);
+        assert!(!token.is_empty(), "minted token must not be empty");
+        assert!(token.len() >= MIN_AUTH_TOKEN_LEN);
+    }
+
+    #[tokio::test]
+    async fn empty_proposed_token_is_not_the_stored_credential() {
+        let (server, _identity, trust, _sessions, _dir) = setup().await;
+        let peer_id = Uuid::new_v4();
+        let _client = queue_hello_with_empty_token(&server, peer_id).await;
+
+        let (_accepted_id, token) = accept_pending(
+            &server.pending,
+            &trust,
+            &server.connections,
+            &server.connection_established_tx,
+            0,
+        )
+        .await
+        .unwrap();
+
+        let t = trust.read().await;
+        assert!(
+            !t.verify(&peer_id, ""),
+            "empty client-proposed token must not become the stored credential"
+        );
+        assert!(t.verify(&peer_id, &token), "the minted token must verify");
+    }
+
+    #[tokio::test]
+    async fn pending_peers_remove_peer_removes_matching() {
+        let pending = PendingPeers::default();
+        let p1 = Uuid::new_v4();
+        let p2 = Uuid::new_v4();
+        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        pending
+            .push(PendingPeer {
+                peer_id: p1,
+                peer_name: "a".into(),
+                remote_addr: addr,
+                proposed_token: String::new(),
+            })
+            .await;
+        pending
+            .push(PendingPeer {
+                peer_id: p2,
+                peer_name: "b".into(),
+                remote_addr: addr,
+                proposed_token: String::new(),
+            })
+            .await;
+
+        assert!(
+            pending.remove_peer(&p1).await,
+            "removing p1 must report true"
+        );
+        assert!(
+            !pending.remove_peer(&p1).await,
+            "removing an absent peer must report false"
+        );
+        let list = pending.list().await;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].peer_id, p2, "the other peer must survive");
+    }
+
+    #[tokio::test]
+    async fn pre_accept_drop_evicts_pending_and_connections() {
+        let (server, _identity, _trust, _sessions, _dir) = setup().await;
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None).unwrap();
+        let client_peer_id = Uuid::new_v4();
+        client
+            .tx
+            .send(SignalingMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                peer_id: client_peer_id.to_string(),
+                peer_name: "client".into(),
+                app_version: "0".into(),
+                capabilities: local_capabilities(),
+                auth_token: String::new(),
+            })
+            .await
+            .unwrap();
+
+        let mut queued = false;
+        for _ in 0..50 {
+            if !server.pending.list().await.is_empty()
+                && server
+                    .connections
+                    .read()
+                    .await
+                    .contains_key(&client_peer_id)
+            {
+                queued = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(queued, "peer must be queued in pending and connections");
+
+        drop(client);
+
+        let mut evicted = false;
+        for _ in 0..50 {
+            if server.pending.list().await.is_empty()
+                && !server
+                    .connections
+                    .read()
+                    .await
+                    .contains_key(&client_peer_id)
+            {
+                evicted = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            evicted,
+            "dropped pre-accept connection must be evicted from pending and connections"
         );
     }
 }

@@ -4622,6 +4622,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "async-trait",
  "bytes",
  "clap",
  "dirs 5.0.1",
@@ -4629,6 +4630,7 @@ dependencies = [
  "socket2 0.5.10",
  "splitter-core",
  "sysinfo",
+ "tempfile",
  "tokio",
  "toml 0.8.23",
  "tracing",
@@ -4640,6 +4642,7 @@ dependencies = [
 name = "splitter-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "audio_thread_priority",
  "audiopus",
  "base64 0.22.1",
@@ -4690,6 +4693,7 @@ dependencies = [
 name = "splitter-tauri"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "parking_lot",
  "serde",
  "serde_json",

@@ -6,6 +6,11 @@ use std::time::Instant;
 pub const PACKET_INTERVAL_MS: u32 = 20;
 pub const MAX_DEPTH_MS_HARD_CAP: u32 = 200;
 
+// queue/arrival_order only shrink when pop_ready runs; a stalled consumer would
+// otherwise grow them unbounded. At 20ms/packet and a 200ms hard cap an in-spec buffer
+// holds ~10 packets, so 512 is far above any legitimate depth while still bounding memory.
+pub const MAX_QUEUED_PACKETS: usize = 512;
+
 #[derive(Debug, Clone)]
 pub enum JitterOutput {
     Packet(Packet),
@@ -86,13 +91,27 @@ impl JitterBuffer {
             Some(cur) if seq < cur => self.next_expected_seq = Some(seq),
             _ => {}
         }
+        while self.arrival_order.len() > MAX_QUEUED_PACKETS {
+            if let Some(dropped) = self.arrival_order.pop_front() {
+                self.queue.remove(&dropped);
+            } else {
+                break;
+            }
+        }
     }
 
     pub fn pop_ready(&mut self, now: Instant) -> Option<JitterOutput> {
         let want = self.next_expected_seq?;
         if self.queue.contains_key(&want) {
             let (pkt, _) = self.queue.remove(&want)?;
-            self.arrival_order.retain(|&s| s != want);
+            // arrival_order is arrival-ordered, not seq-ordered: the popped seq is the
+            // front only in the in-order steady state. Fast-path that; fall back to a
+            // scan when a reordered arrival put `want` elsewhere.
+            if self.arrival_order.front() == Some(&want) {
+                self.arrival_order.pop_front();
+            } else {
+                self.arrival_order.retain(|&s| s != want);
+            }
             self.next_expected_seq = Some(want.wrapping_add(1));
             self.bump_pops();
             return Some(JitterOutput::Packet(pkt));
@@ -276,6 +295,85 @@ mod tests {
             }
             None => {
                 panic!("expected Lost{{seq=5}} — oldest arrival is seq=10 at t0, age=60ms >= 50ms")
+            }
+        }
+    }
+
+    #[test]
+    fn in_order_pop_removes_only_matching_head() {
+        let mut jb = JitterBuffer::new(JitterMode::Min, 100);
+        let t = Instant::now();
+        jb.push(pkt(0), t);
+        jb.push(pkt(1), t);
+        jb.push(pkt(2), t);
+
+        match jb.pop_ready(t).unwrap() {
+            JitterOutput::Packet(p) => assert_eq!(p.seq, 0),
+            _ => panic!("expected Packet(seq=0)"),
+        }
+        match jb.pop_ready(t).unwrap() {
+            JitterOutput::Packet(p) => assert_eq!(p.seq, 1),
+            _ => panic!("expected Packet(seq=1)"),
+        }
+        match jb.pop_ready(t).unwrap() {
+            JitterOutput::Packet(p) => assert_eq!(p.seq, 2),
+            _ => panic!("expected Packet(seq=2)"),
+        }
+    }
+
+    #[test]
+    fn out_of_order_pop_preserves_arrival_order_for_age_gating() {
+        use std::time::Duration;
+        let mut jb = JitterBuffer::new(JitterMode::Min, 50);
+        let t0 = Instant::now();
+
+        jb.push(pkt(10), t0);
+        jb.push(pkt(7), t0 + Duration::from_millis(20));
+        jb.push(pkt(4), t0 + Duration::from_millis(40));
+
+        match jb.pop_ready(t0 + Duration::from_millis(40)).unwrap() {
+            JitterOutput::Packet(p) => assert_eq!(p.seq, 4),
+            _ => panic!("expected Packet(seq=4)"),
+        }
+        assert_eq!(
+            jb.arrival_order.front(),
+            Some(&10),
+            "fallback pop must leave the oldest arrival at the front"
+        );
+
+        match jb.pop_ready(t0 + Duration::from_millis(60)) {
+            Some(JitterOutput::Lost { seq }) => assert_eq!(seq, 5),
+            other => panic!("expected Lost{{seq=5}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn push_beyond_cap_drops_oldest() {
+        let mut jb = JitterBuffer::new(JitterMode::Min, 100);
+        let t = Instant::now();
+        for seq in 0..(MAX_QUEUED_PACKETS as u32 + 5) {
+            jb.push(pkt(seq), t);
+        }
+        assert_eq!(jb.arrival_order.len(), MAX_QUEUED_PACKETS);
+        for seq in 0..5u32 {
+            assert!(
+                !jb.queue.contains_key(&seq),
+                "oldest-arrived seq {seq} must be evicted from queue"
+            );
+        }
+    }
+
+    #[test]
+    fn cap_does_not_break_in_order_playback_within_cap() {
+        let mut jb = JitterBuffer::new(JitterMode::Min, 100);
+        let t = Instant::now();
+        for seq in 0..(MAX_QUEUED_PACKETS as u32) {
+            jb.push(pkt(seq), t);
+        }
+        for expected in 0..(MAX_QUEUED_PACKETS as u32) {
+            match jb.pop_ready(t).unwrap() {
+                JitterOutput::Packet(p) => assert_eq!(p.seq, expected),
+                _ => panic!("expected Packet(seq={expected}) — nothing should drop at/under cap"),
             }
         }
     }

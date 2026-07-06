@@ -3,6 +3,7 @@ import type { StreamStat, StreamSnapshot } from "@/bindings";
 import { useUiStore } from "@/stores/ui";
 import type { StreamHistory } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
+import { useActiveSession } from "@/hooks/useActiveSession";
 import { streamColor } from "@/features/routing/useWireGeometry";
 import { Sparkline } from "@/components/Sparkline";
 import { aggregate } from "./aggregate";
@@ -93,8 +94,7 @@ export function StatsView() {
   const stats = useUiStore((s) => s.stats);
   const statsHistory = useUiStore((s) => s.statsHistory);
   const { data: sessions } = useSnapshot();
-
-  const activeSession = sessions?.find((s) => s.state === "active");
+  const { session: activeSession } = useActiveSession();
   const activeStreamCount = activeSession?.streams.length ?? 0;
 
   const allStreams = useMemo<StreamSnapshot[]>(

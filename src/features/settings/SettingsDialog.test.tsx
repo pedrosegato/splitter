@@ -1,6 +1,6 @@
-import { render, fireEvent, within } from "@testing-library/react";
+import { render, fireEvent, within, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SettingsDialog } from "./SettingsDialog";
 import { useThemeStore, applyTheme } from "@/stores/theme";
 import type { Settings } from "@/bindings";
@@ -195,5 +195,34 @@ describe("SettingsDialog", () => {
     expect(
       within(document.body).getByText("Restaurar padrões"),
     ).toBeTruthy();
+  });
+
+  describe("number input debounce", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("signaling port debounces exactly once (fires set at 300ms, not before)", () => {
+      vi.useFakeTimers();
+      render(<SettingsDialog open onOpenChange={vi.fn()} />, {
+        wrapper: makeWrapper(),
+      });
+
+      const input = document.body.querySelector(
+        '[id="signaling-port"]',
+      ) as HTMLInputElement;
+      expect(input).toBeTruthy();
+
+      fireEvent.change(input, { target: { value: "7400" } });
+
+      expect(mockSet).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(mockSet).toHaveBeenCalledTimes(1);
+      expect(mockSet).toHaveBeenCalledWith("signaling_port", 7400);
+    });
   });
 });

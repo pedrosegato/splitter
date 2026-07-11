@@ -89,11 +89,22 @@ pub fn list_devices() -> Result<Vec<DeviceInfo>, AudioError> {
     Ok(out)
 }
 
+fn resolve_config(
+    default_cfg: Option<cpal::SupportedStreamConfig>,
+    fallback_rate: u32,
+    fallback_channels: u16,
+) -> (u32, u16) {
+    match default_cfg {
+        Some(cfg) => (cfg.sample_rate().0, cfg.channels()),
+        None => (fallback_rate, fallback_channels),
+    }
+}
+
 fn device_info(d: &cpal::Device, kind: DeviceKind, idx: usize) -> Option<DeviceInfo> {
     let name = d.name().ok()?;
-    let cfg = match kind {
-        DeviceKind::Input => d.default_input_config().ok()?,
-        DeviceKind::Output => d.default_output_config().ok()?,
+    let (default_sample_rate, channels) = match kind {
+        DeviceKind::Input => resolve_config(d.default_input_config().ok(), 48_000, 1),
+        DeviceKind::Output => resolve_config(d.default_output_config().ok(), 48_000, 2),
         DeviceKind::SystemAudio => return None,
     };
     let id = format!("{kind:?}:{idx}:{name}");
@@ -101,9 +112,18 @@ fn device_info(d: &cpal::Device, kind: DeviceKind, idx: usize) -> Option<DeviceI
         id,
         name,
         kind,
-        default_sample_rate: cfg.sample_rate().0,
-        channels: cfg.channels(),
+        default_sample_rate,
+        channels,
     })
+}
+
+#[cfg(test)]
+mod device_probe_tests {
+    use super::resolve_config;
+    #[test]
+    fn falls_back_when_no_default_config() {
+        assert_eq!(resolve_config(None, 48_000, 2), (48_000, 2));
+    }
 }
 
 #[cfg(test)]

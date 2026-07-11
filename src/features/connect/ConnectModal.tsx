@@ -4,10 +4,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { usePeers } from "@/hooks/usePeers";
 import { useConnectPeer, useOpenSession } from "@/hooks/useConnection";
 import type { DiscoveredPeer } from "@/bindings";
 import { Cable } from "lucide-react";
+import { motion } from "motion/react";
+import { variants } from "@/lib/motion";
 
 type Props = {
   open: boolean;
@@ -38,7 +41,8 @@ function DiscoveredRow({
   }
 
   return (
-    <button
+    <motion.button
+      variants={variants.listItem}
       type="button"
       onClick={handlePairing}
       disabled={isPending}
@@ -52,7 +56,7 @@ function DiscoveredRow({
         </small>
       </span>
       <Cable size={15} className="shrink-0 text-ink-3 group-hover:text-gold" />
-    </button>
+    </motion.button>
   );
 }
 
@@ -73,11 +77,18 @@ export function ConnectModal({ open, onOpenChange }: Props) {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="px-[7px] py-[7px]">
+        <motion.div
+          variants={variants.listStagger}
+          initial="hidden"
+          animate="show"
+          className="px-[7px] py-[7px]"
+        >
           {discovered.length === 0 ? (
-            <p className="px-[11px] py-[10px] text-[12px] text-ink-3">
-              nenhuma máquina na rede
-            </p>
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>nenhuma máquina na rede</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
             discovered.map((peer) => (
               <DiscoveredRow
@@ -87,7 +98,7 @@ export function ConnectModal({ open, onOpenChange }: Props) {
               />
             ))
           )}
-        </div>
+        </motion.div>
 
         <div className="flex items-center justify-end px-[13px] py-[9px] border-t border-line">
           <button

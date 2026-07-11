@@ -2,6 +2,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { usePendingPeers } from "@/hooks/usePeers";
 import { useAcceptPending, useRejectPending } from "@/hooks/useConnection";
 import { Check, X } from "lucide-react";
+import { motion } from "motion/react";
+import { variants } from "@/lib/motion";
 
 export function IncomingRequestDialog() {
   const pendingPeers = usePendingPeers();
@@ -25,14 +27,19 @@ export function IncomingRequestDialog() {
         </DialogHeader>
 
         {peer && (
-          <div className="px-[15px] py-[16px]">
-            <div className="flex items-center gap-[10px]">
+          <motion.div
+            variants={variants.listStagger}
+            initial="hidden"
+            animate="show"
+            className="px-[15px] py-[16px]"
+          >
+            <motion.div variants={variants.listItem} className="flex items-center gap-[10px]">
               <span className="w-[8px] h-[8px] rounded-full bg-gold shrink-0" />
               <div className="min-w-0">
                 <p className="truncate text-[13px] text-ink font-semibold">{peer.peer_name}</p>
                 <p className="text-[10px] text-ink-3 tabular-nums">{peer.addr}</p>
               </div>
-            </div>
+            </motion.div>
 
             <div className="mt-[16px] flex items-center justify-end gap-2">
               <button
@@ -54,7 +61,7 @@ export function IncomingRequestDialog() {
                 Aceitar
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
       </DialogContent>
     </Dialog>

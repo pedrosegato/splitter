@@ -258,6 +258,10 @@ pub async fn close_stream(
     Ok(())
 }
 
+fn should_notify_remote(action: &StreamAction) -> bool {
+    !matches!(action, StreamAction::Close)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn stream_control(
@@ -285,7 +289,7 @@ pub async fn stream_control(
             .await
             .map_err(|e| e.to_string())?;
     }
-    if !matches!(action, StreamAction::SetMuted { .. }) {
+    if should_notify_remote(&action) {
         notify_remote(&core, sid.get(), stream_id, action).await;
     }
     Ok(())
@@ -396,5 +400,13 @@ mod tests {
     async fn notify_remote_no_session_is_noop() {
         let core = new_core().await;
         notify_remote(&core, Uuid::new_v4(), 0, StreamAction::Close).await;
+    }
+
+    #[test]
+    fn mirrors_mute_and_volume_but_not_close() {
+        assert!(should_notify_remote(&StreamAction::SetMuted { muted: true }));
+        assert!(should_notify_remote(&StreamAction::SetVolume { volume: 0.5 }));
+        assert!(should_notify_remote(&StreamAction::Pause));
+        assert!(!should_notify_remote(&StreamAction::Close));
     }
 }

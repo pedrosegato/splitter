@@ -46,6 +46,7 @@ fn build() -> Builder<tauri::Wry> {
             events::StatsTick,
             events::PeerDisconnected,
             events::SnapshotChanged,
+            events::DevicesChanged,
         ])
 }
 
@@ -96,6 +97,7 @@ pub fn run() {
                     core.spawn_discovery().expect("discovery");
                     core.spawn_stats_emitter();
                     core.spawn_acceptor_supervisor();
+                    core.spawn_device_watcher();
                     app.manage(core);
                     let manager = app.autolaunch();
                     if auto_start {

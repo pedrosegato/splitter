@@ -201,12 +201,14 @@ async setAutostart(enabled: boolean) : Promise<Result<null, string>> {
 
 
 export const events = __makeEvents__<{
+devicesChanged: DevicesChanged,
 incomingSession: IncomingSession,
 peerDisconnected: PeerDisconnected,
 peersChanged: PeersChanged,
 snapshotChanged: SnapshotChanged,
 statsTick: StatsTick
 }>({
+devicesChanged: "devices-changed",
 incomingSession: "incoming-session",
 peerDisconnected: "peer-disconnected",
 peersChanged: "peers-changed",
@@ -223,6 +225,7 @@ statsTick: "stats-tick"
 export type DeviceDescriptor = { id: string; name: string; kind: DeviceKind }
 export type DeviceInfo = { id: string; name: string; kind: DeviceKind; default_sample_rate: number; channels: number }
 export type DeviceKind = "Input" | "Output" | "SystemAudio"
+export type DevicesChanged = null
 export type DiscoveredPeer = { peer_id: string; peer_name: string; host: string; port: number; version: string }
 export type FecMode = "auto" | "always" | "never"
 export type IdentityDto = { peer_id: string; peer_name: string }

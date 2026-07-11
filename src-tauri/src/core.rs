@@ -1,9 +1,10 @@
-use crate::events::{PeersChanged, StatsTick, StreamStat};
+use crate::events::{DevicesChanged, PeersChanged, StatsTick, StreamStat};
 use parking_lot::RwLock as ParkingRwLock;
+use splitter_core::net::device_watcher::DeviceEvent;
 use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent, SERVICE_TYPE};
 use splitter_core::net::signaling::connection::PeerConnectionHandle;
 use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHandle};
-use splitter_core::net::signaling::DeviceDescriptor;
+use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage};
 use splitter_core::settings::SettingsHandle;
 use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, TrustStore};
 use std::collections::HashMap;
@@ -173,6 +174,52 @@ impl AppCore {
 }
 
 impl AppCore {
+    pub fn spawn_device_watcher(self: &Arc<Self>) {
+        let core = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let watcher =
+                splitter_core::net::device_watcher::start(Duration::from_secs(2));
+            let mut rx = watcher.subscribe();
+            while let Ok(ev) = rx.recv().await {
+                match ev {
+                    DeviceEvent::Appeared(_) | DeviceEvent::Disappeared(_) => {
+                        core.on_devices_changed().await;
+                    }
+                }
+            }
+        });
+    }
+
+    pub async fn on_devices_changed(&self) {
+        let devices = local_device_descriptors();
+        self.send_to_all_peers(SignalingMessage::DeviceListResponse { devices })
+            .await;
+        self.emit(DevicesChanged);
+    }
+
+    async fn send_to_all_peers(&self, msg: SignalingMessage) {
+        for handle in self.server.connections.read().await.values() {
+            let _ = handle.tx.send(msg.clone()).await;
+        }
+        for handle in self.outgoing.read().await.values() {
+            let _ = handle.tx.send(msg.clone()).await;
+        }
+    }
+}
+
+fn local_device_descriptors() -> Vec<DeviceDescriptor> {
+    splitter_core::audio::devices::list_devices()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| DeviceDescriptor {
+            id: d.id,
+            name: d.name,
+            kind: d.kind,
+        })
+        .collect()
+}
+
+impl AppCore {
     pub fn spawn_acceptor_supervisor(self: &Arc<Self>) {
         let host = Arc::new(crate::acceptor::TauriControlPlane { core: self.clone() });
         let established = self.server.connection_established_tx.subscribe();
@@ -297,6 +344,39 @@ mod tests {
             core.peers.read().await.contains_key("mdns-peer"),
             "mDNS discovery map must not be evicted on connection drop"
         );
+    }
+
+    #[tokio::test]
+    async fn device_change_sends_device_list_to_connected_peer() {
+        use splitter_core::net::signaling::connection::spawn_peer_connection;
+        use splitter_core::net::signaling::{PeerEvent, SignalingMessage};
+        let dir = tempdir().unwrap();
+        let core = AppCore::init(dir.path()).await.expect("init");
+        let peer_id = Uuid::new_v4();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let laddr = listener.local_addr().unwrap();
+        let (client, accepted) =
+            tokio::join!(tokio::net::TcpStream::connect(laddr), listener.accept());
+        let (server_stream, _) = accepted.unwrap();
+        let client_handle = spawn_peer_connection(client.unwrap(), None).unwrap();
+        let server_handle = spawn_peer_connection(server_stream, None).unwrap();
+        let mut server_events = server_handle.events.subscribe();
+
+        core.outgoing.write().await.insert(peer_id, client_handle);
+        core.on_devices_changed().await;
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(PeerEvent::Message(SignalingMessage::DeviceListResponse { .. })) =
+                    server_events.recv().await
+                {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("no DeviceListResponse delivered to connected peer within 2s");
     }
 
     #[tokio::test]

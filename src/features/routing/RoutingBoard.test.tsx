@@ -91,7 +91,12 @@ beforeEach(() => {
   mockedUsePeers.mockReturnValue({ data: PEERS });
   mockedUsePendingPeers.mockReturnValue({ data: [] });
   mockedUseDisconnect.mockReturnValue({ mutate: vi.fn() });
-  mockedUseWiring.mockReturnValue({ onPortActivate: vi.fn(), hint: null, arm: null });
+  mockedUseWiring.mockReturnValue({
+    onPortActivate: vi.fn(),
+    onPortConnect: vi.fn(),
+    hint: null,
+    arm: null,
+  });
 });
 
 import { RoutingBoard } from "./RoutingBoard";
@@ -136,6 +141,13 @@ describe("RoutingBoard — with session", () => {
     const { getByText, queryByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
     expect(getByText("Este Mac")).toBeDefined();
     expect(queryByText("ESTE PC")).toBeNull();
+  });
+
+  it("renders ports with data-port-id for drag targeting", () => {
+    const { container } = render(<RoutingBoard />, { wrapper: makeWrapper() });
+    const ports = container.querySelectorAll("[data-port-id]");
+    expect(ports.length).toBeGreaterThan(0);
+    expect(ports[0].getAttribute("data-port-id")).toMatch(/^.+:(src|sink):.+$/);
   });
 });
 

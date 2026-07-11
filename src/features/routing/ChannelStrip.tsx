@@ -1,9 +1,11 @@
 import { useCallback } from "react";
+import { motion } from "motion/react";
 import type { StreamSnapshot } from "@/bindings";
 import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
 import { useUiStore } from "@/stores/ui";
 import { Slider } from "@/components/ui/slider";
 import { streamColor } from "./useWireGeometry";
+import { variants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -53,7 +55,12 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
   );
 
   return (
-    <div
+    <motion.div
+      layout
+      variants={variants.listItem}
+      initial="hidden"
+      animate="show"
+      exit={{ opacity: 0, y: -6 }}
       role="button"
       tabIndex={0}
       onClick={() => selectStream(stream.id)}
@@ -114,6 +121,6 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
           />
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

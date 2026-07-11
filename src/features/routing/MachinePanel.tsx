@@ -1,5 +1,8 @@
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import { springs } from "@/lib/motion";
 import { Port } from "./Port";
+import { resolveConnection, type PortRef } from "./resolveConnection";
 
 export const panelCardClass = "relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]";
 
@@ -29,6 +32,9 @@ type MachinePanelProps = {
     peerId: string,
     deviceId: string,
   ) => void;
+  onDragStart?: (ref: PortRef, e: React.PointerEvent) => void;
+  dragFrom?: PortRef | null;
+  dragActive?: boolean;
   onConnectClick?: () => void;
   onDisconnect?: () => void;
 };
@@ -41,6 +47,9 @@ function DevRow({
   wiredPortIds,
   portColor,
   onPortActivate,
+  onDragStart,
+  dragFrom,
+  dragActive,
 }: {
   peerId: string;
   dev: Dev;
@@ -54,9 +63,22 @@ function DevRow({
     peerId: string,
     deviceId: string,
   ) => void;
+  onDragStart?: (ref: PortRef, e: React.PointerEvent) => void;
+  dragFrom?: PortRef | null;
+  dragActive?: boolean;
 }) {
   const portId = `${peerId}:${kind}:${dev.id}`;
   const isLeft = side === "left";
+
+  const thisRef: PortRef = { peerId, deviceId: dev.id, kind };
+  const isOrigin =
+    !!dragFrom &&
+    dragFrom.peerId === thisRef.peerId &&
+    dragFrom.deviceId === thisRef.deviceId &&
+    dragFrom.kind === thisRef.kind;
+  const highlighted =
+    !!dragActive && !!dragFrom && resolveConnection(dragFrom, thisRef) !== null;
+  const dimmed = !!dragActive && !!dragFrom && !isOrigin && !highlighted;
 
   return (
     <div
@@ -79,6 +101,9 @@ function DevRow({
           wired={wiredPortIds?.has(portId)}
           color={portColor?.(portId)}
           onActivate={onPortActivate}
+          onDragStart={onDragStart}
+          highlighted={highlighted}
+          dimmed={dimmed}
         />
       </span>
     </div>
@@ -96,6 +121,9 @@ export function MachinePanel({
   wiredPortIds,
   portColor,
   onPortActivate,
+  onDragStart,
+  dragFrom,
+  dragActive,
   onConnectClick,
   onDisconnect,
 }: MachinePanelProps) {
@@ -103,7 +131,11 @@ export function MachinePanel({
 
   if (side === "right" && !connected) {
     return (
-      <div className={panelCardClass}>
+      <motion.div
+        className={panelCardClass}
+        whileHover={{ y: -2 }}
+        transition={springs.snappy}
+      >
         <div className="py-[44px] px-5 text-center flex flex-col items-center gap-[5px]">
           <div className="w-[38px] h-[38px] rounded-[2px] border border-dashed border-line-2 text-ink-3 flex items-center justify-center text-[18px] mb-2">
             +
@@ -116,12 +148,16 @@ export function MachinePanel({
             Conectar máquina
           </button>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
   return (
-    <div className="relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]">
+    <motion.div
+      className="relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]"
+      whileHover={{ y: -2 }}
+      transition={springs.snappy}
+    >
       <div className="flex items-center gap-[9px] px-[11px] py-[9px] bg-elev-1 border-b border-line">
         <span
           className={cn(
@@ -158,6 +194,9 @@ export function MachinePanel({
             wiredPortIds={wiredPortIds}
             portColor={portColor}
             onPortActivate={onPortActivate}
+            onDragStart={onDragStart}
+            dragFrom={dragFrom}
+            dragActive={dragActive}
           />
         ))}
       </div>
@@ -176,9 +215,12 @@ export function MachinePanel({
             wiredPortIds={wiredPortIds}
             portColor={portColor}
             onPortActivate={onPortActivate}
+            onDragStart={onDragStart}
+            dragFrom={dragFrom}
+            dragActive={dragActive}
           />
         ))}
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -21,21 +21,24 @@ import { useUiStore } from "@/stores/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StreamSnapshot, DeviceDescriptor } from "@/bindings";
 
-function useRemoteName(remotePeerId: string | undefined): string {
+function useRemoteName(
+  remotePeerId: string | undefined,
+  sessionName: string | undefined,
+): string {
   const { data: peers } = usePeers();
   const knownNames = useUiStore((s) => s.knownNames);
   const rememberNames = useUiStore((s) => s.rememberNames);
   const match = remotePeerId
     ? peers?.find((p) => p.peer_id === remotePeerId)
     : undefined;
-  const matchName = match?.peer_name;
+  const resolvedName = sessionName || match?.peer_name;
 
   useEffect(() => {
-    if (remotePeerId && matchName) rememberNames({ [remotePeerId]: matchName });
-  }, [remotePeerId, matchName, rememberNames]);
+    if (remotePeerId && resolvedName) rememberNames({ [remotePeerId]: resolvedName });
+  }, [remotePeerId, resolvedName, rememberNames]);
 
   if (!remotePeerId) return "Remoto";
-  if (matchName) return matchName;
+  if (resolvedName) return resolvedName;
   if (knownNames[remotePeerId]) return knownNames[remotePeerId];
   return remotePeerId.slice(0, 8);
 }
@@ -152,7 +155,7 @@ function RoutingBoardContent() {
     [devices],
   );
 
-  const remoteName = useRemoteName(remotePeerId);
+  const remoteName = useRemoteName(remotePeerId, session?.remote_peer_name);
 
   const { remoteSources, remoteSinks } = useMemo(
     () =>
@@ -207,7 +210,7 @@ function RoutingBoardContent() {
               "repeating-linear-gradient(to right, transparent, transparent 39px, var(--grid-line) 39px, var(--grid-line) 40px)",
           }}
         >
-          <motion.div variants={variants.scaleIn} initial="hidden" animate="show">
+          <motion.div className="relative z-[2]" variants={variants.scaleIn} initial="hidden" animate="show">
             <MachinePanel
               peerId={selfPeerId}
               name={selfName}
@@ -224,7 +227,7 @@ function RoutingBoardContent() {
             />
           </motion.div>
 
-          <motion.div variants={variants.scaleIn} initial="hidden" animate="show">
+          <motion.div className="relative z-[2]" variants={variants.scaleIn} initial="hidden" animate="show">
             <MachinePanel
               peerId={remotePeerId ?? "remote"}
               name={remoteName}

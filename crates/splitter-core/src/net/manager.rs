@@ -26,6 +26,7 @@ pub struct StreamSnapshot {
 pub struct SessionSnapshot {
     pub id: SessionId,
     pub remote_peer_id: Uuid,
+    pub remote_peer_name: String,
     pub state: SessionState,
     pub streams: Vec<StreamSnapshot>,
 }
@@ -195,6 +196,7 @@ impl SessionManager {
             .map(|s| SessionSnapshot {
                 id: s.id,
                 remote_peer_id: s.remote_peer_id,
+                remote_peer_name: String::new(),
                 state: s.state(),
                 streams: s
                     .streams()

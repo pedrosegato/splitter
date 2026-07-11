@@ -60,6 +60,7 @@ const STREAM: StreamSnapshot = {
 const SESSION: SessionSnapshot = {
   id: "sess-1",
   remote_peer_id: "peer-remote",
+  remote_peer_name: "",
   state: "active",
   streams: [STREAM],
 };
@@ -121,6 +122,16 @@ describe("RoutingBoard — with session", () => {
   it("right panel shows remote peer name from discovered peers", () => {
     const { getByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
     expect(getByText("Studio PC")).toBeDefined();
+  });
+
+  it("uses the session's remote_peer_name even when the peer is not discovered", () => {
+    mockedUsePeers.mockReturnValue({ data: [] });
+    mockedUseSnapshot.mockReturnValue({
+      data: [{ ...SESSION, remote_peer_name: "Windows Studio" }],
+    });
+    const { getByText, queryByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
+    expect(getByText("Windows Studio")).toBeDefined();
+    expect(queryByText("peer-rem")).toBeNull();
   });
 
   it("ChannelDock renders 1 channel strip for the session stream", () => {

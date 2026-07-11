@@ -32,7 +32,14 @@ pub(crate) async fn notify_remote(core: &AppCore, sid: Uuid, stream_id: u8, acti
 #[tauri::command]
 #[specta::specta]
 pub async fn snapshot(core: State<'_, Arc<AppCore>>) -> Result<Vec<SessionSnapshot>, String> {
-    Ok(core.sessions.snapshot().await)
+    let mut sessions = core.sessions.snapshot().await;
+    let trust = core.trust.read().await;
+    for session in &mut sessions {
+        if let Some(peer) = trust.peer_for(&session.remote_peer_id) {
+            session.remote_peer_name = peer.peer_name.clone();
+        }
+    }
+    Ok(sessions)
 }
 
 #[tauri::command]
@@ -348,6 +355,7 @@ mod tests {
         let snap = SessionSnapshot {
             id: SessionId(Uuid::nil()),
             remote_peer_id: Uuid::nil(),
+            remote_peer_name: String::new(),
             state: SessionState::Active,
             streams: vec![],
         };

@@ -44,6 +44,7 @@ const twoStreamSessions: SessionSnapshot[] = [
   {
     id: "sess-1",
     remote_peer_id: "peer-remote",
+    remote_peer_name: "",
     state: "active",
     streams: [
       {

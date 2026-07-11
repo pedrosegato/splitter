@@ -194,7 +194,9 @@ impl AppCore {
     }
 
     pub async fn on_devices_changed(&self) {
-        let devices = local_device_descriptors();
+        let devices = tokio::task::spawn_blocking(local_device_descriptors)
+            .await
+            .unwrap_or_default();
         self.send_to_all_peers(SignalingMessage::DeviceListResponse { devices })
             .await;
         self.emit(DevicesChanged);

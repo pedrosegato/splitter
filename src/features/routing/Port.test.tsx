@@ -135,4 +135,36 @@ describe("Port + PortRegistryProvider", () => {
 
     expect(captured).toEqual(["p9:sink:d9", "sink", "p9", "d9"]);
   });
+
+  it("exposes a data-port-id for hit-testing", () => {
+    const { getByRole } = render(
+      <PortRegistryProvider>
+        <Port peerId="A" kind="src" deviceId="mic" />
+      </PortRegistryProvider>,
+    );
+
+    expect(getByRole("button")).toHaveAttribute("data-port-id", "A:src:mic");
+  });
+
+  it("still calls onActivate on click (a11y path)", () => {
+    let captured: unknown;
+    const { getByRole } = render(
+      <PortRegistryProvider>
+        <Port
+          peerId="A"
+          kind="src"
+          deviceId="mic"
+          onActivate={(...args) => {
+            captured = args;
+          }}
+        />
+      </PortRegistryProvider>,
+    );
+
+    act(() => {
+      getByRole("button").click();
+    });
+
+    expect(captured).toEqual(["A:src:mic", "src", "A", "mic"]);
+  });
 });

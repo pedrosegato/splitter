@@ -524,16 +524,10 @@ mod tests {
         }))
         .unwrap();
 
-        let snap = await_sessions(&core, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|x| x.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&core, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|x| x.id == sid),
+            "a remote session-close must evict the session from the manager, not leave it Closed"
         );
     }
 
@@ -650,16 +644,10 @@ mod tests {
         })
         .unwrap();
 
-        let snap = await_sessions(&core, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|x| x.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&core, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|x| x.id == sid),
+            "a remote disconnect must evict the peer's session from the manager, not leave it Closed"
         );
     }
 

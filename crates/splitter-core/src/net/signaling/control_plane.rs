@@ -194,6 +194,7 @@ async fn handle_session_request(
             let _ = deps.stream_registry.close(&old.id, st.id).await;
         }
         let _ = deps.sessions.close(&old.id).await;
+        deps.sessions.remove(&old.id).await;
     }
 
     if let Err(e) = deps
@@ -390,6 +391,7 @@ async fn handle_session_response_close(
     let _ = deps.sessions.close(&sid).await;
     tracing::info!(peer = %peer_id, session = %sid, "remote closed session");
     observer.on_session_closed(peer_id, sid).await;
+    deps.sessions.remove(&sid).await;
 }
 
 async fn handle_disconnected(
@@ -418,6 +420,7 @@ async fn handle_disconnected(
             let _ = deps.stream_registry.close(sid, stream_id).await;
         }
         let _ = deps.sessions.close(sid).await;
+        deps.sessions.remove(sid).await;
     }
     observer
         .on_peer_disconnected(peer_id, reason, had_active_session)
@@ -606,12 +609,13 @@ mod tests {
         let snap = await_sessions(&deps, |s| {
             s.iter()
                 .any(|x| x.id == SessionId(s2) && x.state == SessionState::Active)
-                && s.iter()
-                    .find(|x| x.id == SessionId(s1))
-                    .map(|x| x.state == SessionState::Closed)
-                    .unwrap_or(false)
+                && !s.iter().any(|x| x.id == SessionId(s1))
         })
         .await;
+        assert!(
+            !snap.iter().any(|x| x.id == SessionId(s1)),
+            "the stale session must be evicted from the manager, not merely marked Closed"
+        );
         let active: Vec<_> = snap
             .iter()
             .filter(|x| x.state == SessionState::Active)
@@ -679,13 +683,7 @@ mod tests {
         }))
         .unwrap();
 
-        await_sessions(&deps, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
+        await_sessions(&deps, |s| !s.iter().any(|x| x.id == sid)).await;
         assert_eq!(rec.sessions_closed.lock().unwrap().as_slice(), &[sid]);
     }
 
@@ -841,13 +839,7 @@ mod tests {
         })
         .unwrap();
 
-        await_sessions(&deps, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
+        await_sessions(&deps, |s| !s.iter().any(|x| x.id == sid)).await;
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if !rec.disconnects.lock().unwrap().is_empty() {

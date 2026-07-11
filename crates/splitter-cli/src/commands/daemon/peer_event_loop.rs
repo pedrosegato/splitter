@@ -312,12 +312,13 @@ mod tests {
         let snap = await_sessions(&ctx, |s| {
             s.iter()
                 .any(|x| x.id == SessionId(new_sid) && x.state == SessionState::Active)
-                && s.iter()
-                    .find(|x| x.id == existing)
-                    .map(|x| x.state == SessionState::Closed)
-                    .unwrap_or(false)
+                && !s.iter().any(|x| x.id == existing)
         })
         .await;
+        assert!(
+            !snap.iter().any(|x| x.id == existing),
+            "the stale session must be evicted from the manager, not merely marked Closed"
+        );
         let active: Vec<_> = snap
             .iter()
             .filter(|x| x.state == SessionState::Active)
@@ -401,16 +402,10 @@ mod tests {
         }))
         .unwrap();
 
-        let snap = await_sessions(&ctx, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|s| s.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&ctx, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|s| s.id == sid),
+            "a remote session-close must evict the session from the manager, not leave it Closed"
         );
     }
 
@@ -430,16 +425,17 @@ mod tests {
         .unwrap();
 
         let snap = await_sessions(&ctx, |s| {
-            s.iter()
-                .find(|x| x.id == a)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
+            !s.iter().any(|x| x.id == a)
+                && !s.iter().any(|x| x.id == b)
+                && s.iter().any(|x| x.id == untouched)
         })
         .await;
-        let state_of = |id: SessionId| snap.iter().find(|s| s.id == id).unwrap().state;
-        assert_eq!(state_of(a), SessionState::Closed);
-        assert_eq!(state_of(b), SessionState::Closed);
-        assert_eq!(state_of(untouched), SessionState::Active);
+        assert!(
+            !snap.iter().any(|s| s.id == a) && !snap.iter().any(|s| s.id == b),
+            "both of the disconnected peer's sessions must be evicted, not merely Closed"
+        );
+        let untouched_state = snap.iter().find(|s| s.id == untouched).unwrap().state;
+        assert_eq!(untouched_state, SessionState::Active);
     }
 
     #[tokio::test]
@@ -454,16 +450,10 @@ mod tests {
         })
         .unwrap();
 
-        let snap = await_sessions(&ctx, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|s| s.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&ctx, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|s| s.id == sid),
+            "a remote disconnect must evict the peer's session from the manager, not leave it Closed"
         );
     }
 }

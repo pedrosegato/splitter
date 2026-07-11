@@ -194,6 +194,28 @@ describe("useWiring", () => {
     expect(mutateSpy).not.toHaveBeenCalled();
   });
 
+  it("onPortConnect fires openStream for a self-source pair, no arm involvement", async () => {
+    const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
+
+    act(() => {
+      result.current.onPortConnect(
+        { peerId: "peer-a", deviceId: "sys-1", kind: "src" },
+        { peerId: "peer-b", deviceId: "spk-1", kind: "sink" },
+      );
+    });
+
+    await waitFor(() => expect(mutateSpy).toHaveBeenCalledOnce());
+    expect(mutateSpy).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      sourceDeviceId: "sys-1",
+      sourceIsSystem: true,
+      sinkPeerId: "peer-b",
+      sinkDeviceId: "spk-1",
+      bitrate: undefined,
+    });
+    expect(result.current.arm).toBeNull();
+  });
+
   it("Escape key clears arm", () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 

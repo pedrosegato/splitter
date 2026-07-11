@@ -4,6 +4,7 @@ import { useDevices } from "@/hooks/useDevices";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useOpenStream, useRequestStream } from "@/hooks/useStreams";
+import { resolveConnection, type PortRef, type Connection } from "./resolveConnection";
 
 export function useWiring() {
   const arm = useUiStore((s) => s.arm);
@@ -25,33 +26,10 @@ export function useWiring() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [clearArm]);
 
-  const onPortActivate = useCallback(
-    (portId: string, kind: "src" | "sink", peerId: string, deviceId: string) => {
-      void portId;
-
+  const runConnection = useCallback(
+    (conn: NonNullable<Connection>) => {
       if (!session) return;
-
-      if (!arm) {
-        armSource(peerId, deviceId, kind);
-        return;
-      }
-
-      if (kind === arm.kind) {
-        if (peerId === arm.peerId && deviceId === arm.deviceId) {
-          clearArm();
-        }
-        return;
-      }
-      if (peerId === arm.peerId) return;
-
-      const src =
-        arm.kind === "src"
-          ? { peer: arm.peerId, dev: arm.deviceId }
-          : { peer: peerId, dev: deviceId };
-      const sink =
-        arm.kind === "sink"
-          ? { peer: arm.peerId, dev: arm.deviceId }
-          : { peer: peerId, dev: deviceId };
+      const { src, sink } = conn;
 
       if (src.peer === selfPeerId) {
         const armedDevice = devices?.find((d) => d.id === src.dev);
@@ -75,21 +53,48 @@ export function useWiring() {
           sinkDeviceId: sink.dev,
         });
       }
+    },
+    [session, devices, peerDevices, selfPeerId, openStream, requestStream],
+  );
+
+  const onPortActivate = useCallback(
+    (portId: string, kind: "src" | "sink", peerId: string, deviceId: string) => {
+      void portId;
+
+      if (!session) return;
+
+      if (!arm) {
+        armSource(peerId, deviceId, kind);
+        return;
+      }
+
+      if (kind === arm.kind) {
+        if (peerId === arm.peerId && deviceId === arm.deviceId) {
+          clearArm();
+        }
+        return;
+      }
+      if (peerId === arm.peerId) return;
+
+      const conn = resolveConnection(
+        { peerId: arm.peerId, deviceId: arm.deviceId, kind: arm.kind },
+        { peerId, deviceId, kind },
+      );
+      if (conn) runConnection(conn);
 
       clearArm();
     },
-    [
-      arm,
-      session,
-      devices,
-      peerDevices,
-      selfPeerId,
-      armSource,
-      clearArm,
-      openStream,
-      requestStream,
-    ],
+    [arm, session, armSource, clearArm, runConnection],
   );
 
-  return { arm, onPortActivate };
+  const onPortConnect = useCallback(
+    (a: PortRef, b: PortRef) => {
+      if (!session) return;
+      const conn = resolveConnection(a, b);
+      if (conn) runConnection(conn);
+    },
+    [session, runConnection],
+  );
+
+  return { arm, onPortActivate, onPortConnect };
 }

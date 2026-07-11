@@ -1,10 +1,10 @@
-import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import { springs } from "@/lib/motion";
+import { Card } from "@/components/ui/card";
 import { Port } from "./Port";
 import { resolveConnection, type PortRef } from "./resolveConnection";
 
-export const panelCardClass = "relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]";
+export const panelCardClass =
+  "relative z-[2] w-[262px] rounded-xl border border-line bg-surface shadow-sm";
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
@@ -131,11 +131,7 @@ export function MachinePanel({
 
   if (side === "right" && !connected) {
     return (
-      <motion.div
-        className={panelCardClass}
-        whileHover={{ y: -2 }}
-        transition={springs.snappy}
-      >
+      <Card className={cn(panelCardClass, "gap-0 py-0")}>
         <div className="py-[44px] px-5 text-center flex flex-col items-center gap-[5px]">
           <div className="w-[38px] h-[38px] rounded-[2px] border border-dashed border-line-2 text-ink-3 flex items-center justify-center text-[18px] mb-2">
             +
@@ -148,17 +144,13 @@ export function MachinePanel({
             Conectar máquina
           </button>
         </div>
-      </motion.div>
+      </Card>
     );
   }
 
   return (
-    <motion.div
-      className="relative z-[2] w-[262px] bg-surface border border-line rounded-[3px]"
-      whileHover={{ y: -2 }}
-      transition={springs.snappy}
-    >
-      <div className="flex items-center gap-[9px] px-[11px] py-[9px] bg-elev-1 border-b border-line">
+    <Card className={cn(panelCardClass, "gap-0 py-0")}>
+      <div className="flex items-center gap-[9px] px-[11px] py-[9px] bg-elev-1 border-b border-line rounded-t-xl">
         <span
           className={cn(
             "w-[7px] h-[7px] rounded-full shrink-0",
@@ -221,6 +213,6 @@ export function MachinePanel({
           />
         ))}
       </div>
-    </motion.div>
+    </Card>
   );
 }

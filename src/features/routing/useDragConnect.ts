@@ -64,7 +64,15 @@ export function useDragConnect({ boardRef, onConnect }: Params) {
       const targetId = portAt(e.clientX, e.clientY);
       const target = targetId ? registry.getRef(targetId) : null;
       const origin = fromRef.current;
-      if (origin && target) onConnect(origin, target);
+      const droppedOnDifferentPort =
+        !!origin &&
+        !!target &&
+        !(
+          target.peerId === origin.peerId &&
+          target.deviceId === origin.deviceId &&
+          target.kind === origin.kind
+        );
+      if (origin && target && droppedOnDifferentPort) onConnect(origin, target);
       setActive(false);
       setFrom(null);
       fromRef.current = null;

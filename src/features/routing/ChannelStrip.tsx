@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import type { StreamSnapshot } from "@/bindings";
 import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
@@ -25,6 +25,28 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
 
   const color = streamColor(stream.id);
 
+  const authoritativeVolume = Math.round(stream.volume * 100);
+  const [dragVolume, setDragVolume] = useState<number | null>(null);
+  const draggingRef = useRef(false);
+  const lastSentRef = useRef(0);
+
+  useEffect(() => {
+    if (!draggingRef.current) setDragVolume(null);
+  }, [authoritativeVolume]);
+
+  const displayVolume = dragVolume ?? authoritativeVolume;
+
+  const sendVolume = useCallback(
+    (value: number) => {
+      streamControl.mutate({
+        sessionId,
+        streamId: stream.id,
+        action: { type: "set_volume", volume: value / 100 },
+      });
+    },
+    [sessionId, stream.id, streamControl],
+  );
+
   const handleMute = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -39,13 +61,26 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
 
   const handleVolumeChange = useCallback(
     (values: number[]) => {
-      streamControl.mutate({
-        sessionId,
-        streamId: stream.id,
-        action: { type: "set_volume", volume: values[0] / 100 },
-      });
+      const value = values[0];
+      draggingRef.current = true;
+      setDragVolume(value);
+      const now = Date.now();
+      if (now - lastSentRef.current >= 80) {
+        lastSentRef.current = now;
+        sendVolume(value);
+      }
     },
-    [sessionId, stream.id, streamControl],
+    [sendVolume],
+  );
+
+  const handleVolumeCommit = useCallback(
+    (values: number[]) => {
+      const value = values[0];
+      draggingRef.current = false;
+      lastSentRef.current = Date.now();
+      sendVolume(value);
+    },
+    [sendVolume],
   );
 
   const handleClose = useCallback(
@@ -116,10 +151,11 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
           style={{ "--primary": color } as React.CSSProperties}
         >
           <Slider
-            value={[Math.round(stream.volume * 100)]}
+            value={[displayVolume]}
             min={0}
             max={100}
             onValueChange={handleVolumeChange}
+            onValueCommit={handleVolumeCommit}
             aria-label="volume"
           />
         </div>

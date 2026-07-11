@@ -161,6 +161,40 @@ describe("ChannelStrip", () => {
     expect(mockSelectStream).toHaveBeenCalledWith(1);
   });
 
+  it("changing the volume ultimately calls streamControl with set_volume", () => {
+    const stream = makeStream({ volume: 0.7 });
+    const { getByRole } = render(
+      <ChannelStrip sessionId="sess-1" stream={stream} selected={false} />,
+      { wrapper: makeWrapper() },
+    );
+
+    const slider = getByRole("slider");
+    act(() => {
+      fireEvent.keyDown(slider, { key: "ArrowRight" });
+    });
+
+    expect(mockStreamControlMutate).toHaveBeenLastCalledWith({
+      sessionId: "sess-1",
+      streamId: 1,
+      action: { type: "set_volume", volume: 0.71 },
+    });
+  });
+
+  it("reflects the dragged volume optimistically before the snapshot updates", () => {
+    const stream = makeStream({ volume: 0.7 });
+    const { getByRole } = render(
+      <ChannelStrip sessionId="sess-1" stream={stream} selected={false} />,
+      { wrapper: makeWrapper() },
+    );
+
+    const slider = getByRole("slider");
+    act(() => {
+      fireEvent.keyDown(slider, { key: "ArrowRight" });
+    });
+
+    expect(slider.getAttribute("aria-valuenow")).toBe("71");
+  });
+
   it("renders slider at correct initial volume (70 for volume 0.7)", () => {
     const stream = makeStream({ volume: 0.7 });
     const { getByRole } = render(

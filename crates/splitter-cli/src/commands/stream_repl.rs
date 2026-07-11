@@ -29,8 +29,8 @@ pub(crate) async fn handle(
         "open" => stream_open(rest, identity, sessions, registry, server, outgoing).await,
         "close" => stream_close(rest, sessions, registry, server, outgoing).await,
         "volume" => stream_volume(rest, sessions, registry, server, outgoing).await,
-        "mute" => stream_set_mute(rest, true, sessions, registry).await,
-        "unmute" => stream_set_mute(rest, false, sessions, registry).await,
+        "mute" => stream_set_mute(rest, true, sessions, registry, server, outgoing).await,
+        "unmute" => stream_set_mute(rest, false, sessions, registry, server, outgoing).await,
         "pause" => stream_set_paused(rest, true, sessions, registry, server, outgoing).await,
         "resume" => stream_set_paused(rest, false, sessions, registry, server, outgoing).await,
         "stats" => stream_stats(rest, registry).await,
@@ -212,13 +212,26 @@ async fn stream_volume(
 async fn stream_set_mute(
     rest: &[&str],
     muted: bool,
-    _sessions: &Arc<SessionManager>,
+    sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
+    server: &splitter_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
 ) -> anyhow::Result<()> {
     let (sid, stream_id) = parse_session_stream(rest)?;
     registry
         .send_control(&sid, stream_id, StreamControlSignal::SetMuted(muted))
         .await?;
+    let snap = sessions.snapshot().await;
+    if let Some(s) = snap.iter().find(|s| s.id == sid) {
+        if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
+            notify_remote_control(
+                &conn.tx,
+                stream_id.get(),
+                StreamAction::SetMuted { muted },
+            )
+            .await;
+        }
+    }
     Ok(())
 }
 

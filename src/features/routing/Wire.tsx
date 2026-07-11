@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import {
   motion,
   animate,
@@ -10,6 +10,7 @@ import {
 } from "motion/react";
 import { springs } from "@/lib/motion";
 import { cable, sagFor, type Pt } from "./useWireGeometry";
+import { useAnimateGate } from "./useAnimateGate";
 
 type WireProps = {
   id: number;
@@ -24,7 +25,7 @@ type WireProps = {
   onSelect: (id: number) => void;
 };
 
-export function Wire({
+function WireImpl({
   id,
   a,
   b,
@@ -56,12 +57,19 @@ export function Wire({
   }, [isPresent, restSag, sag]);
 
   const time = useTime();
-  const swayAmp = reducedMotion ? 0 : 2.5;
+  const gate = useAnimateGate();
+  const swayAmp = 2.5;
   const phase = id * 1.3;
 
-  const d = useTransform([ax, ay, bx, by, sag, time], (v) => {
-    const [axv, ayv, bxv, byv, s, tms] = v as number[];
-    const eff = s + swayAmp * Math.sin(tms / 3000 + phase);
+  const swayInputs = reducedMotion
+    ? [ax, ay, bx, by, sag]
+    : [ax, ay, bx, by, sag, time, gate];
+
+  const d = useTransform(swayInputs, (v) => {
+    const [axv, ayv, bxv, byv, s] = v as number[];
+    const eff = reducedMotion
+      ? s
+      : s + swayAmp * (v[6] as number) * Math.sin((v[5] as number) / 3000 + phase);
     return cable({ x: axv, y: ayv }, { x: bxv, y: byv }, eff);
   });
 
@@ -167,3 +175,5 @@ export function Wire({
     </g>
   );
 }
+
+export const Wire = memo(WireImpl);

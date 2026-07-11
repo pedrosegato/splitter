@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, useCallback } from "react";
+import { useLayoutEffect, useState, useCallback, useRef } from "react";
 import {
   AnimatePresence,
   motion,
@@ -37,7 +37,10 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
   const theme = useThemeStore((s) => s.theme);
   const reducedMotion = useReducedMotion();
   const [wires, setWires] = useState<ComputedWire[]>([]);
-  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const cursorX = useMotionValue(0);
+  const cursorY = useMotionValue(0);
+  const [armMoved, setArmMoved] = useState(false);
+  const armMovedRef = useRef(false);
 
   const measure = useCallback(() => {
     const board = boardRef.current;
@@ -76,6 +79,9 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
     setWires(computed);
   }, [boardRef, streams, registry]);
 
+  const measureRef = useRef(measure);
+  measureRef.current = measure;
+
   useLayoutEffect(() => {
     measure();
   }, [measure]);
@@ -84,17 +90,17 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
     const board = boardRef.current;
     if (!board) return;
 
-    const ro = new ResizeObserver(() => measure());
+    const ro = new ResizeObserver(() => measureRef.current());
     ro.observe(board);
 
-    const onWindowResize = () => measure();
+    const onWindowResize = () => measureRef.current();
     window.addEventListener("resize", onWindowResize);
 
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onWindowResize);
     };
-  }, [boardRef, measure]);
+  }, [boardRef]);
 
   useLayoutEffect(() => {
     const id = requestAnimationFrame(() => requestAnimationFrame(measure));
@@ -103,33 +109,46 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
 
   useLayoutEffect(() => {
     const board = boardRef.current;
-    if (!board || !arm) {
-      setCursor(null);
-      return;
-    }
+    armMovedRef.current = false;
+    setArmMoved(false);
+    if (!board || !arm) return;
+
     const onMove = (e: PointerEvent) => {
       const br = board.getBoundingClientRect();
-      setCursor({ x: e.clientX - br.left, y: e.clientY - br.top });
+      cursorX.set(e.clientX - br.left);
+      cursorY.set(e.clientY - br.top);
+      if (!armMovedRef.current) {
+        armMovedRef.current = true;
+        setArmMoved(true);
+      }
     };
     board.addEventListener("pointermove", onMove);
     return () => board.removeEventListener("pointermove", onMove);
-  }, [boardRef, arm]);
+  }, [boardRef, arm, cursorX, cursorY]);
 
   const board = boardRef.current;
 
-  let previewPath: string | null = null;
-  if (arm && cursor && board) {
+  let armOrigin: Pt | null = null;
+  if (arm && board) {
     const el = registry.get(`${arm.peerId}:${arm.kind}:${arm.deviceId}`);
     if (el) {
       const br = board.getBoundingClientRect();
       const r = el.getBoundingClientRect();
-      const a = {
+      armOrigin = {
         x: r.left + r.width / 2 - br.left,
         y: r.top + r.height / 2 - br.top,
       };
-      previewPath = cable(a, cursor, sagFor(a, cursor));
     }
   }
+
+  const previewPath = useTransform([cursorX, cursorY], (latest) => {
+    const [x, y] = latest as number[];
+    if (!armOrigin) return "";
+    const to = { x, y };
+    return cable(armOrigin, to, sagFor(armOrigin, to));
+  });
+
+  const showPreview = Boolean(arm && armMoved && armOrigin);
 
   let dragOrigin: Pt | null = null;
   if (drag?.active && drag.from && board) {
@@ -161,8 +180,8 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
 
   return (
     <svg className="absolute inset-0 w-full h-full pointer-events-none z-[1]">
-      {previewPath && (
-        <path
+      {showPreview && (
+        <motion.path
           d={previewPath}
           fill="none"
           stroke="var(--color-gold)"

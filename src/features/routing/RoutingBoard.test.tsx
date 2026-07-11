@@ -92,10 +92,7 @@ beforeEach(() => {
   mockedUsePendingPeers.mockReturnValue({ data: [] });
   mockedUseDisconnect.mockReturnValue({ mutate: vi.fn() });
   mockedUseWiring.mockReturnValue({
-    onPortActivate: vi.fn(),
     onPortConnect: vi.fn(),
-    hint: null,
-    arm: null,
   });
 });
 

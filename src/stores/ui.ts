@@ -3,8 +3,6 @@ import type { StreamStat } from "@/bindings";
 
 const HISTORY_CAP = 60;
 
-type Arm = { peerId: string; deviceId: string; kind: "src" | "sink" } | null;
-
 export type StreamHistory = { rtt: number[]; loss: number[]; kbps: number[] };
 
 function cappedAppend(arr: number[], value: number): number[] {
@@ -31,14 +29,11 @@ export function pushStatsHistory(
 interface UiState {
   activeTab: "routing" | "stats";
   selectedStreamId: number | null;
-  arm: Arm;
   stats: StreamStat[];
   statsHistory: Record<number, StreamHistory>;
   knownNames: Record<string, string>;
   setTab: (t: UiState["activeTab"]) => void;
   selectStream: (id: number | null) => void;
-  armSource: (peerId: string, deviceId: string, kind: "src" | "sink") => void;
-  clearArm: () => void;
   pushStats: (tick: StreamStat[]) => void;
   rememberNames: (names: Record<string, string>) => void;
 }
@@ -46,14 +41,11 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   activeTab: "routing",
   selectedStreamId: null,
-  arm: null,
   stats: [],
   statsHistory: {},
   knownNames: {},
   setTab: (activeTab) => set({ activeTab }),
   selectStream: (selectedStreamId) => set({ selectedStreamId }),
-  armSource: (peerId, deviceId, kind) => set({ arm: { peerId, deviceId, kind } }),
-  clearArm: () => set({ arm: null }),
   pushStats: (tick) =>
     set((state) => ({
       stats: tick,

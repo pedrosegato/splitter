@@ -9,7 +9,6 @@ import {
 import type { StreamSnapshot } from "@/bindings";
 import { usePortRegistry } from "./usePortRegistry";
 import { cable, sagFor, streamColor, type Pt } from "./useWireGeometry";
-import { useUiStore } from "@/stores/ui";
 import { useThemeStore } from "@/stores/theme";
 import { Wire } from "./Wire";
 import type { DragState } from "./useDragConnect";
@@ -33,14 +32,9 @@ type ComputedWire = {
 
 export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: WireLayerProps) {
   const registry = usePortRegistry();
-  const arm = useUiStore((s) => s.arm);
   const theme = useThemeStore((s) => s.theme);
   const reducedMotion = useReducedMotion();
   const [wires, setWires] = useState<ComputedWire[]>([]);
-  const cursorX = useMotionValue(0);
-  const cursorY = useMotionValue(0);
-  const [armMoved, setArmMoved] = useState(false);
-  const armMovedRef = useRef(false);
 
   const measure = useCallback(() => {
     const board = boardRef.current;
@@ -107,48 +101,7 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
     return () => cancelAnimationFrame(id);
   }, [theme, measure]);
 
-  useLayoutEffect(() => {
-    const board = boardRef.current;
-    armMovedRef.current = false;
-    setArmMoved(false);
-    if (!board || !arm) return;
-
-    const onMove = (e: PointerEvent) => {
-      const br = board.getBoundingClientRect();
-      cursorX.set(e.clientX - br.left);
-      cursorY.set(e.clientY - br.top);
-      if (!armMovedRef.current) {
-        armMovedRef.current = true;
-        setArmMoved(true);
-      }
-    };
-    board.addEventListener("pointermove", onMove);
-    return () => board.removeEventListener("pointermove", onMove);
-  }, [boardRef, arm, cursorX, cursorY]);
-
   const board = boardRef.current;
-
-  let armOrigin: Pt | null = null;
-  if (arm && board) {
-    const el = registry.get(`${arm.peerId}:${arm.kind}:${arm.deviceId}`);
-    if (el) {
-      const br = board.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      armOrigin = {
-        x: r.left + r.width / 2 - br.left,
-        y: r.top + r.height / 2 - br.top,
-      };
-    }
-  }
-
-  const previewPath = useTransform([cursorX, cursorY], (latest) => {
-    const [x, y] = latest as number[];
-    if (!armOrigin) return "";
-    const to = { x, y };
-    return cable(armOrigin, to, sagFor(armOrigin, to));
-  });
-
-  const showPreview = Boolean(arm && armMoved && armOrigin);
 
   let dragOrigin: Pt | null = null;
   if (drag?.active && drag.from && board) {
@@ -180,18 +133,6 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
 
   return (
     <svg className="absolute inset-0 w-full h-full pointer-events-none z-[1]">
-      {showPreview && (
-        <motion.path
-          d={previewPath}
-          fill="none"
-          stroke="var(--color-gold)"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeDasharray="5 6"
-          opacity="0.75"
-          style={{ pointerEvents: "none" }}
-        />
-      )}
       {showLiveDrag && (
         <motion.path
           d={liveDragPath}

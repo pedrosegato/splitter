@@ -1,5 +1,4 @@
-import { useEffect, useCallback } from "react";
-import { useUiStore } from "@/stores/ui";
+import { useCallback } from "react";
 import { useDevices } from "@/hooks/useDevices";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -7,9 +6,6 @@ import { useOpenStream, useRequestStream } from "@/hooks/useStreams";
 import { resolveConnection, type PortRef, type Connection } from "./resolveConnection";
 
 export function useWiring() {
-  const arm = useUiStore((s) => s.arm);
-  const armSource = useUiStore((s) => s.armSource);
-  const clearArm = useUiStore((s) => s.clearArm);
   const { data: devices } = useDevices();
   const { data: identity } = useIdentity();
   const openStream = useOpenStream();
@@ -17,14 +13,6 @@ export function useWiring() {
   const selfPeerId = identity?.peer_id;
 
   const { session, peerDevices } = useActiveSession();
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") clearArm();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clearArm]);
 
   const runConnection = useCallback(
     (conn: NonNullable<Connection>) => {
@@ -43,7 +31,6 @@ export function useWiring() {
         });
       } else {
         const remoteDevice = peerDevices?.find((d) => d.id === src.dev);
-        // Invalid targets are visually disabled so stray clicks are ignored here.
         requestStream.mutate({
           sessionId: session.id,
           source:
@@ -57,45 +44,14 @@ export function useWiring() {
     [session, devices, peerDevices, selfPeerId, openStream, requestStream],
   );
 
-  const onPortActivate = useCallback(
-    (portId: string, kind: "src" | "sink", peerId: string, deviceId: string) => {
-      void portId;
-
-      if (!session) return;
-
-      if (!arm) {
-        armSource(peerId, deviceId, kind);
-        return;
-      }
-
-      if (kind === arm.kind) {
-        if (peerId === arm.peerId && deviceId === arm.deviceId) {
-          clearArm();
-        }
-        return;
-      }
-      if (peerId === arm.peerId) return;
-
-      const conn = resolveConnection(
-        { peerId: arm.peerId, deviceId: arm.deviceId, kind: arm.kind },
-        { peerId, deviceId, kind },
-      );
-      if (conn) runConnection(conn);
-
-      clearArm();
-    },
-    [arm, session, armSource, clearArm, runConnection],
-  );
-
   const onPortConnect = useCallback(
     (a: PortRef, b: PortRef) => {
       if (!session) return;
-      clearArm();
       const conn = resolveConnection(a, b);
       if (conn) runConnection(conn);
     },
-    [session, clearArm, runConnection],
+    [session, runConnection],
   );
 
-  return { arm, onPortActivate, onPortConnect };
+  return { onPortConnect };
 }

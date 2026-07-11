@@ -130,7 +130,6 @@ function RoutingBoardContent() {
 
   const selectedStreamId = useUiStore((s) => s.selectedStreamId);
   const selectStream = useUiStore((s) => s.selectStream);
-  const clearArm = useUiStore((s) => s.clearArm);
 
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -171,7 +170,7 @@ function RoutingBoardContent() {
     [portColorMap],
   );
 
-  const { onPortActivate, onPortConnect } = useWiring();
+  const { onPortConnect } = useWiring();
   const { drag, startDrag } = useDragConnect({ boardRef, onConnect: onPortConnect });
 
   useTrayHealth(snapshots);
@@ -200,10 +199,7 @@ function RoutingBoardContent() {
         <div
           ref={boardRef}
           onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              selectStream(null);
-              clearArm();
-            }
+            if (e.target === e.currentTarget) selectStream(null);
           }}
           className="relative flex flex-1 items-center justify-center gap-[120px] bg-board"
           style={{
@@ -222,7 +218,6 @@ function RoutingBoardContent() {
               sources={selfSources}
               wiredPortIds={wiredPortIds}
               portColor={portColor}
-              onPortActivate={onPortActivate}
               onDragStart={startDrag}
               dragFrom={drag.from}
               dragActive={drag.active}
@@ -239,7 +234,6 @@ function RoutingBoardContent() {
               sources={remoteSources}
               wiredPortIds={wiredPortIds}
               portColor={portColor}
-              onPortActivate={onPortActivate}
               onDragStart={startDrag}
               dragFrom={drag.from}
               dragActive={drag.active}

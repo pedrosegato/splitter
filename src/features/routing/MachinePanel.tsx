@@ -27,12 +27,6 @@ type MachinePanelProps = {
   sources: Dev[];
   wiredPortIds?: Set<string>;
   portColor?: (portId: string) => string | undefined;
-  onPortActivate?: (
-    portId: string,
-    kind: "src" | "sink",
-    peerId: string,
-    deviceId: string,
-  ) => void;
   onDragStart?: (ref: PortRef, e: React.PointerEvent) => void;
   dragFrom?: PortRef | null;
   dragActive?: boolean;
@@ -47,7 +41,6 @@ function DevRow({
   side,
   wiredPortIds,
   portColor,
-  onPortActivate,
   onDragStart,
   dragFrom,
   dragActive,
@@ -58,12 +51,6 @@ function DevRow({
   side: "left" | "right";
   wiredPortIds?: Set<string>;
   portColor?: (portId: string) => string | undefined;
-  onPortActivate?: (
-    portId: string,
-    kind: "src" | "sink",
-    peerId: string,
-    deviceId: string,
-  ) => void;
   onDragStart?: (ref: PortRef, e: React.PointerEvent) => void;
   dragFrom?: PortRef | null;
   dragActive?: boolean;
@@ -101,7 +88,6 @@ function DevRow({
           deviceId={dev.id}
           wired={wiredPortIds?.has(portId)}
           color={portColor?.(portId)}
-          onActivate={onPortActivate}
           onDragStart={onDragStart}
           highlighted={highlighted}
           dimmed={dimmed}
@@ -121,7 +107,6 @@ export function MachinePanel({
   sources,
   wiredPortIds,
   portColor,
-  onPortActivate,
   onDragStart,
   dragFrom,
   dragActive,
@@ -187,7 +172,6 @@ export function MachinePanel({
             side={side}
             wiredPortIds={wiredPortIds}
             portColor={portColor}
-            onPortActivate={onPortActivate}
             onDragStart={onDragStart}
             dragFrom={dragFrom}
             dragActive={dragActive}
@@ -208,7 +192,6 @@ export function MachinePanel({
             side={side}
             wiredPortIds={wiredPortIds}
             portColor={portColor}
-            onPortActivate={onPortActivate}
             onDragStart={onDragStart}
             dragFrom={dragFrom}
             dragActive={dragActive}

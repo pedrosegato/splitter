@@ -262,6 +262,7 @@ impl ReconnectDriver for TauriControlPlane {
             let events = outcome.handle.events.subscribe();
             let reconnect_addr = outcome.handle.remote_addr;
             let connection_id = outcome.handle.connection_id;
+            crate::commands::peers::close_active_sessions_for_peer(&self.core, pid).await;
             let previous = self.core.outgoing.write().await.insert(pid, outcome.handle);
             if let Some(old) = previous {
                 old.shutdown();

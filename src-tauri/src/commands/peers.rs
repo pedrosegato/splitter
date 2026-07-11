@@ -92,6 +92,7 @@ pub async fn connect_peer(
         let addr = outcome.handle.remote_addr;
         let tx = outcome.handle.tx.clone();
         let connection_id = outcome.handle.connection_id;
+        close_active_sessions_for_peer(&core, pid).await;
         let previous = core.outgoing.write().await.insert(pid, outcome.handle);
         if let Some(old) = previous {
             old.shutdown();
@@ -172,6 +173,26 @@ pub async fn set_device_name(
     })
 }
 
+pub(crate) async fn close_active_sessions_for_peer(core: &AppCore, peer_id: uuid::Uuid) {
+    let stale: Vec<_> = core
+        .sessions
+        .snapshot()
+        .await
+        .into_iter()
+        .filter(|s| {
+            s.remote_peer_id == peer_id && s.state == splitter_core::SessionState::Active
+        })
+        .collect();
+    for sess in stale {
+        for stream in &sess.streams {
+            if let Err(e) = core.stream_registry.close(&sess.id, stream.id).await {
+                tracing::warn!(sid = %sess.id, stream_id = %stream.id, "replacing connection: stream close error: {e}");
+            }
+        }
+        core.sessions.remove(&sess.id).await;
+    }
+}
+
 pub(crate) async fn teardown_session(
     core: &AppCore,
     sid: splitter_core::SessionId,
@@ -244,8 +265,36 @@ pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Re
 mod tests {
     use super::*;
     use splitter_core::net::signaling::connection::spawn_peer_connection;
+    use splitter_core::net::stream::{Stream, StreamId, StreamRoute};
+    use splitter_core::net::stream_runtime::{
+        DeviceGuard, StreamControlSignal, StreamRuntime, StreamStats,
+    };
+    use splitter_core::net::signaling::{Codec, CodecParams, Endpoint};
     use tokio::io::AsyncReadExt;
     use tokio::net::{TcpListener, TcpStream};
+
+    fn fake_runtime(
+        session_id: splitter_core::SessionId,
+        stream_id: StreamId,
+    ) -> StreamRuntime {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamControlSignal>(4);
+        let join = tokio::spawn(async move {
+            while let Some(sig) = rx.recv().await {
+                if matches!(sig, StreamControlSignal::Close) {
+                    break;
+                }
+            }
+        });
+        StreamRuntime {
+            session_id,
+            stream_id,
+            stats: std::sync::Arc::new(StreamStats::default()),
+            control_tx: tx,
+            bound_device_id: None,
+            join,
+            device_guard: DeviceGuard::None,
+        }
+    }
 
     #[test]
     fn validate_trims_and_rejects_empty_and_too_long() {
@@ -253,6 +302,56 @@ mod tests {
         assert!(validate_device_name("   ").is_err());
         assert!(validate_device_name(&"x".repeat(41)).is_err());
         assert_eq!(validate_device_name(&"x".repeat(40)).unwrap().len(), 40);
+    }
+
+    #[tokio::test]
+    async fn close_active_sessions_for_peer_closes_streams_and_evicts_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = AppCore::init(dir.path()).await.unwrap();
+        let remote = uuid::Uuid::new_v4();
+        let local = core.identity.read().peer_id;
+
+        let sid = core.sessions.open_outgoing(local, remote).await;
+        core.sessions.accept(&sid).await.unwrap();
+        let route = StreamRoute::new(
+            Endpoint {
+                peer_id: local.to_string(),
+                device_id: "in".into(),
+            },
+            Endpoint {
+                peer_id: remote.to_string(),
+                device_id: "out".into(),
+            },
+            CodecParams {
+                name: Codec::Opus,
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            1.0,
+        );
+        core.sessions
+            .add_stream(&sid, Stream::new_negotiating(StreamId(0), route, 0))
+            .await
+            .unwrap();
+        core.sessions
+            .activate_stream(&sid, StreamId(0))
+            .await
+            .unwrap();
+        core.stream_registry
+            .register(fake_runtime(sid, StreamId(0)))
+            .await
+            .unwrap();
+
+        close_active_sessions_for_peer(&core, remote).await;
+
+        assert!(
+            core.stream_registry.list().await.is_empty(),
+            "the replaced connection's stream runtime must be closed, not leaked"
+        );
+        assert!(
+            !core.sessions.snapshot().await.iter().any(|s| s.id == sid),
+            "the stale active session must be evicted before the new connection replaces it"
+        );
     }
 
     #[tokio::test]

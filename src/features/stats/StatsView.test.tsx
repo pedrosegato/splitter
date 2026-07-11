@@ -158,11 +158,13 @@ describe("StatsView", () => {
     expect(getByText("430")).toBeDefined();
   });
 
-  it("renders one row per stat entry with source_device → sink_device label", () => {
+  it("renders one row per stat entry with source and sink device labels", () => {
     setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
-    expect(getByText("MacBook Mic → Studio Monitors")).toBeDefined();
-    expect(getByText("Sistema → Fones")).toBeDefined();
+    expect(getByText("MacBook Mic")).toBeDefined();
+    expect(getByText("Studio Monitors")).toBeDefined();
+    expect(getByText("Sistema")).toBeDefined();
+    expect(getByText("Fones")).toBeDefined();
   });
 
   it("shows fallback label when stream snapshot is not found", () => {

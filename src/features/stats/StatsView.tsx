@@ -1,13 +1,13 @@
 import { useMemo } from "react";
 import { motion } from "motion/react";
 import type { StreamStat, StreamSnapshot } from "@/bindings";
+import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 import type { StreamHistory } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { streamColor } from "@/features/routing/useWireGeometry";
 import { Sparkline } from "@/components/Sparkline";
-import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { variants } from "@/lib/motion";
 import { aggregate } from "./aggregate";
@@ -24,23 +24,49 @@ function MetricCard({
   accent?: boolean;
 }) {
   return (
-    <motion.div variants={variants.listItem}>
-      <Card className="bg-bg py-0">
-        <CardContent className="p-4">
-          <div
-            className={`text-2xl tabular-nums leading-none ${accent ? "text-gold" : "text-ink"}`}
-          >
-            {value}
-            {unit && (
-              <span className="text-sm text-ink-3 ml-0.5">{unit}</span>
-            )}
-          </div>
-          <div className="text-[9px] text-ink-3 uppercase tracking-widest mt-1.5">
-            {label}
-          </div>
-        </CardContent>
-      </Card>
+    <motion.div
+      variants={variants.listItem}
+      className="rounded-xl border border-line bg-surface px-4 py-3.5"
+    >
+      <div className="flex items-baseline gap-1">
+        <span
+          className={cn(
+            "text-2xl tabular-nums leading-none",
+            accent ? "text-gold" : "text-ink",
+          )}
+        >
+          {value}
+        </span>
+        {unit && <span className="text-xs text-ink-3">{unit}</span>}
+      </div>
+      <div className="text-[11px] text-ink-3 mt-2">{label}</div>
     </motion.div>
+  );
+}
+
+function Metric({
+  value,
+  unit,
+  values,
+  color,
+  testId,
+}: {
+  value: string;
+  unit: string;
+  values: number[];
+  color: string;
+  testId: string;
+}) {
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="text-xs tabular-nums">
+        <span className="text-ink">{value}</span>
+        <span className="text-ink-3 ml-0.5">{unit}</span>
+      </div>
+      <span data-testid={testId} className="opacity-70">
+        <Sparkline values={values} width={54} height={16} color={color} />
+      </span>
+    </div>
   );
 }
 
@@ -54,48 +80,51 @@ function StreamRow({
   history: StreamHistory | undefined;
 }) {
   const color = streamColor(stat.stream_id);
-  const label = stream
-    ? `${stream.source_device} → ${stream.sink_device}`
-    : `stream ${stat.stream_id}`;
-
-  const rttHistory = history?.rtt ?? [];
-  const lossHistory = history?.loss ?? [];
-  const kbpsHistory = history?.kbps ?? [];
+  const source = stream?.source_device ?? `stream ${stat.stream_id}`;
+  const sink = stream?.sink_device;
 
   return (
     <motion.div
       variants={variants.listItem}
-      className="flex items-center gap-3 py-2.5 px-4 border-b border-line last:border-b-0"
+      className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface"
     >
       <span
-        className="w-[9px] h-[30px] flex-none"
+        className="size-2.5 flex-none rounded-full ring-2 ring-inset ring-black/10"
         style={{ background: color }}
       />
-      <div className="flex-1 min-w-0">
-        <div className="text-xs text-ink truncate">{label}</div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 truncate text-xs">
+          <span className="min-w-0 truncate text-ink-2">{source}</span>
+          {sink && (
+            <>
+              <span className="flex-none text-gold">→</span>
+              <span className="min-w-0 truncate text-ink">{sink}</span>
+            </>
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-4 text-xs tabular-nums text-ink-2 flex-none">
-        <span className="flex items-center gap-1.5">
-          <span className="text-ink">{stat.rtt_ms}</span>
-          <span className="text-ink-3">ms</span>
-          <span data-testid={`sparkline-rtt-${stat.stream_id}`}>
-            <Sparkline values={rttHistory} width={60} height={20} color={color} />
-          </span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="text-ink">{stat.loss_pct.toFixed(1)}</span>
-          <span className="text-ink-3">%</span>
-          <span data-testid={`sparkline-loss-${stat.stream_id}`}>
-            <Sparkline values={lossHistory} width={60} height={20} color="var(--color-ink-3)" />
-          </span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="text-ink">{stat.kbps_sent + stat.kbps_received}</span>
-          <span className="text-ink-3">kbps</span>
-          <span data-testid={`sparkline-kbps-${stat.stream_id}`}>
-            <Sparkline values={kbpsHistory} width={60} height={20} color={color} />
-          </span>
-        </span>
+      <div className="flex flex-none items-start gap-5">
+        <Metric
+          value={String(stat.rtt_ms)}
+          unit="ms"
+          values={history?.rtt ?? []}
+          color={color}
+          testId={`sparkline-rtt-${stat.stream_id}`}
+        />
+        <Metric
+          value={stat.loss_pct.toFixed(1)}
+          unit="%"
+          values={history?.loss ?? []}
+          color="var(--color-ink-3)"
+          testId={`sparkline-loss-${stat.stream_id}`}
+        />
+        <Metric
+          value={String(stat.kbps_sent + stat.kbps_received)}
+          unit="kbps"
+          values={history?.kbps ?? []}
+          color={color}
+          testId={`sparkline-kbps-${stat.stream_id}`}
+        />
       </div>
     </motion.div>
   );
@@ -121,67 +150,45 @@ export function StatsView() {
   const { avgRtt, avgLoss, totalKbps } = aggregate(stats);
 
   return (
-    <div className="p-6 overflow-auto">
-      <p className="text-[9px] text-ink-3 uppercase tracking-widest mb-3">
-        Sessão · agregado
-      </p>
-
+    <div className="overflow-auto p-6">
       <motion.div
         variants={variants.listStagger}
         initial="hidden"
         animate="show"
-        className="grid gap-px bg-line border border-line mb-6"
-        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}
+        className="mb-8 grid gap-3"
+        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}
       >
-        <MetricCard
-          value={String(activeStreamCount)}
-          label="streams ativos"
-          accent
-        />
-        <MetricCard
-          value={String(Math.round(avgRtt))}
-          unit="ms"
-          label="latência média"
-        />
-        <MetricCard
-          value={avgLoss.toFixed(1)}
-          unit="%"
-          label="perda média"
-        />
-        <MetricCard
-          value={String(Math.round(totalKbps))}
-          unit="kbps"
-          label="banda total"
-        />
+        <MetricCard value={String(activeStreamCount)} label="streams ativos" accent />
+        <MetricCard value={String(Math.round(avgRtt))} unit="ms" label="latência média" />
+        <MetricCard value={avgLoss.toFixed(1)} unit="%" label="perda média" />
+        <MetricCard value={String(Math.round(totalKbps))} unit="kbps" label="banda total" />
       </motion.div>
 
-      <p className="text-[9px] text-ink-3 uppercase tracking-widest mb-3">
-        Por stream
-      </p>
+      <p className="mb-2 px-3 text-[11px] text-ink-3">Por stream</p>
 
-      <div className="border border-line">
-        {stats.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>sem streams ativos</EmptyTitle>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <motion.div variants={variants.listStagger} initial="hidden" animate="show">
-            {stats.map((stat) => {
-              const stream = streamById.get(stat.stream_id);
-              return (
-                <StreamRow
-                  key={`${stat.session_id}-${stat.stream_id}`}
-                  stat={stat}
-                  stream={stream}
-                  history={statsHistory[stat.stream_id]}
-                />
-              );
-            })}
-          </motion.div>
-        )}
-      </div>
+      {stats.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>sem streams ativos</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <motion.div
+          variants={variants.listStagger}
+          initial="hidden"
+          animate="show"
+          className="rounded-xl border border-line bg-board/40 p-1"
+        >
+          {stats.map((stat) => (
+            <StreamRow
+              key={`${stat.session_id}-${stat.stream_id}`}
+              stat={stat}
+              stream={streamById.get(stat.stream_id)}
+              history={statsHistory[stat.stream_id]}
+            />
+          ))}
+        </motion.div>
+      )}
     </div>
   );
 }

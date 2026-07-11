@@ -31,8 +31,8 @@ describe("MachinePanel", () => {
       />,
     );
 
-    expect(getByText("DESTINOS")).toBeTruthy();
-    expect(getByText("FONTES")).toBeTruthy();
+    expect(getByText("Destinos")).toBeTruthy();
+    expect(getByText("Fontes")).toBeTruthy();
 
     expect(getByText("Fones MCHOSE V9")).toBeTruthy();
     expect(getByText("Alto-falantes")).toBeTruthy();
@@ -76,8 +76,8 @@ describe("MachinePanel", () => {
     const btn = getByRole("button", { name: /Conectar máquina/i });
     expect(btn).toBeTruthy();
 
-    expect(queryByText("DESTINOS")).toBeNull();
-    expect(queryByText("FONTES")).toBeNull();
+    expect(queryByText("Destinos")).toBeNull();
+    expect(queryByText("Fontes")).toBeNull();
   });
 
   it("calls onConnectClick when the connect button is clicked", () => {

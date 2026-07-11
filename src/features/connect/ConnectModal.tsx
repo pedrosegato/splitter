@@ -72,7 +72,7 @@ export function ConnectModal({ open, onOpenChange }: Props) {
         className="w-[378px] max-w-[378px] bg-surface border-line gap-0 p-0"
       >
         <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg">
-          <DialogTitle className="text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
+          <DialogTitle className="text-[11px] text-ink-3 font-medium">
             Máquinas na rede
           </DialogTitle>
         </DialogHeader>

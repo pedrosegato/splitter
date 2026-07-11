@@ -40,7 +40,7 @@ type Props = {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase mb-[8px] mt-[14px] first:mt-0">
+    <p className="text-[11px] text-ink-3 font-medium mb-[8px] mt-[14px] first:mt-0">
       {children}
     </p>
   );
@@ -208,7 +208,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
         className="w-[420px] max-w-[420px] bg-surface border-line gap-0 p-0"
       >
         <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg flex-row items-center justify-between">
-          <DialogTitle className="text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
+          <DialogTitle className="text-[11px] text-ink-3 font-medium">
             Configurações
           </DialogTitle>
           {savedVisible && (

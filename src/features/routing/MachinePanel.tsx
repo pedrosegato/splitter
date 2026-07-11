@@ -9,7 +9,7 @@ export const panelCardClass =
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[8.5px] tracking-[1.4px] text-ink-3 font-semibold px-[11px] pt-[3px] pb-[7px]">
+    <div className="text-[10.5px] text-ink-3 font-medium px-[11px] pt-[3px] pb-[7px]">
       {children}
     </div>
   );
@@ -149,11 +149,11 @@ export function MachinePanel({
         {!isSelf && (
           <div className="ml-auto flex items-center gap-2 shrink-0">
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon-xs"
               title="desconectar"
               onClick={onDisconnect}
-              className="text-[10px] text-ink-3 hover:bg-transparent hover:text-gold"
+              className="text-ink-2 border-line-2 hover:text-destructive hover:border-destructive"
             >
               ✕
             </Button>
@@ -162,7 +162,7 @@ export function MachinePanel({
       </div>
 
       <div className="py-[7px] pb-[9px]">
-        <SectionHeading>DESTINOS</SectionHeading>
+        <SectionHeading>Destinos</SectionHeading>
         {sinks.map((dev) => (
           <DevRow
             key={dev.id}
@@ -182,7 +182,7 @@ export function MachinePanel({
       <div className="h-px bg-line mx-[11px]" />
 
       <div className="py-[7px] pb-[9px]">
-        <SectionHeading>FONTES</SectionHeading>
+        <SectionHeading>Fontes</SectionHeading>
         {sources.map((dev) => (
           <DevRow
             key={dev.id}

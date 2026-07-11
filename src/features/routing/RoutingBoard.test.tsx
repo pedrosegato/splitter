@@ -102,10 +102,10 @@ describe("RoutingBoard — with session", () => {
   it("left panel shows self device names under DESTINOS and FONTES", () => {
     const { getByText, getAllByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
 
-    const destinosLabels = getAllByText("DESTINOS");
+    const destinosLabels = getAllByText("Destinos");
     expect(destinosLabels.length).toBeGreaterThanOrEqual(1);
 
-    const fontesLabels = getAllByText("FONTES");
+    const fontesLabels = getAllByText("Fontes");
     expect(fontesLabels.length).toBeGreaterThanOrEqual(1);
 
     expect(getByText("Alto-falantes")).toBeDefined();

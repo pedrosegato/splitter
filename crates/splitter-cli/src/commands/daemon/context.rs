@@ -61,21 +61,29 @@ impl DaemonContext {
         tokio::spawn(async move {
             loop {
                 match events_rx.recv().await {
-                    Ok(PeerEvent::Disconnected { .. }) => {
-                        map.write().await.remove(&peer_id);
+                    Ok(PeerEvent::Disconnected { .. })
+                    | Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        evict_if_this_connection_is_dead(&map, peer_id).await;
                         break;
                     }
                     Ok(_) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!(skipped = n, "peer event stream lagged; continuing");
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        map.write().await.remove(&peer_id);
-                        break;
-                    }
                 }
             }
         });
+    }
+}
+
+async fn evict_if_this_connection_is_dead(map: &PeerConnections, peer_id: Uuid) {
+    let mut guard = map.write().await;
+    if guard
+        .get(&peer_id)
+        .map(|h| h.tx.is_closed())
+        .unwrap_or(false)
+    {
+        guard.remove(&peer_id);
     }
 }
 
@@ -142,5 +150,66 @@ mod tests {
         let ctx = test_ctx();
         let peer = Uuid::new_v4();
         assert_eq!(ctx.peer_display_name(&peer).await, short(&peer));
+    }
+
+    async fn live_handle() -> PeerConnectionHandle {
+        use splitter_core::net::signaling::connection::spawn_peer_connection;
+        use tokio::net::{TcpListener, TcpStream};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, _accepted) =
+            tokio::join!(TcpStream::connect(addr), async { listener.accept().await });
+        spawn_peer_connection(client.unwrap(), None).unwrap()
+    }
+
+    #[tokio::test]
+    async fn late_eviction_spares_a_fast_reconnects_live_handle() {
+        let ctx = test_ctx();
+        let peer = Uuid::new_v4();
+        let live = live_handle().await;
+        assert!(!live.tx.is_closed());
+        ctx.outgoing_connections.write().await.insert(peer, live);
+
+        evict_if_this_connection_is_dead(&ctx.outgoing_connections, peer).await;
+
+        assert!(
+            ctx.outgoing_connections.read().await.contains_key(&peer),
+            "a fast reconnect's live handle must survive the dead connection's late eviction"
+        );
+    }
+
+    #[tokio::test]
+    async fn late_eviction_removes_the_dead_handle_it_owns() {
+        use std::time::Duration;
+        let ctx = test_ctx();
+        let peer = Uuid::new_v4();
+        let dead = live_handle().await;
+        dead.shutdown();
+        ctx.outgoing_connections.write().await.insert(peer, dead);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let closed = ctx
+                    .outgoing_connections
+                    .read()
+                    .await
+                    .get(&peer)
+                    .map(|h| h.tx.is_closed())
+                    .unwrap_or(true);
+                if closed {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("aborted connection task should close its tx within 2s");
+
+        evict_if_this_connection_is_dead(&ctx.outgoing_connections, peer).await;
+
+        assert!(
+            !ctx.outgoing_connections.read().await.contains_key(&peer),
+            "the dead connection's own stale entry must still be evicted"
+        );
     }
 }

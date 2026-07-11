@@ -175,11 +175,11 @@ impl AppCore {
 impl AppCore {
     pub fn spawn_acceptor_supervisor(self: &Arc<Self>) {
         let host = Arc::new(crate::acceptor::TauriControlPlane { core: self.clone() });
-        splitter_core::net::signaling::spawn_connection_supervisor(
-            self.server.connection_established_tx.subscribe(),
-            self.server.connections.clone(),
-            host,
-        );
+        let established = self.server.connection_established_tx.subscribe();
+        let connections = self.server.connections.clone();
+        tauri::async_runtime::spawn(async move {
+            splitter_core::net::signaling::spawn_connection_supervisor(established, connections, host);
+        });
     }
 }
 

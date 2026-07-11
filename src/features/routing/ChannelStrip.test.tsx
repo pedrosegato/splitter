@@ -61,7 +61,8 @@ describe("ChannelStrip", () => {
       { wrapper: makeWrapper() },
     );
 
-    expect(getByText("MacBook Mic → PC Speaker")).toBeDefined();
+    expect(getByText("MacBook Mic")).toBeDefined();
+    expect(getByText("PC Speaker")).toBeDefined();
   });
 
   it("clicking M button calls streamControl.mutate with set_muted action", () => {
@@ -246,7 +247,9 @@ describe("ChannelDock", () => {
       { wrapper: makeWrapper() },
     );
 
-    expect(getByText("MacBook Mic → PC Speaker")).toBeDefined();
-    expect(getByText("Guitar → Studio Out")).toBeDefined();
+    expect(getByText("MacBook Mic")).toBeDefined();
+    expect(getByText("PC Speaker")).toBeDefined();
+    expect(getByText("Guitar")).toBeDefined();
+    expect(getByText("Studio Out")).toBeDefined();
   });
 });

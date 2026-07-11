@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { motion } from "motion/react";
+import { ArrowRight } from "lucide-react";
 import type { StreamStat, StreamSnapshot } from "@/bindings";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
@@ -98,7 +99,7 @@ function StreamRow({
           <span className="min-w-0 truncate text-ink-2">{source}</span>
           {sink && (
             <>
-              <span className="flex-none text-gold">→</span>
+              <ArrowRight className="size-3.5 flex-none text-gold" strokeWidth={2.5} />
               <span className="min-w-0 truncate text-ink">{sink}</span>
             </>
           )}

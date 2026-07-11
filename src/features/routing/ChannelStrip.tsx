@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
+import { ArrowRight } from "lucide-react";
 import type { StreamSnapshot } from "@/bindings";
 import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
 import { useUiStore } from "@/stores/ui";
@@ -118,8 +119,10 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
           className="w-2 h-[18px] rounded-[1px] flex-none"
           style={{ background: color }}
         />
-        <span className="text-[11px] font-medium truncate flex-1 text-ink">
-          {deviceLabel(stream.source_device)} → {deviceLabel(stream.sink_device)}
+        <span className="flex flex-1 min-w-0 items-center gap-1 text-[11px] font-medium text-ink">
+          <span className="min-w-0 truncate">{deviceLabel(stream.source_device)}</span>
+          <ArrowRight className="size-3 flex-none text-ink-3" strokeWidth={2.5} />
+          <span className="min-w-0 truncate">{deviceLabel(stream.sink_device)}</span>
         </span>
         <Button
           variant="ghost"

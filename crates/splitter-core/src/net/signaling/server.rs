@@ -131,6 +131,7 @@ impl SignalingServer {
                         ..
                     } = first
                     else {
+                        handle.disarm();
                         let _ = handle
                             .tx
                             .send(SignalingMessage::HelloAck {
@@ -143,6 +144,7 @@ impl SignalingServer {
                         return;
                     };
                     if protocol_version != PROTOCOL_VERSION {
+                        handle.disarm();
                         let _ = handle
                             .tx
                             .send(SignalingMessage::HelloAck {
@@ -157,6 +159,7 @@ impl SignalingServer {
                         return;
                     }
                     let Ok(peer_uuid) = Uuid::parse_str(&peer_id) else {
+                        handle.disarm();
                         let _ = handle
                             .tx
                             .send(SignalingMessage::HelloAck {
@@ -175,6 +178,7 @@ impl SignalingServer {
                     };
                     if known {
                         if !token_valid {
+                            handle.disarm();
                             let _ = handle
                                 .tx
                                 .send(SignalingMessage::HelloAck {

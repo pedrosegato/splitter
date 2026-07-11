@@ -3,7 +3,7 @@ use crate::net::signaling::heartbeat::build_heartbeat;
 use crate::net::signaling::message::SignalingMessage;
 use crate::net::stream_runtime::StreamRegistry;
 use futures::{SinkExt, StreamExt};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -26,6 +26,7 @@ pub struct PeerConnectionHandle {
     pub events: broadcast::Sender<PeerEvent>,
     pub remote_addr: std::net::SocketAddr,
     pub(crate) abort: tokio::task::AbortHandle,
+    pub(crate) abort_on_drop: AtomicBool,
 }
 
 impl PeerConnectionHandle {
@@ -34,6 +35,21 @@ impl PeerConnectionHandle {
     /// would otherwise keep the task's `recv()` alive and the socket open.
     pub fn shutdown(&self) {
         self.abort.abort();
+    }
+
+    /// Opt this handle out of abort-on-drop so the task drains its outbox and
+    /// flushes any buffered outgoing message before exiting. Used on the reject
+    /// paths that send a final `HelloAck` then drop the handle.
+    pub fn disarm(&self) {
+        self.abort_on_drop.store(false, Ordering::Relaxed);
+    }
+}
+
+impl Drop for PeerConnectionHandle {
+    fn drop(&mut self) {
+        if self.abort_on_drop.load(Ordering::Relaxed) {
+            self.abort.abort();
+        }
     }
 }
 
@@ -176,6 +192,7 @@ pub fn spawn_peer_connection(
         events: event_tx.clone(),
         remote_addr: peer_addr,
         abort: task.abort_handle(),
+        abort_on_drop: AtomicBool::new(true),
     })
 }
 
@@ -255,6 +272,23 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(matches!(event, PeerEvent::Disconnected { .. }));
+    }
+
+    #[tokio::test]
+    async fn dropping_handle_aborts_its_task() {
+        let (server, client) = _wire_for_tests().await;
+        let abort = server.abort.clone();
+        assert!(!abort.is_finished(), "task must be live before drop");
+        drop(server);
+        let aborted = tokio::time::timeout(Duration::from_secs(2), async {
+            while !abort.is_finished() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        assert!(aborted, "dropping the handle must abort its spawned task");
+        drop(client);
     }
 
     #[tokio::test]

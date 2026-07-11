@@ -213,6 +213,7 @@ mod tests {
                 events,
                 remote_addr: addr,
                 abort: tokio::spawn(async {}).abort_handle(),
+                abort_on_drop: std::sync::atomic::AtomicBool::new(true),
             },
             rx,
         )

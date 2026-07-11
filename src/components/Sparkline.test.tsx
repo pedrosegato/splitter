@@ -64,4 +64,14 @@ describe("Sparkline", () => {
     const points = polyline!.getAttribute("points")!.trim().split(" ");
     expect(points).toHaveLength(1);
   });
+
+  it("renders a polyline when values exist", () => {
+    const { container } = render(<Sparkline values={[1, 2, 3]} />);
+    expect(container.querySelector("polyline")).toBeInTheDocument();
+  });
+
+  it("renders nothing drawable for empty values", () => {
+    const { container } = render(<Sparkline values={[]} />);
+    expect(container.querySelector("polyline")).not.toBeInTheDocument();
+  });
 });

@@ -1,3 +1,6 @@
+import { motion } from "motion/react";
+import { durations } from "@/lib/motion";
+
 type SparklineProps = {
   values: number[];
   width?: number;
@@ -28,13 +31,16 @@ export function Sparkline({
 
   return (
     <svg width={width} height={height} aria-hidden="true">
-      <polyline
+      <motion.polyline
         points={points}
         fill="none"
         stroke={color}
         strokeWidth={1.5}
         strokeLinejoin="round"
         strokeLinecap="round"
+        initial={{ pathLength: 0, opacity: 0.4 }}
+        animate={{ pathLength: 1, opacity: 1 }}
+        transition={{ duration: durations.slow, ease: "easeOut" }}
       />
     </svg>
   );

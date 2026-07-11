@@ -32,6 +32,7 @@ pub(crate) fn spawn_control_plane_loop(
     conn_tx: ConnTx,
     events: tokio::sync::broadcast::Receiver<PeerEvent>,
     peer_id: Uuid,
+    connection_id: Option<Uuid>,
 ) {
     let deps = make_deps(&ctx);
     spawn_control_plane(
@@ -40,6 +41,7 @@ pub(crate) fn spawn_control_plane_loop(
         conn_tx,
         events,
         Arc::new(CliControlPlane { ctx }),
+        connection_id,
     );
 }
 
@@ -172,11 +174,13 @@ impl ReconnectDriver for CliControlPlane {
 #[async_trait::async_trait]
 impl ControlPlaneHost for CliControlPlane {
     fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) {
+        let connection_id = endpoints.connection_id;
         spawn_control_plane_loop(
             self.ctx.clone(),
             endpoints.tx,
             endpoints.events.subscribe(),
             peer_id,
+            Some(connection_id),
         );
     }
 
@@ -209,7 +213,7 @@ mod tests {
     ) {
         let (tx, rx) = broadcast::channel(16);
         let (conn_tx, conn_rx) = mpsc::channel(16);
-        spawn_control_plane_loop(ctx, conn_tx, rx, peer);
+        spawn_control_plane_loop(ctx, conn_tx, rx, peer, None);
         (tx, conn_rx)
     }
 

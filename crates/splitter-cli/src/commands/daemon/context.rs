@@ -50,6 +50,7 @@ impl DaemonContext {
             handle.tx.clone(),
             handle.events.subscribe(),
             peer_id,
+            Some(handle.connection_id),
         );
         let mut events_rx = handle.events.subscribe();
         self.outgoing_connections

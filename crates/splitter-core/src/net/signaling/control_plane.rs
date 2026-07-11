@@ -55,15 +55,25 @@ pub fn spawn_control_plane(
     conn_tx: ConnTx,
     mut events: broadcast::Receiver<PeerEvent>,
     observer: Arc<dyn ControlPlaneObserver>,
+    connection_id: Option<Uuid>,
 ) {
     tokio::spawn(async move {
         loop {
             match events.recv().await {
                 Ok(PeerEvent::Message(msg)) => {
-                    handle_message(&deps, peer_id, &conn_tx, observer.as_ref(), msg).await;
+                    handle_message(
+                        &deps,
+                        peer_id,
+                        &conn_tx,
+                        observer.as_ref(),
+                        msg,
+                        connection_id,
+                    )
+                    .await;
                 }
                 Ok(PeerEvent::Disconnected { reason }) => {
-                    handle_disconnected(&deps, peer_id, observer.as_ref(), &reason).await;
+                    handle_disconnected(&deps, peer_id, observer.as_ref(), &reason, connection_id)
+                        .await;
                     break;
                 }
                 Ok(PeerEvent::Connected { .. }) => {}
@@ -82,12 +92,23 @@ async fn handle_message(
     conn_tx: &ConnTx,
     observer: &dyn ControlPlaneObserver,
     msg: SignalingMessage,
+    connection_id: Option<Uuid>,
 ) {
     match msg {
         SignalingMessage::SessionRequest {
             session_id,
             requested_by,
-        } => handle_session_request(deps, peer_id, observer, &session_id, &requested_by).await,
+        } => {
+            handle_session_request(
+                deps,
+                peer_id,
+                observer,
+                &session_id,
+                &requested_by,
+                connection_id,
+            )
+            .await
+        }
         SignalingMessage::StreamOpen {
             session_id,
             stream_id,
@@ -154,6 +175,7 @@ async fn handle_session_request(
     observer: &dyn ControlPlaneObserver,
     session_id: &str,
     requested_by: &str,
+    connection_id: Option<Uuid>,
 ) {
     let Ok(sid) = Uuid::parse_str(session_id).map(SessionId) else {
         return;
@@ -175,7 +197,7 @@ async fn handle_session_request(
 
     if let Err(e) = deps
         .sessions
-        .register_incoming(sid, deps.local_peer_id, requester)
+        .register_incoming(sid, deps.local_peer_id, requester, connection_id)
         .await
     {
         tracing::warn!(peer = %peer_id, session = %sid, "register_incoming failed: {e}");
@@ -374,16 +396,13 @@ async fn handle_disconnected(
     peer_id: Uuid,
     observer: &dyn ControlPlaneObserver,
     reason: &str,
+    connection_id: Option<Uuid>,
 ) {
     tracing::info!(peer = %peer_id, %reason, "peer disconnected");
     let session_ids: Vec<SessionId> = deps
         .sessions
-        .snapshot()
-        .await
-        .into_iter()
-        .filter(|s| s.remote_peer_id == peer_id)
-        .map(|s| s.id)
-        .collect();
+        .sessions_owned_by_connection(peer_id, connection_id)
+        .await;
     let had_active_session = !session_ids.is_empty();
     for sid in &session_ids {
         let stream_ids: Vec<StreamId> = deps
@@ -476,8 +495,20 @@ mod tests {
     ) {
         let (tx, rx) = broadcast::channel(16);
         let (ctx, crx) = mpsc::channel(16);
-        spawn_control_plane(deps, peer, ctx, rx, Arc::new(rec));
+        spawn_control_plane(deps, peer, ctx, rx, Arc::new(rec), None);
         (tx, crx)
+    }
+
+    fn driven_with_connection(
+        deps: Arc<ControlPlaneDeps>,
+        peer: Uuid,
+        rec: Arc<Recorder>,
+        connection_id: Uuid,
+    ) -> broadcast::Sender<PeerEvent> {
+        let (tx, rx) = broadcast::channel(16);
+        let (ctx, _crx) = mpsc::channel(16);
+        spawn_control_plane(deps, peer, ctx, rx, Arc::new(rec), Some(connection_id));
+        tx
     }
 
     async fn await_sessions(
@@ -730,6 +761,70 @@ mod tests {
         .await
         .expect("observer not called within 2s");
         assert_eq!(rec.renames.lock().unwrap()[0].1, "New");
+    }
+
+    #[tokio::test]
+    async fn stale_connection_disconnect_does_not_close_newer_connections_session() {
+        let deps = deps();
+        let requester = Uuid::new_v4();
+        let conn_old = Uuid::new_v4();
+        let conn_new = Uuid::new_v4();
+        let s_old = Uuid::new_v4();
+        let s_new = Uuid::new_v4();
+
+        let tx_old = driven_with_connection(
+            deps.clone(),
+            requester,
+            Arc::new(Recorder::default()),
+            conn_old,
+        );
+        tx_old
+            .send(PeerEvent::Message(SignalingMessage::SessionRequest {
+                session_id: s_old.to_string(),
+                requested_by: requester.to_string(),
+            }))
+            .unwrap();
+        await_sessions(&deps, |s| {
+            s.iter()
+                .any(|x| x.id == SessionId(s_old) && x.state == SessionState::Active)
+        })
+        .await;
+
+        let tx_new = driven_with_connection(
+            deps.clone(),
+            requester,
+            Arc::new(Recorder::default()),
+            conn_new,
+        );
+        tx_new
+            .send(PeerEvent::Message(SignalingMessage::SessionRequest {
+                session_id: s_new.to_string(),
+                requested_by: requester.to_string(),
+            }))
+            .unwrap();
+        await_sessions(&deps, |s| {
+            s.iter()
+                .any(|x| x.id == SessionId(s_new) && x.state == SessionState::Active)
+        })
+        .await;
+
+        tx_old
+            .send(PeerEvent::Disconnected {
+                reason: "stale eof".into(),
+            })
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let snap = deps.sessions.snapshot().await;
+        let new_state = snap
+            .iter()
+            .find(|x| x.id == SessionId(s_new))
+            .map(|x| x.state);
+        assert_eq!(
+            new_state,
+            Some(SessionState::Active),
+            "the newer connection's session must survive a stale connection's late disconnect"
+        );
     }
 
     #[tokio::test]

@@ -27,6 +27,7 @@ pub fn spawn_connection_supervisor(
                             tx: c.tx.clone(),
                             remote_addr: c.remote_addr,
                             events: c.events.clone(),
+                            connection_id: c.connection_id,
                         })
                     };
                     if let Some(endpoints) = endpoints {

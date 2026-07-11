@@ -1,7 +1,7 @@
 use crate::core::AppCore;
 use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
 use splitter_core::net::session::SessionId;
-use splitter_core::net::signaling::client_ops::{find_conn_tx, ConnEndpoints};
+use splitter_core::net::signaling::client_ops::{find_conn, ConnEndpoints};
 use splitter_core::net::signaling::{
     spawn_control_plane, spawn_reconnect, ConnectOutcome, ControlPlaneDeps, ControlPlaneHost,
     ControlPlaneObserver, PeerEvent, ReconnectDriver, SourceKind, StreamAction,
@@ -49,13 +49,15 @@ pub fn spawn_acceptor(
     let deps = make_deps(&core);
     let obs = observer(&core);
     tokio::spawn(async move {
-        let conn_tx = find_conn_tx(&core.server.connections, &core.outgoing, peer_id)
-            .await
-            .unwrap_or_else(|| {
-                let (tx, _rx) = mpsc::channel(1);
-                tx
-            });
-        spawn_control_plane(deps, peer_id, conn_tx, events, obs);
+        let (conn_tx, connection_id) =
+            match find_conn(&core.server.connections, &core.outgoing, peer_id).await {
+                Some(c) => (c.tx, Some(c.connection_id)),
+                None => {
+                    let (tx, _rx) = mpsc::channel(1);
+                    (tx, None)
+                }
+            };
+        spawn_control_plane(deps, peer_id, conn_tx, events, obs, connection_id);
     });
 }
 
@@ -271,12 +273,14 @@ impl ReconnectDriver for TauriControlPlane {
 #[async_trait::async_trait]
 impl ControlPlaneHost for TauriControlPlane {
     fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) {
+        let connection_id = endpoints.connection_id;
         spawn_control_plane(
             make_deps(&self.core),
             peer_id,
             endpoints.tx,
             endpoints.events.subscribe(),
             observer(&self.core),
+            Some(connection_id),
         );
     }
 }

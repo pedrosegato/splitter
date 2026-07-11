@@ -25,6 +25,7 @@ pub struct PeerConnectionHandle {
     pub tx: mpsc::Sender<SignalingMessage>,
     pub events: broadcast::Sender<PeerEvent>,
     pub remote_addr: std::net::SocketAddr,
+    pub connection_id: Uuid,
     pub(crate) abort: tokio::task::AbortHandle,
     pub(crate) abort_on_drop: AtomicBool,
 }
@@ -191,6 +192,7 @@ pub fn spawn_peer_connection(
         tx: msg_tx,
         events: event_tx.clone(),
         remote_addr: peer_addr,
+        connection_id: Uuid::new_v4(),
         abort: task.abort_handle(),
         abort_on_drop: AtomicBool::new(true),
     })

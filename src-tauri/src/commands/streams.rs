@@ -51,6 +51,7 @@ pub async fn open_session(
     let conn = find_peer_conn(&core, remote)
         .await
         .ok_or_else(|| "no live signaling connection to remote peer".to_string())?;
+    core.sessions.set_session_owner(&sid, conn.connection_id).await;
     conn.tx
         .send(SignalingMessage::SessionRequest {
             session_id: sid.to_string(),

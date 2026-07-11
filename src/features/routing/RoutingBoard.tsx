@@ -210,7 +210,7 @@ function RoutingBoardContent() {
               "repeating-linear-gradient(to right, transparent, transparent 39px, var(--grid-line) 39px, var(--grid-line) 40px)",
           }}
         >
-          <motion.div className="relative z-[2]" variants={variants.scaleIn} initial="hidden" animate="show">
+          <motion.div variants={variants.scaleIn} initial="hidden" animate="show">
             <MachinePanel
               peerId={selfPeerId}
               name={selfName}
@@ -227,7 +227,7 @@ function RoutingBoardContent() {
             />
           </motion.div>
 
-          <motion.div className="relative z-[2]" variants={variants.scaleIn} initial="hidden" animate="show">
+          <motion.div variants={variants.scaleIn} initial="hidden" animate="show">
             <MachinePanel
               peerId={remotePeerId ?? "remote"}
               name={remoteName}

@@ -7,6 +7,7 @@ import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/toggle";
 import { streamColor } from "./useWireGeometry";
+import { deviceLabel } from "@/lib/deviceName";
 import { variants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -117,8 +118,8 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
           className="w-2 h-[18px] rounded-[1px] flex-none"
           style={{ background: color }}
         />
-        <span className="text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-ink">
-          {stream.source_device} → {stream.sink_device}
+        <span className="text-[11px] font-medium truncate flex-1 text-ink">
+          {deviceLabel(stream.source_device)} → {deviceLabel(stream.sink_device)}
         </span>
         <Button
           variant="ghost"

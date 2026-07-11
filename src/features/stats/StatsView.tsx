@@ -7,6 +7,7 @@ import type { StreamHistory } from "@/stores/ui";
 import { useSnapshot } from "@/hooks/useSnapshot";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { streamColor } from "@/features/routing/useWireGeometry";
+import { deviceLabel } from "@/lib/deviceName";
 import { Sparkline } from "@/components/Sparkline";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { variants } from "@/lib/motion";
@@ -80,8 +81,8 @@ function StreamRow({
   history: StreamHistory | undefined;
 }) {
   const color = streamColor(stat.stream_id);
-  const source = stream?.source_device ?? `stream ${stat.stream_id}`;
-  const sink = stream?.sink_device;
+  const source = stream ? deviceLabel(stream.source_device) : `stream ${stat.stream_id}`;
+  const sink = stream ? deviceLabel(stream.sink_device) : undefined;
 
   return (
     <motion.div

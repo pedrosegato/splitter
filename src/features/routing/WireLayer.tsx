@@ -1,15 +1,19 @@
-import { useLayoutEffect, useState, useRef, useCallback } from "react";
+import { useLayoutEffect, useState, useRef, useCallback, useEffect } from "react";
+import { motion, useTransform, useMotionValue } from "motion/react";
 import type { StreamSnapshot } from "@/bindings";
 import { usePortRegistry } from "./usePortRegistry";
-import { curve, streamColor } from "./useWireGeometry";
+import { curve, streamColor, type Pt } from "./useWireGeometry";
 import { useUiStore } from "@/stores/ui";
 import { useThemeStore } from "@/stores/theme";
+import { springs } from "@/lib/motion";
+import type { DragState } from "./useDragConnect";
 
 type WireLayerProps = {
   boardRef: React.RefObject<HTMLDivElement | null>;
   streams: StreamSnapshot[];
   selectedId: number | null;
   onSelect: (streamId: number | null) => void;
+  drag?: DragState;
 };
 
 type ComputedWire = {
@@ -18,14 +22,17 @@ type ComputedWire = {
   color: string;
   muted: boolean;
   volume: number;
+  sink: Pt;
 };
 
-export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayerProps) {
+export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: WireLayerProps) {
   const registry = usePortRegistry();
   const arm = useUiStore((s) => s.arm);
   const theme = useThemeStore((s) => s.theme);
   const [wires, setWires] = useState<ComputedWire[]>([]);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const [pulseIds, setPulseIds] = useState<number[]>([]);
+  const seenIdsRef = useRef<Set<number> | null>(null);
   const tickRef = useRef(0);
 
   const measure = useCallback(() => {
@@ -59,6 +66,7 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
         color: streamColor(stream.id),
         muted: stream.state === "paused" || stream.muted,
         volume: stream.volume,
+        sink: b,
       });
     }
 
@@ -104,6 +112,19 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
     return () => board.removeEventListener("pointermove", onMove);
   }, [boardRef, arm]);
 
+  useEffect(() => {
+    const currentIds = wires.map((wire) => wire.id);
+    if (seenIdsRef.current === null) {
+      seenIdsRef.current = new Set(currentIds);
+      return;
+    }
+    const fresh = currentIds.filter((id) => !seenIdsRef.current!.has(id));
+    for (const id of currentIds) seenIdsRef.current.add(id);
+    if (fresh.length > 0) {
+      setPulseIds((prev) => [...prev, ...fresh]);
+    }
+  }, [wires]);
+
   let previewPath: string | null = null;
   if (arm && cursor) {
     const board = boardRef.current;
@@ -119,6 +140,32 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
     }
   }
 
+  let dragOrigin: Pt | null = null;
+  if (drag?.active && drag.from) {
+    const board = boardRef.current;
+    const fromPortId = `${drag.from.peerId}:${drag.from.kind}:${drag.from.deviceId}`;
+    const el = registry.get(fromPortId);
+    if (board && el) {
+      const br = board.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      dragOrigin = {
+        x: r.left + r.width / 2 - br.left,
+        y: r.top + r.height / 2 - br.top,
+      };
+    }
+  }
+  const dragCenterX = boardRef.current ? boardRef.current.clientWidth / 2 : 0;
+
+  const fallbackX = useMotionValue(0);
+  const fallbackY = useMotionValue(0);
+  const liveX = drag?.x ?? fallbackX;
+  const liveY = drag?.y ?? fallbackY;
+  const liveDragPath = useTransform([liveX, liveY], (latest) => {
+    const [x, y] = latest as number[];
+    return dragOrigin ? curve(dragOrigin, { x, y }, dragCenterX) : "";
+  });
+
+  const showLiveDrag = Boolean(drag?.active && drag.from && dragOrigin);
   const hasSelection = selectedId !== null;
 
   return (
@@ -132,6 +179,18 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
           strokeLinecap="round"
           strokeDasharray="5 6"
           opacity="0.75"
+          style={{ pointerEvents: "none" }}
+        />
+      )}
+      {showLiveDrag && (
+        <motion.path
+          d={liveDragPath}
+          fill="none"
+          stroke="var(--color-gold)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 0.85 }}
           style={{ pointerEvents: "none" }}
         />
       )}
@@ -149,11 +208,14 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
               style={{ pointerEvents: "stroke", cursor: "pointer" }}
               onClick={() => onSelect(wire.id)}
             />
-            <path
+            <motion.path
               d={wire.d}
               fill="none"
               strokeWidth={strokeWidth}
               strokeLinecap="round"
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={springs.cable}
               style={{
                 stroke: wire.color,
                 fill: "none",
@@ -175,6 +237,22 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect }: WireLayer
                 opacity="0.65"
                 className="[animation:flow_1s_linear_infinite] [pointer-events:none] motion-reduce:animate-none"
                 style={{ fill: "none" }}
+              />
+            )}
+            {pulseIds.includes(wire.id) && (
+              <motion.circle
+                key={`pulse-${wire.id}`}
+                cx={wire.sink.x}
+                cy={wire.sink.y}
+                r={4}
+                fill={wire.color}
+                initial={{ scale: 0.4, opacity: 0.9 }}
+                animate={{ scale: 2.4, opacity: 0 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                onAnimationComplete={() =>
+                  setPulseIds((prev) => prev.filter((id) => id !== wire.id))
+                }
+                style={{ pointerEvents: "none", transformOrigin: "center" }}
               />
             )}
           </g>

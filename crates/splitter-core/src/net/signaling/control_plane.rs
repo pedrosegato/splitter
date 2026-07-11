@@ -56,7 +56,7 @@ pub fn spawn_control_plane(
     mut events: broadcast::Receiver<PeerEvent>,
     observer: Arc<dyn ControlPlaneObserver>,
     connection_id: Option<Uuid>,
-) {
+) -> tokio::task::AbortHandle {
     tokio::spawn(async move {
         loop {
             match events.recv().await {
@@ -83,7 +83,8 @@ pub fn spawn_control_plane(
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }
-    });
+    })
+    .abort_handle()
 }
 
 async fn handle_message(

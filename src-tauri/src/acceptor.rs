@@ -27,6 +27,10 @@ pub struct TauriControlPlane {
     pub core: Arc<AppCore>,
 }
 
+pub(crate) fn should_reconnect(had_active_session: bool, locally_torn_down: bool) -> bool {
+    had_active_session && !locally_torn_down
+}
+
 fn make_deps(core: &Arc<AppCore>) -> Arc<ControlPlaneDeps> {
     Arc::new(ControlPlaneDeps {
         sessions: core.sessions.clone(),
@@ -193,7 +197,8 @@ impl ControlPlaneObserver for TauriControlPlane {
             peer_id: peer_id.to_string(),
             reason: reason.to_string(),
         });
-        if had_active_session {
+        let locally_torn_down = self.core.local_disconnects.read().await.contains(&peer_id);
+        if should_reconnect(had_active_session, locally_torn_down) {
             spawn_reconnect(peer_id, observer(&self.core));
         }
         // A concurrent reconnect may have re-inserted a live handle under the
@@ -256,7 +261,11 @@ impl ReconnectDriver for TauriControlPlane {
         if let Some(pid) = outcome.remote_peer_id {
             let events = outcome.handle.events.subscribe();
             let reconnect_addr = outcome.handle.remote_addr;
-            self.core.outgoing.write().await.insert(pid, outcome.handle);
+            let previous = self.core.outgoing.write().await.insert(pid, outcome.handle);
+            if let Some(old) = previous {
+                old.shutdown();
+            }
+            self.core.local_disconnects.write().await.remove(&pid);
             spawn_acceptor(self.core.clone(), pid, events, reconnect_addr);
         }
     }
@@ -272,7 +281,11 @@ impl ReconnectDriver for TauriControlPlane {
 
 #[async_trait::async_trait]
 impl ControlPlaneHost for TauriControlPlane {
-    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) {
+    fn spawn_loop(
+        &self,
+        peer_id: Uuid,
+        endpoints: ConnEndpoints,
+    ) -> tokio::task::AbortHandle {
         let connection_id = endpoints.connection_id;
         spawn_control_plane(
             make_deps(&self.core),
@@ -281,7 +294,7 @@ impl ControlPlaneHost for TauriControlPlane {
             endpoints.events.subscribe(),
             observer(&self.core),
             Some(connection_id),
-        );
+        )
     }
 }
 
@@ -364,6 +377,22 @@ mod tests {
             .await
             .unwrap();
         sid
+    }
+
+    #[test]
+    fn should_reconnect_policy() {
+        assert!(
+            should_reconnect(true, false),
+            "a genuine remote drop with an active session must auto-reconnect"
+        );
+        assert!(
+            !should_reconnect(true, true),
+            "a locally initiated teardown must not auto-reconnect"
+        );
+        assert!(
+            !should_reconnect(false, false),
+            "no active session means nothing to reconnect"
+        );
     }
 
     #[tokio::test]

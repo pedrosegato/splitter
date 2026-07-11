@@ -7,7 +7,7 @@ use splitter_core::net::signaling::server::{SignalingServer, SignalingServerHand
 use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage};
 use splitter_core::settings::SettingsHandle;
 use splitter_core::{PeerIdentity, SessionManager, Settings, StreamRegistry, TrustStore};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -47,6 +47,7 @@ pub struct AppCore {
     pub stream_registry: Arc<StreamRegistry>,
     pub server: SignalingServerHandle,
     pub outgoing: Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    pub local_disconnects: Arc<RwLock<HashSet<Uuid>>>,
     pub peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     pub remote_devices: Arc<RwLock<HashMap<Uuid, Vec<DeviceDescriptor>>>>,
     pub app: OnceLock<tauri::AppHandle>,
@@ -100,6 +101,7 @@ impl AppCore {
             stream_registry,
             server,
             outgoing: Arc::new(RwLock::new(HashMap::new())),
+            local_disconnects: Arc::new(RwLock::new(HashSet::new())),
             peers: Arc::new(RwLock::new(HashMap::new())),
             remote_devices: Arc::new(RwLock::new(HashMap::new())),
             app: OnceLock::new(),

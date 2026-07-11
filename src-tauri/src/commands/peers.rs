@@ -91,7 +91,11 @@ pub async fn connect_peer(
         let events = outcome.handle.events.subscribe();
         let addr = outcome.handle.remote_addr;
         let tx = outcome.handle.tx.clone();
-        core.outgoing.write().await.insert(pid, outcome.handle);
+        let previous = core.outgoing.write().await.insert(pid, outcome.handle);
+        if let Some(old) = previous {
+            old.shutdown();
+        }
+        core.local_disconnects.write().await.remove(&pid);
         crate::acceptor::spawn_acceptor((*core).clone(), pid, events, addr);
         tx.send(SignalingMessage::DeviceListRequest {}).await.ok();
     }
@@ -223,6 +227,7 @@ pub(crate) async fn teardown_session(
         handle.shutdown();
     }
     core.remote_devices.write().await.remove(&remote);
+    core.local_disconnects.write().await.insert(remote);
     Ok(())
 }
 
@@ -247,6 +252,22 @@ mod tests {
         assert!(validate_device_name("   ").is_err());
         assert!(validate_device_name(&"x".repeat(41)).is_err());
         assert_eq!(validate_device_name(&"x".repeat(40)).unwrap().len(), 40);
+    }
+
+    #[tokio::test]
+    async fn teardown_marks_peer_as_locally_disconnected() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = AppCore::init(dir.path()).await.unwrap();
+        let remote = uuid::Uuid::new_v4();
+        let local = core.identity.read().peer_id;
+        let sid = core.sessions.open_outgoing(local, remote).await;
+
+        teardown_session(&core, sid).await.unwrap();
+
+        assert!(
+            core.local_disconnects.read().await.contains(&remote),
+            "local teardown must mark the peer so a late disconnect does not auto-reconnect"
+        );
     }
 
     #[tokio::test]

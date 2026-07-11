@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Dialog,
   DialogContent,
@@ -7,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { usePermissions, useRequestPermission } from "@/hooks/usePermissions";
+import { variants } from "@/lib/motion";
 import type { PermStatus } from "@/bindings";
 import { useOnboarding } from "./useOnboarding";
 
@@ -17,18 +19,22 @@ function StepIndicator({ current }: { current: Step }) {
   const idx = STEPS.indexOf(current);
   return (
     <div className="flex gap-1.5 justify-center">
-      {STEPS.map((s, i) => (
-        <span
-          key={s}
-          className={`inline-block h-[3px] rounded-full transition-all ${
-            i === idx
-              ? "w-5 bg-gold"
-              : i < idx
-                ? "w-3 bg-gold/40"
-                : "w-3 bg-surface-2"
-          }`}
-        />
-      ))}
+      {STEPS.map((s, i) =>
+        i === idx ? (
+          <motion.span
+            key={s}
+            layoutId="wizard-dot"
+            className="inline-block h-[3px] w-5 rounded-full bg-gold"
+          />
+        ) : (
+          <span
+            key={s}
+            className={`inline-block h-[3px] rounded-full transition-all ${
+              i < idx ? "w-3 bg-gold/40" : "w-3 bg-surface-2"
+            }`}
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -171,6 +177,7 @@ export function OnboardingWizard() {
   const onboarded = useOnboarding((s) => s.onboarded);
   const complete = useOnboarding((s) => s.complete);
   const [step, setStep] = useState<Step>("welcome");
+  const [direction, setDirection] = useState<1 | -1>(1);
   const { data: permissions } = usePermissions();
 
   if (onboarded) return null;
@@ -178,10 +185,12 @@ export function OnboardingWizard() {
   const idx = STEPS.indexOf(step);
 
   function next() {
+    setDirection(1);
     setStep(STEPS[idx + 1]);
   }
 
   function back() {
+    setDirection(-1);
     setStep(STEPS[idx - 1]);
   }
 
@@ -211,11 +220,22 @@ export function OnboardingWizard() {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="px-[15px] py-[14px] min-h-[140px]">
-          {step === "welcome" && <WelcomeStep />}
-          {step === "permissions" && <PermissionsStep onSkip={next} />}
-          {step === "firewall" && <FirewallStep />}
-          {step === "ready" && <ReadyStep onComplete={complete} />}
+        <div className="px-[15px] py-[14px] min-h-[140px] overflow-hidden">
+          <AnimatePresence mode="wait" custom={direction}>
+            <motion.div
+              key={step}
+              custom={direction}
+              variants={variants.slide(direction)}
+              initial="enter"
+              animate="center"
+              exit="exit"
+            >
+              {step === "welcome" && <WelcomeStep />}
+              {step === "permissions" && <PermissionsStep onSkip={next} />}
+              {step === "firewall" && <FirewallStep />}
+              {step === "ready" && <ReadyStep onComplete={complete} />}
+            </motion.div>
+          </AnimatePresence>
         </div>
 
         <div className="px-[13px] py-[9px] border-t border-line flex items-center justify-between gap-2">

@@ -252,6 +252,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn owner_tagged_session_is_only_owned_by_its_connection() {
+        let mgr = SessionManager::new();
+        let remote = Uuid::new_v4();
+        let owner = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let id = mgr.open_outgoing(Uuid::new_v4(), remote).await;
+        mgr.set_session_owner(&id, owner).await;
+
+        assert_eq!(
+            mgr.sessions_owned_by_connection(remote, Some(owner)).await,
+            vec![id],
+            "the owning connection must own the session"
+        );
+        assert!(
+            mgr.sessions_owned_by_connection(remote, Some(other))
+                .await
+                .is_empty(),
+            "a foreign connection must not own an owner-tagged session"
+        );
+    }
+
+    #[tokio::test]
+    async fn untagged_session_is_owned_by_any_connection() {
+        let mgr = SessionManager::new();
+        let remote = Uuid::new_v4();
+        let id = mgr.open_outgoing(Uuid::new_v4(), remote).await;
+
+        assert_eq!(
+            mgr.sessions_owned_by_connection(remote, Some(Uuid::new_v4()))
+                .await,
+            vec![id],
+            "an untagged session falls back to any connection for backward compatibility"
+        );
+    }
+
+    #[tokio::test]
     async fn accept_then_add_stream_then_activate() {
         let mgr = SessionManager::new();
         let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;

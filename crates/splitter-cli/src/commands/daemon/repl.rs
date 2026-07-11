@@ -2,7 +2,7 @@ use super::context::{short, DaemonContext};
 use super::{graceful_shutdown, ui};
 use crate::commands::stream_repl;
 use splitter_core::net::discovery::{Discovery, DiscoveryEvent};
-use splitter_core::net::signaling::client_ops::{find_conn_tx, notify_remote_control};
+use splitter_core::net::signaling::client_ops::{find_conn, find_conn_tx, notify_remote_control};
 use splitter_core::net::signaling::server::{accept_pending_as, SignalingServerHandle};
 use splitter_core::net::signaling::{connect_to_peer, SignalingMessage, StreamAction};
 use std::net::SocketAddr;
@@ -336,14 +336,18 @@ async fn cmd_open<'a>(
     {
         println!(">> opened session {session_id} with {}", target.peer_name);
     }
-    let conn_tx = find_conn_tx(&server.connections, &ctx.outgoing_connections, remote_uuid).await;
-    if let Some(tx) = conn_tx {
-        tx.send(SignalingMessage::SessionRequest {
-            session_id: session_id.to_string(),
-            requested_by: ctx.identity.peer_id.to_string(),
-        })
-        .await
-        .ok();
+    let conn = find_conn(&server.connections, &ctx.outgoing_connections, remote_uuid).await;
+    if let Some(conn) = conn {
+        ctx.sessions
+            .set_session_owner(&session_id, conn.connection_id)
+            .await;
+        conn.tx
+            .send(SignalingMessage::SessionRequest {
+                session_id: session_id.to_string(),
+                requested_by: ctx.identity.peer_id.to_string(),
+            })
+            .await
+            .ok();
     }
     Ok(())
 }

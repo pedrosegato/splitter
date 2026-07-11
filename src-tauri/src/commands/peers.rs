@@ -91,12 +91,13 @@ pub async fn connect_peer(
         let events = outcome.handle.events.subscribe();
         let addr = outcome.handle.remote_addr;
         let tx = outcome.handle.tx.clone();
+        let connection_id = outcome.handle.connection_id;
         let previous = core.outgoing.write().await.insert(pid, outcome.handle);
         if let Some(old) = previous {
             old.shutdown();
         }
         core.local_disconnects.write().await.remove(&pid);
-        crate::acceptor::spawn_acceptor((*core).clone(), pid, events, addr);
+        crate::acceptor::spawn_acceptor((*core).clone(), pid, connection_id, events, addr);
         tx.send(SignalingMessage::DeviceListRequest {}).await.ok();
     }
     Ok(outcome.accepted)
@@ -193,6 +194,7 @@ pub(crate) async fn teardown_session(
     }
 
     let remote = sess.remote_peer_id;
+    core.local_disconnects.write().await.insert(remote);
     let tx = {
         let g = core.server.connections.read().await;
         g.get(&remote).map(|c| c.tx.clone())
@@ -227,7 +229,6 @@ pub(crate) async fn teardown_session(
         handle.shutdown();
     }
     core.remote_devices.write().await.remove(&remote);
-    core.local_disconnects.write().await.insert(remote);
     Ok(())
 }
 

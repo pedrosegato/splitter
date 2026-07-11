@@ -47,21 +47,21 @@ fn observer(core: &Arc<AppCore>) -> Arc<TauriControlPlane> {
 pub fn spawn_acceptor(
     core: Arc<AppCore>,
     peer_id: Uuid,
+    connection_id: Uuid,
     events: broadcast::Receiver<PeerEvent>,
     _addr: SocketAddr,
 ) {
     let deps = make_deps(&core);
     let obs = observer(&core);
     tokio::spawn(async move {
-        let (conn_tx, connection_id) =
-            match find_conn(&core.server.connections, &core.outgoing, peer_id).await {
-                Some(c) => (c.tx, Some(c.connection_id)),
-                None => {
-                    let (tx, _rx) = mpsc::channel(1);
-                    (tx, None)
-                }
-            };
-        spawn_control_plane(deps, peer_id, conn_tx, events, obs, connection_id);
+        let conn_tx = match find_conn(&core.server.connections, &core.outgoing, peer_id).await {
+            Some(c) => c.tx,
+            None => {
+                let (tx, _rx) = mpsc::channel(1);
+                tx
+            }
+        };
+        spawn_control_plane(deps, peer_id, conn_tx, events, obs, Some(connection_id));
     });
 }
 
@@ -197,7 +197,7 @@ impl ControlPlaneObserver for TauriControlPlane {
             peer_id: peer_id.to_string(),
             reason: reason.to_string(),
         });
-        let locally_torn_down = self.core.local_disconnects.read().await.contains(&peer_id);
+        let locally_torn_down = self.core.local_disconnects.write().await.remove(&peer_id);
         if should_reconnect(had_active_session, locally_torn_down) {
             spawn_reconnect(peer_id, observer(&self.core));
         }
@@ -261,12 +261,13 @@ impl ReconnectDriver for TauriControlPlane {
         if let Some(pid) = outcome.remote_peer_id {
             let events = outcome.handle.events.subscribe();
             let reconnect_addr = outcome.handle.remote_addr;
+            let connection_id = outcome.handle.connection_id;
             let previous = self.core.outgoing.write().await.insert(pid, outcome.handle);
             if let Some(old) = previous {
                 old.shutdown();
             }
             self.core.local_disconnects.write().await.remove(&pid);
-            spawn_acceptor(self.core.clone(), pid, events, reconnect_addr);
+            spawn_acceptor(self.core.clone(), pid, connection_id, events, reconnect_addr);
         }
     }
 
@@ -296,6 +297,10 @@ impl ControlPlaneHost for TauriControlPlane {
             Some(connection_id),
         )
     }
+
+    async fn on_peer_connected(&self, peer_id: Uuid) {
+        self.core.local_disconnects.write().await.remove(&peer_id);
+    }
 }
 
 #[cfg(test)]
@@ -320,7 +325,7 @@ mod tests {
 
     fn driven_acceptor(core: Arc<AppCore>, peer: Uuid) -> broadcast::Sender<PeerEvent> {
         let (tx, rx) = broadcast::channel(16);
-        spawn_acceptor(core, peer, rx, "127.0.0.1:9".parse().unwrap());
+        spawn_acceptor(core, peer, Uuid::new_v4(), rx, "127.0.0.1:9".parse().unwrap());
         tx
     }
 
@@ -600,6 +605,36 @@ mod tests {
         .await
         .expect("peer rename not applied within 2s");
         assert_eq!(name, "New");
+    }
+
+    #[tokio::test]
+    async fn inbound_reestablish_clears_local_disconnect_flag() {
+        let core = new_core().await;
+        let peer = Uuid::new_v4();
+        core.local_disconnects.write().await.insert(peer);
+
+        let host = TauriControlPlane { core: core.clone() };
+        host.on_peer_connected(peer).await;
+
+        assert!(
+            !core.local_disconnects.read().await.contains(&peer),
+            "an inbound re-establish must clear the stale local-disconnect flag so a later genuine drop can auto-reconnect"
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_disconnect_consumes_local_disconnect_flag() {
+        let core = new_core().await;
+        let peer = Uuid::new_v4();
+        core.local_disconnects.write().await.insert(peer);
+
+        let obs = TauriControlPlane { core: core.clone() };
+        obs.on_peer_disconnected(peer, "test", false).await;
+
+        assert!(
+            !core.local_disconnects.read().await.contains(&peer),
+            "reading the local-disconnect flag on disconnect must consume it so it suppresses exactly one reconnect"
+        );
     }
 
     #[tokio::test]

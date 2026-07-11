@@ -1,13 +1,14 @@
 use crate::net::signaling::message::{HeartbeatStreamStats, SignalingMessage};
-use crate::net::stream_runtime::StreamRegistry;
+use crate::net::stream_runtime::{StatsBaseline, StreamRegistry};
 use std::sync::Arc;
 
 pub async fn build_heartbeat(
     registry: &Arc<StreamRegistry>,
     window_ms: u32,
     timestamp_ms: u64,
+    baseline: &mut StatsBaseline,
 ) -> SignalingMessage {
-    let snaps = registry.snapshot_stats(window_ms).await;
+    let snaps = registry.snapshot_stats(window_ms, baseline).await;
     let streams_stats = snaps
         .into_iter()
         .map(|(_sid, stream_id, snap)| HeartbeatStreamStats {
@@ -34,7 +35,7 @@ mod phase3_tests {
     use crate::net::session::SessionId;
     use crate::net::stream::StreamId;
     use crate::net::stream_runtime::{
-        DeviceGuard, StreamControlSignal, StreamRegistry, StreamRuntime, StreamStats,
+        DeviceGuard, StatsBaseline, StreamControlSignal, StreamRegistry, StreamRuntime, StreamStats,
     };
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -64,7 +65,8 @@ mod phase3_tests {
         rt.stats.packets_lost.store(1, Ordering::Relaxed);
         reg.register(rt).await.unwrap();
 
-        let msg = build_heartbeat(&reg, 1_000, 12_345).await;
+        let mut baseline = StatsBaseline::default();
+        let msg = build_heartbeat(&reg, 1_000, 12_345, &mut baseline).await;
         match msg {
             crate::net::signaling::SignalingMessage::Heartbeat { streams_stats, .. } => {
                 assert_eq!(streams_stats.len(), 1);

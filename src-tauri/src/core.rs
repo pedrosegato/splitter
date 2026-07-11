@@ -155,9 +155,10 @@ impl AppCore {
         let core = self.clone();
         tauri::async_runtime::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(1));
+            let mut baseline = splitter_core::net::stream_runtime::StatsBaseline::default();
             loop {
                 ticker.tick().await;
-                let raw = core.stream_registry.snapshot_stats(1000).await;
+                let raw = core.stream_registry.snapshot_stats(1000, &mut baseline).await;
                 let stats: Vec<StreamStat> = raw
                     .into_iter()
                     .map(|(session_id, stream_id, snap)| StreamStat {

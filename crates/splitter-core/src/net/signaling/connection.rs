@@ -77,6 +77,7 @@ pub fn spawn_peer_connection(
         let mut hb_tick = tokio::time::interval(Duration::from_secs(1));
         hb_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last_heard = tokio::time::Instant::now();
+        let mut hb_baseline = crate::net::stream_runtime::StatsBaseline::default();
         let mut deadline = tokio::time::interval(Duration::from_millis(500));
         deadline.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -156,7 +157,7 @@ pub fn spawn_peer_connection(
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
                     let hb = match &registry {
-                        Some(reg) => build_heartbeat(reg, 1_000, now_ms).await,
+                        Some(reg) => build_heartbeat(reg, 1_000, now_ms, &mut hb_baseline).await,
                         None => SignalingMessage::Heartbeat {
                             timestamp_ms: now_ms,
                             streams_stats: Vec::new(),

@@ -18,6 +18,10 @@ export const variants = {
     hidden: { opacity: 0, scale: 0.96 },
     show: { opacity: 1, scale: 1, transition: springs.snappy },
   },
+  fade: {
+    hidden: { opacity: 0 },
+    show: { opacity: 1, transition: springs.snappy },
+  },
   listStagger: {
     hidden: {},
     show: { transition: { staggerChildren: 0.05, delayChildren: 0.02 } },

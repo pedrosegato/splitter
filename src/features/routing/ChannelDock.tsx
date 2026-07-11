@@ -22,7 +22,7 @@ export function ChannelDock({ sessionId, streams, isLoading }: Props) {
       {isLoading ? (
         <div className="flex items-center gap-3 px-4">
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="w-[72px] h-[64px] bg-line-2 rounded-[2px]" />
+            <Skeleton key={i} className="w-[72px] h-[64px] bg-line-2" />
           ))}
         </div>
       ) : (

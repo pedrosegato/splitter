@@ -25,10 +25,10 @@ function MetricCard({
 }) {
   return (
     <motion.div variants={variants.listItem}>
-      <Card className="rounded-none border-0 bg-bg py-0 shadow-none">
+      <Card className="bg-bg py-0">
         <CardContent className="p-4">
           <div
-            className={`font-mono text-2xl tabular-nums leading-none ${accent ? "text-gold" : "text-ink"}`}
+            className={`text-2xl tabular-nums leading-none ${accent ? "text-gold" : "text-ink"}`}
           >
             {value}
             {unit && (
@@ -68,7 +68,7 @@ function StreamRow({
       className="flex items-center gap-3 py-2.5 px-4 border-b border-line last:border-b-0"
     >
       <span
-        className="w-[9px] h-[30px] rounded-[2px] flex-none"
+        className="w-[9px] h-[30px] flex-none"
         style={{ background: color }}
       />
       <div className="flex-1 min-w-0">

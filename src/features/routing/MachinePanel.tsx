@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Port } from "./Port";
 import { resolveConnection, type PortRef } from "./resolveConnection";
 
@@ -136,13 +137,13 @@ export function MachinePanel({
           <div className="w-[38px] h-[38px] rounded-[2px] border border-dashed border-line-2 text-ink-3 flex items-center justify-center text-[18px] mb-2">
             +
           </div>
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={onConnectClick}
-            className="mt-[13px] font-sans text-[11.5px] text-line bg-gold border-0 rounded-[2px] px-[15px] py-2 cursor-pointer font-semibold hover:brightness-110"
+            className="mt-[13px] text-[11.5px] text-line bg-gold font-semibold hover:brightness-110"
           >
             Conectar máquina
-          </button>
+          </Button>
         </div>
       </Card>
     );
@@ -162,14 +163,15 @@ export function MachinePanel({
         </span>
         {!isSelf && (
           <div className="ml-auto flex items-center gap-2 shrink-0">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-xs"
               title="desconectar"
               onClick={onDisconnect}
-              className="font-sans text-[10px] text-ink-3 bg-elev-2 border border-line-2 rounded-[2px] px-2 py-[3px] cursor-pointer hover:text-gold hover:border-gold"
+              className="text-[10px] text-ink-3 hover:bg-transparent hover:text-gold"
             >
               ✕
-            </button>
+            </Button>
           </div>
         )}
       </div>

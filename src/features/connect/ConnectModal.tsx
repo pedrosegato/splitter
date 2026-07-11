@@ -5,6 +5,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Button } from "@/components/ui/button";
 import { usePeers } from "@/hooks/usePeers";
 import { useConnectPeer, useOpenSession } from "@/hooks/useConnection";
 import type { DiscoveredPeer } from "@/bindings";
@@ -41,12 +42,11 @@ function DiscoveredRow({
   }
 
   return (
-    <motion.button
-      variants={variants.listItem}
-      type="button"
+    <Button
+      variant="ghost"
       onClick={handlePairing}
       disabled={isPending}
-      className="group w-full flex items-center gap-[11px] px-[11px] py-[10px] rounded-[2px] border border-transparent hover:bg-elev-2 hover:border-line-2 cursor-pointer text-left disabled:opacity-50 disabled:cursor-default"
+      className="group w-full h-auto justify-start gap-[11px] px-[11px] py-[10px] border border-transparent hover:bg-elev-2 hover:border-line-2 text-left disabled:opacity-50 disabled:cursor-default"
     >
       <span className="w-[7px] h-[7px] rounded-full bg-green shrink-0" />
       <span className="flex-1 min-w-0 text-[12.5px] truncate">
@@ -56,7 +56,7 @@ function DiscoveredRow({
         </small>
       </span>
       <Cable size={15} className="shrink-0 text-ink-3 group-hover:text-gold" />
-    </motion.button>
+    </Button>
   );
 }
 
@@ -69,10 +69,10 @@ export function ConnectModal({ open, onOpenChange }: Props) {
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
-        className="w-[378px] max-w-[378px] bg-surface border-line rounded-[3px] gap-0 p-0"
+        className="w-[378px] max-w-[378px] bg-surface border-line gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-[3px]">
-          <DialogTitle className="font-mono text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
+        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg">
+          <DialogTitle className="text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
             Máquinas na rede
           </DialogTitle>
         </DialogHeader>
@@ -101,13 +101,14 @@ export function ConnectModal({ open, onOpenChange }: Props) {
         </motion.div>
 
         <div className="flex items-center justify-end px-[13px] py-[9px] border-t border-line">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onOpenChange(false)}
-            className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
+            className="text-[11px]"
           >
             cancelar
-          </button>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

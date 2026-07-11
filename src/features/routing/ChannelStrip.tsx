@@ -4,6 +4,8 @@ import type { StreamSnapshot } from "@/bindings";
 import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
 import { useUiStore } from "@/stores/ui";
 import { Slider } from "@/components/ui/slider";
+import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
 import { streamColor } from "./useWireGeometry";
 import { variants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -83,30 +85,31 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
         <span className="text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-ink">
           {stream.source_device} → {stream.sink_device}
         </span>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onClick={handleClose}
-          className="flex-none text-[10px] text-ink-3 hover:text-gold leading-none px-0.5"
+          className="flex-none text-[10px] text-ink-3 hover:bg-transparent hover:text-gold leading-none"
           aria-label="fechar stream"
         >
           ✕
-        </button>
+        </Button>
       </div>
 
       <div className="flex items-center gap-2.5">
-        <button
-          type="button"
+        <Toggle
+          pressed={muted}
           onClick={handleMute}
           className={cn(
-            "flex-none w-6 h-6 rounded-[2px] border text-[10px] font-mono font-medium flex items-center justify-center",
+            "flex-none size-6 min-w-6 p-0 border text-[10px] font-medium",
             muted
-              ? "bg-gold border-gold text-[#161618]"
-              : "bg-transparent border-line-2 text-ink-2 hover:border-gold hover:text-gold",
+              ? "bg-gold border-gold text-[#161618] hover:bg-gold"
+              : "bg-transparent border-line-2 text-ink-2 hover:bg-transparent hover:border-gold hover:text-gold",
           )}
           aria-label={muted ? "desmutar" : "mutar"}
         >
           M
-        </button>
+        </Toggle>
 
         <div
           className="flex-1"

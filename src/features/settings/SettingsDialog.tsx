@@ -7,6 +7,9 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   Select,
@@ -27,7 +30,7 @@ function AppVersion() {
   useEffect(() => {
     import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setV).catch(() => setV("?"));
   }, []);
-  return <span className="font-mono text-[11px] text-ink-2">{v || "…"}</span>;
+  return <span className="text-[11px] text-ink-2">{v || "…"}</span>;
 }
 
 type Props = {
@@ -37,7 +40,7 @@ type Props = {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="font-mono text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase mb-[8px] mt-[14px] first:mt-0">
+    <p className="text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase mb-[8px] mt-[14px] first:mt-0">
       {children}
     </p>
   );
@@ -47,7 +50,7 @@ function Row({ children }: { children: React.ReactNode }) {
   return (
     <Field
       orientation="horizontal"
-      className="gap-4 py-[7px] px-[11px] rounded-[2px] hover:bg-elev-2"
+      className="gap-4 py-[7px] px-[11px] hover:bg-elev-2"
     >
       {children}
     </Field>
@@ -91,7 +94,7 @@ function SettingSelect({
       <SelectTrigger
         id={id}
         size="sm"
-        className="w-[110px] h-[28px] text-[12px] font-mono bg-board border-line-2 text-ink focus-visible:ring-gold"
+        className="w-[110px] h-[28px] text-[12px] bg-board border-line-2 text-ink focus-visible:ring-gold"
       >
         <SelectValue />
       </SelectTrigger>
@@ -103,34 +106,6 @@ function SettingSelect({
         ))}
       </SelectContent>
     </Select>
-  );
-}
-
-function ThemeButton({
-  value,
-  active,
-  onSelect,
-  label,
-  borderLeft,
-}: {
-  value: "dark" | "light";
-  active: boolean;
-  onSelect: (value: "dark" | "light") => void;
-  label: string;
-  borderLeft?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(value)}
-      className={`px-[10px] py-[5px] font-mono text-[11px] cursor-pointer transition-colors${borderLeft ? " border-l border-line-2" : ""} ${
-        active
-          ? "bg-gold text-[#1c1c1f] font-semibold"
-          : "bg-board text-ink-2 hover:text-ink"
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -168,7 +143,7 @@ function NumberInput({
         const n = Number(e.target.value);
         if (!Number.isNaN(n)) debouncedSet(settingKey, n);
       }}
-      className={`w-[90px] font-mono ${inputClass}`}
+      className={`w-[90px] ${inputClass}`}
     />
   );
 }
@@ -230,16 +205,16 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
-        className="w-[420px] max-w-[420px] bg-surface border-line rounded-[3px] gap-0 p-0"
+        className="w-[420px] max-w-[420px] bg-surface border-line gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-[3px] flex-row items-center justify-between">
-          <DialogTitle className="font-mono text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
+        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg flex-row items-center justify-between">
+          <DialogTitle className="text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
             Configurações
           </DialogTitle>
           {savedVisible && (
-            <span className="font-mono text-[9.5px] text-gold tracking-wide">
+            <Badge variant="secondary" className="text-[9.5px] text-gold tracking-wide">
               salvo
-            </span>
+            </Badge>
           )}
         </DialogHeader>
 
@@ -411,21 +386,31 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
           <FieldGroup className="gap-0">
             <Row>
               <SettingLabel>Tema</SettingLabel>
-              <div className="flex rounded-[2px] border border-line-2 overflow-hidden">
-                <ThemeButton
+              <ToggleGroup
+                type="single"
+                value={theme}
+                onValueChange={(v) => {
+                  if (v === "dark" || v === "light") {
+                    setTheme(v);
+                    applyTheme(v);
+                  }
+                }}
+                size="sm"
+                className="border border-line-2 overflow-hidden"
+              >
+                <ToggleGroupItem
                   value="dark"
-                  active={theme === "dark"}
-                  onSelect={(v) => { setTheme(v); applyTheme(v); }}
-                  label="Escuro"
-                />
-                <ThemeButton
+                  className="px-[10px] text-[11px] bg-board text-ink-2 hover:bg-board hover:text-ink data-[state=on]:bg-gold data-[state=on]:text-[#1c1c1f] data-[state=on]:font-semibold"
+                >
+                  Escuro
+                </ToggleGroupItem>
+                <ToggleGroupItem
                   value="light"
-                  active={theme === "light"}
-                  onSelect={(v) => { setTheme(v); applyTheme(v); }}
-                  label="Claro"
-                  borderLeft
-                />
-              </div>
+                  className="px-[10px] text-[11px] border-l border-line-2 bg-board text-ink-2 hover:bg-board hover:text-ink data-[state=on]:bg-gold data-[state=on]:text-[#1c1c1f] data-[state=on]:font-semibold"
+                >
+                  Claro
+                </ToggleGroupItem>
+              </ToggleGroup>
             </Row>
           </FieldGroup>
 
@@ -441,50 +426,53 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               <SettingLabel>Atualizações</SettingLabel>
               {updateState.status === "available" ? (
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] text-gold">
+                  <Badge variant="secondary" className="text-[10px] text-gold">
                     v{updateState.version}
-                  </span>
-                  <button
-                    type="button"
+                  </Badge>
+                  <Button
+                    size="sm"
                     onClick={updateState.onInstall}
-                    className="font-mono text-[11px] text-[#1c1c1f] bg-gold border border-gold rounded-[2px] px-3 py-[5px] cursor-pointer hover:opacity-90"
+                    className="text-[11px] bg-gold text-[#1c1c1f] hover:bg-gold/90"
                   >
                     instalar
-                  </button>
+                  </Button>
                 </div>
               ) : (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={checkForUpdates}
                   disabled={updateState.status === "checking" || updateState.status === "installing"}
-                  className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-[11px]"
                 >
                   {updateState.status === "checking"
                     ? "verificando…"
                     : updateState.status === "installing"
                     ? "instalando…"
                     : "buscar atualizações"}
-                </button>
+                </Button>
               )}
             </Row>
           </FieldGroup>
         </div>
 
         <div className="flex items-center justify-between px-[13px] py-[9px] border-t border-line">
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleReset}
-            className="font-mono text-[11px] text-ink-3 bg-transparent border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-gold hover:border-gold"
+            className="text-[11px] text-ink-3 hover:text-gold hover:border-gold"
           >
             Restaurar padrões
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onOpenChange(false)}
-            className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
+            className="text-[11px]"
           >
             fechar
-          </button>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

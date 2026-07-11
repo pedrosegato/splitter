@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { queryClient } from "@/app/queryClient";
 import { mountEventBridge } from "@/lib/events";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { variants } from "@/lib/motion";
 import { useUiStore } from "@/stores/ui";
 import { RoutingBoard } from "@/features/routing/RoutingBoard";
@@ -53,55 +54,57 @@ export function App() {
             >
               <TabsTrigger
                 value="routing"
-                className="rounded-sm px-3 text-xs data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 data-[state=active]:shadow-none"
+                className="px-3 text-xs data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 data-[state=active]:shadow-none"
               >
                 Roteamento
               </TabsTrigger>
               <TabsTrigger
                 value="stats"
-                className="rounded-sm px-3 text-xs data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 data-[state=active]:shadow-none"
+                className="px-3 text-xs data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 data-[state=active]:shadow-none"
               >
                 Estatísticas
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          <motion.button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-xs"
             aria-label="Configurações"
             onClick={() => setSettingsOpen(true)}
-            whileHover={{ scale: 1.08 }}
-            whileTap={{ scale: 0.95 }}
-            className="flex items-center justify-center w-6 h-6 rounded-sm text-ink-2 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold"
+            className="text-ink-2 hover:text-ink"
           >
             <Settings size={16} />
-          </motion.button>
+          </Button>
         </div>
         {!isMac && (
           <div className="flex items-stretch h-full ml-2">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label="Minimizar"
               onClick={() => getCurrentWindow().minimize()}
-              className="w-[46px] flex items-center justify-center text-ink-2 hover:bg-elev-2 hover:text-ink"
+              className="w-[46px] h-full text-ink-2 hover:bg-elev-2 hover:text-ink"
             >
               <Minus size={15} />
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label="Maximizar"
               onClick={() => getCurrentWindow().toggleMaximize()}
-              className="w-[46px] flex items-center justify-center text-ink-2 hover:bg-elev-2 hover:text-ink"
+              className="w-[46px] h-full text-ink-2 hover:bg-elev-2 hover:text-ink"
             >
               <Square size={12} />
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label="Fechar"
               onClick={() => getCurrentWindow().close()}
-              className="w-[46px] flex items-center justify-center text-ink-2 hover:bg-[#e81123] hover:text-white"
+              className="w-[46px] h-full text-ink-2 hover:bg-[#e81123] hover:text-white"
             >
               <X size={16} />
-            </button>
+            </Button>
           </div>
         )}
       </header>

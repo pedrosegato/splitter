@@ -324,6 +324,14 @@ async fn handle_stream_control(
                     .await;
             }
         }
+        if let StreamControlSignal::SetVolume(v) = signal {
+            for sid in &session_ids {
+                let _ = deps
+                    .sessions
+                    .set_stream_volume(sid, StreamId(stream_id), v)
+                    .await;
+            }
+        }
         for sid in &session_ids {
             let _ = deps
                 .stream_registry

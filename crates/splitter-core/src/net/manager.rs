@@ -134,6 +134,19 @@ impl SessionManager {
         .await
     }
 
+    pub async fn set_stream_volume(
+        &self,
+        id: &SessionId,
+        stream_id: StreamId,
+        volume: f32,
+    ) -> Result<(), NetError> {
+        self.with_stream_mut(id, stream_id, |st| {
+            st.set_volume(volume);
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn next_stream_id(&self, id: &SessionId) -> Result<StreamId, NetError> {
         self.with_session_mut(id, |s| Ok(s.next_stream_id())).await
     }
@@ -284,6 +297,21 @@ mod tests {
         mgr.set_stream_muted(&id, StreamId(0), false).await.unwrap();
         let snap = mgr.snapshot().await;
         assert!(!snap[0].streams[0].muted);
+    }
+
+    #[tokio::test]
+    async fn set_stream_volume_updates_snapshot() {
+        let mgr = SessionManager::new();
+        let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
+        mgr.accept(&id).await.unwrap();
+        mgr.add_stream(&id, Stream::new_negotiating(StreamId(0), route(), 5004))
+            .await
+            .unwrap();
+
+        mgr.set_stream_volume(&id, StreamId(0), 0.25).await.unwrap();
+
+        let snap = mgr.snapshot().await;
+        assert!((snap[0].streams[0].volume - 0.25).abs() < 1e-6);
     }
 
     #[tokio::test]

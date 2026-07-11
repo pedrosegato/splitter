@@ -284,6 +284,12 @@ pub async fn stream_control(
                 .await
                 .map_err(|e| e.to_string())?;
         }
+        if let StreamControlSignal::SetVolume(v) = signal {
+            core.sessions
+                .set_stream_volume(&sid, StreamId(stream_id), v)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
         core.stream_registry
             .send_control(&sid, StreamId(stream_id), signal)
             .await

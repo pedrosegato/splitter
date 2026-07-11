@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { motion } from "motion/react";
 import type { StreamStat, StreamSnapshot } from "@/bindings";
 import { useUiStore } from "@/stores/ui";
 import type { StreamHistory } from "@/stores/ui";
@@ -6,6 +7,9 @@ import { useSnapshot } from "@/hooks/useSnapshot";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { streamColor } from "@/features/routing/useWireGeometry";
 import { Sparkline } from "@/components/Sparkline";
+import { Card, CardContent } from "@/components/ui/card";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { variants } from "@/lib/motion";
 import { aggregate } from "./aggregate";
 
 function MetricCard({
@@ -20,19 +24,23 @@ function MetricCard({
   accent?: boolean;
 }) {
   return (
-    <div className="bg-bg p-4">
-      <div
-        className={`font-mono text-2xl tabular-nums leading-none ${accent ? "text-gold" : "text-ink"}`}
-      >
-        {value}
-        {unit && (
-          <span className="text-sm text-ink-3 ml-0.5">{unit}</span>
-        )}
-      </div>
-      <div className="text-[9px] text-ink-3 uppercase tracking-widest mt-1.5">
-        {label}
-      </div>
-    </div>
+    <motion.div variants={variants.listItem}>
+      <Card className="rounded-none border-0 bg-bg py-0 shadow-none">
+        <CardContent className="p-4">
+          <div
+            className={`font-mono text-2xl tabular-nums leading-none ${accent ? "text-gold" : "text-ink"}`}
+          >
+            {value}
+            {unit && (
+              <span className="text-sm text-ink-3 ml-0.5">{unit}</span>
+            )}
+          </div>
+          <div className="text-[9px] text-ink-3 uppercase tracking-widest mt-1.5">
+            {label}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }
 
@@ -55,7 +63,10 @@ function StreamRow({
   const kbpsHistory = history?.kbps ?? [];
 
   return (
-    <div className="flex items-center gap-3 py-2.5 px-4 border-b border-line last:border-b-0">
+    <motion.div
+      variants={variants.listItem}
+      className="flex items-center gap-3 py-2.5 px-4 border-b border-line last:border-b-0"
+    >
       <span
         className="w-[9px] h-[30px] rounded-[2px] flex-none"
         style={{ background: color }}
@@ -86,7 +97,7 @@ function StreamRow({
           </span>
         </span>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -115,7 +126,10 @@ export function StatsView() {
         Sessão · agregado
       </p>
 
-      <div
+      <motion.div
+        variants={variants.listStagger}
+        initial="hidden"
+        animate="show"
         className="grid gap-px bg-line border border-line mb-6"
         style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}
       >
@@ -139,7 +153,7 @@ export function StatsView() {
           unit="kbps"
           label="banda total"
         />
-      </div>
+      </motion.div>
 
       <p className="text-[9px] text-ink-3 uppercase tracking-widest mb-3">
         Por stream
@@ -147,21 +161,25 @@ export function StatsView() {
 
       <div className="border border-line">
         {stats.length === 0 ? (
-          <div className="px-4 py-3 text-xs text-ink-3">
-            sem streams ativos
-          </div>
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>sem streams ativos</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          stats.map((stat) => {
-            const stream = streamById.get(stat.stream_id);
-            return (
-              <StreamRow
-                key={`${stat.session_id}-${stat.stream_id}`}
-                stat={stat}
-                stream={stream}
-                history={statsHistory[stat.stream_id]}
-              />
-            );
-          })
+          <motion.div variants={variants.listStagger} initial="hidden" animate="show">
+            {stats.map((stat) => {
+              const stream = streamById.get(stat.stream_id);
+              return (
+                <StreamRow
+                  key={`${stat.session_id}-${stat.stream_id}`}
+                  stat={stat}
+                  stream={stream}
+                  history={statsHistory[stat.stream_id]}
+                />
+              );
+            })}
+          </motion.div>
         )}
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -176,6 +176,12 @@ describe("StatsView", () => {
     setupMocks([], twoStreamSessions, {});
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("sem streams ativos")).toBeDefined();
+  });
+
+  it("renders sem streams ativos via the Empty primitive when stats is empty", () => {
+    setupMocks([], twoStreamSessions, {});
+    render(<StatsView />, { wrapper: makeWrapper() });
+    expect(screen.getByText(/sem streams ativos/i)).toBeInTheDocument();
   });
 
   it("renders three sparklines per stream row when history is present", () => {

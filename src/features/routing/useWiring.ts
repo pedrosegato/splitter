@@ -90,10 +90,11 @@ export function useWiring() {
   const onPortConnect = useCallback(
     (a: PortRef, b: PortRef) => {
       if (!session) return;
+      clearArm();
       const conn = resolveConnection(a, b);
       if (conn) runConnection(conn);
     },
-    [session, runConnection],
+    [session, clearArm, runConnection],
   );
 
   return { arm, onPortActivate, onPortConnect };

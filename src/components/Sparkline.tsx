@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { durations } from "@/lib/motion";
 
 type SparklineProps = {
@@ -16,6 +16,8 @@ export function Sparkline({
   color = "currentColor",
   max,
 }: SparklineProps) {
+  const reducedMotion = useReducedMotion();
+
   if (values.length === 0) {
     return <svg width={width} height={height} aria-hidden="true" />;
   }
@@ -38,7 +40,7 @@ export function Sparkline({
         strokeWidth={1.5}
         strokeLinejoin="round"
         strokeLinecap="round"
-        initial={{ pathLength: 0, opacity: 0.4 }}
+        initial={reducedMotion ? false : { pathLength: 0, opacity: 0.4 }}
         animate={{ pathLength: 1, opacity: 1 }}
         transition={{ duration: durations.slow, ease: "easeOut" }}
       />

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useState, useRef, useCallback, useEffect } from "react";
-import { motion, useTransform, useMotionValue } from "motion/react";
+import { motion, useTransform, useMotionValue, useReducedMotion } from "motion/react";
 import type { StreamSnapshot } from "@/bindings";
 import { usePortRegistry } from "./usePortRegistry";
 import { curve, streamColor, type Pt } from "./useWireGeometry";
@@ -29,6 +29,7 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
   const registry = usePortRegistry();
   const arm = useUiStore((s) => s.arm);
   const theme = useThemeStore((s) => s.theme);
+  const reducedMotion = useReducedMotion();
   const [wires, setWires] = useState<ComputedWire[]>([]);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [pulseIds, setPulseIds] = useState<number[]>([]);
@@ -213,7 +214,7 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
               fill="none"
               strokeWidth={strokeWidth}
               strokeLinecap="round"
-              initial={{ pathLength: 0 }}
+              initial={reducedMotion ? false : { pathLength: 0 }}
               animate={{ pathLength: 1 }}
               transition={springs.cable}
               style={{

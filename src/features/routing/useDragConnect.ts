@@ -21,7 +21,6 @@ export function useDragConnect({ boardRef, onConnect }: Params) {
   const y = useMotionValue(0);
   const [active, setActive] = useState(false);
   const [from, setFrom] = useState<PortRef | null>(null);
-  const [hoverPortId, setHoverPortId] = useState<string | null>(null);
   const fromRef = useRef<PortRef | null>(null);
 
   const toBoard = useCallback(
@@ -59,7 +58,6 @@ export function useDragConnect({ boardRef, onConnect }: Params) {
       const { bx, by } = toBoard(e.clientX, e.clientY);
       x.set(bx);
       y.set(by);
-      setHoverPortId(portAt(e.clientX, e.clientY));
     };
 
     const finish = (e: PointerEvent) => {
@@ -69,7 +67,6 @@ export function useDragConnect({ boardRef, onConnect }: Params) {
       if (origin && target) onConnect(origin, target);
       setActive(false);
       setFrom(null);
-      setHoverPortId(null);
       fromRef.current = null;
     };
 
@@ -82,5 +79,5 @@ export function useDragConnect({ boardRef, onConnect }: Params) {
   }, [active, onConnect, registry, toBoard, x, y]);
 
   const drag: DragState = { active, from, x, y };
-  return { drag, startDrag, hoverPortId };
+  return { drag, startDrag };
 }

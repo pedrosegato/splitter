@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { queryClient } from "@/app/queryClient";
 import { mountEventBridge } from "@/lib/events";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { variants } from "@/lib/motion";
 import { useUiStore } from "@/stores/ui";
 import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { StatsView } from "@/features/stats/StatsView";
@@ -63,14 +65,16 @@ export function App() {
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          <button
+          <motion.button
             type="button"
             aria-label="Configurações"
             onClick={() => setSettingsOpen(true)}
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.95 }}
             className="flex items-center justify-center w-6 h-6 rounded-sm text-ink-2 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold"
           >
             <Settings size={16} />
-          </button>
+          </motion.button>
         </div>
         {!isMac && (
           <div className="flex items-stretch h-full ml-2">
@@ -102,7 +106,18 @@ export function App() {
         )}
       </header>
       <main className="flex-1 overflow-auto bg-board">
-        {activeTab === "routing" ? <RoutingBoard /> : <StatsView />}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={activeTab}
+            variants={variants.fadeInUp}
+            initial="hidden"
+            animate="show"
+            exit={{ opacity: 0, y: -6 }}
+            className="h-full overflow-auto"
+          >
+            {activeTab === "routing" ? <RoutingBoard /> : <StatsView />}
+          </motion.div>
+        </AnimatePresence>
       </main>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <OnboardingWizard />

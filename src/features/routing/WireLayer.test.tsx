@@ -204,7 +204,7 @@ describe("WireLayer", () => {
     );
 
     expect(visibleWire).toBeDefined();
-    expect(visibleWire!.style.stroke).toBe("var(--color-s0)");
+    expect(visibleWire!.getAttribute("stroke")).toBe("var(--color-s0)");
   });
 
   it("clicking the hit path calls onSelect with the stream id", () => {
@@ -274,7 +274,9 @@ describe("WireLayer", () => {
     );
 
     const flowPath = Array.from(container.querySelectorAll("path")).find(
-      (p) => p.getAttribute("stroke") === "#fff",
+      (p) =>
+        p.getAttribute("stroke") === "#fff" &&
+        p.getAttribute("stroke-dasharray") === "1 10",
     );
     expect(flowPath).toBeDefined();
   });
@@ -296,7 +298,9 @@ describe("WireLayer", () => {
     );
 
     const flowPath = Array.from(container.querySelectorAll("path")).find(
-      (p) => p.getAttribute("stroke") === "#fff",
+      (p) =>
+        p.getAttribute("stroke") === "#fff" &&
+        p.getAttribute("stroke-dasharray") === "1 10",
     );
     expect(flowPath).toBeUndefined();
   });

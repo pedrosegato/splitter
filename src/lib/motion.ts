@@ -4,6 +4,7 @@ export const springs = {
   snappy: { type: "spring", stiffness: 520, damping: 32, mass: 0.7 },
   soft: { type: "spring", stiffness: 260, damping: 26 },
   cable: { type: "spring", stiffness: 380, damping: 30, mass: 0.8 },
+  cableSettle: { type: "spring", stiffness: 150, damping: 9, mass: 1.1 },
 } satisfies Record<string, Transition>;
 
 export const durations = { fast: 0.12, base: 0.22, slow: 0.4 };

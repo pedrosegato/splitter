@@ -2,8 +2,9 @@ use crate::net::discovery::DiscoveredPeer;
 use crate::net::signaling::connection::{spawn_peer_connection, PeerEvent};
 use crate::net::signaling::message::SignalingMessage;
 use ipnet::Ipv4Net;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 
 const MIN_PREFIX_LEN: u8 = 22;
@@ -124,6 +125,40 @@ pub async fn scan_once(
     .await
 }
 
+/// Merge a unicast scan result into the shared discovered-peer map and expire
+/// unicast entries that have not answered within `ttl`. Connected peers are
+/// never pruned. Returns whether the visible peer set changed.
+pub fn reconcile_scan(
+    peers: &mut HashMap<String, DiscoveredPeer>,
+    seen: &mut HashMap<String, Instant>,
+    found: Vec<DiscoveredPeer>,
+    connected: &HashSet<String>,
+    now: Instant,
+    ttl: Duration,
+) -> bool {
+    let mut changed = false;
+    for peer in found {
+        let id = peer.peer_id.clone();
+        if !peers.contains_key(&id) {
+            changed = true;
+        }
+        peers.insert(id.clone(), peer);
+        seen.insert(id, now);
+    }
+    let stale: Vec<String> = seen
+        .iter()
+        .filter(|(_, t)| now.duration_since(**t) > ttl)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in stale {
+        seen.remove(&id);
+        if !connected.contains(&id) && peers.remove(&id).is_some() {
+            changed = true;
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +202,74 @@ mod tests {
     fn awdl_interface_is_skipped() {
         let targets = scan_targets(&[iface("awdl0", [192, 168, 5, 2], [255, 255, 255, 0])]);
         assert!(targets.is_empty());
+    }
+
+    fn peer(id: &str) -> DiscoveredPeer {
+        DiscoveredPeer {
+            peer_id: id.into(),
+            peer_name: format!("name-{id}"),
+            host: "192.168.0.5".into(),
+            port: 7000,
+            version: "0.1.0".into(),
+        }
+    }
+
+    #[test]
+    fn reconcile_adds_new_peer_and_reports_change() {
+        let mut peers = HashMap::new();
+        let mut seen = HashMap::new();
+        let now = Instant::now();
+        let changed = reconcile_scan(
+            &mut peers,
+            &mut seen,
+            vec![peer("a")],
+            &HashSet::new(),
+            now,
+            Duration::from_secs(25),
+        );
+        assert!(changed);
+        assert!(peers.contains_key("a"));
+
+        let changed_again = reconcile_scan(
+            &mut peers,
+            &mut seen,
+            vec![peer("a")],
+            &HashSet::new(),
+            now,
+            Duration::from_secs(25),
+        );
+        assert!(!changed_again, "re-seeing the same peer is not a change");
+    }
+
+    #[test]
+    fn reconcile_prunes_stale_unicast_peer() {
+        let mut peers = HashMap::new();
+        let mut seen = HashMap::new();
+        let ttl = Duration::from_secs(25);
+        let old = Instant::now().checked_sub(Duration::from_secs(60)).unwrap();
+        peers.insert("gone".to_string(), peer("gone"));
+        seen.insert("gone".to_string(), old);
+
+        let changed = reconcile_scan(&mut peers, &mut seen, vec![], &HashSet::new(), Instant::now(), ttl);
+        assert!(changed);
+        assert!(!peers.contains_key("gone"), "stale unicast peer must be pruned");
+    }
+
+    #[test]
+    fn reconcile_keeps_connected_peer_even_when_stale() {
+        let mut peers = HashMap::new();
+        let mut seen = HashMap::new();
+        let ttl = Duration::from_secs(25);
+        let old = Instant::now().checked_sub(Duration::from_secs(60)).unwrap();
+        peers.insert("linked".to_string(), peer("linked"));
+        seen.insert("linked".to_string(), old);
+        let connected: HashSet<String> = ["linked".to_string()].into_iter().collect();
+
+        reconcile_scan(&mut peers, &mut seen, vec![], &connected, Instant::now(), ttl);
+        assert!(
+            peers.contains_key("linked"),
+            "a connected peer must never be pruned by the scanner"
+        );
     }
 
     #[tokio::test]

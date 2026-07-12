@@ -23,8 +23,7 @@ fn iface_is_scannable(iface: &IfaceV4) -> bool {
     if iface.name.starts_with("awdl") || iface.name.starts_with("llw") {
         return false;
     }
-    // Only sweep RFC1918 LAN ranges: never fan TCP SYNs out over a routable
-    // public subnet even if a public /24 interface exists.
+    // RFC1918 only: never fan TCP SYNs out over a routable public subnet.
     iface.ip.is_private()
 }
 
@@ -127,9 +126,6 @@ pub async fn scan_once(
     .await
 }
 
-/// Merge a unicast scan result into the shared discovered-peer map and expire
-/// unicast entries that have not answered within `ttl`. Connected peers are
-/// never pruned. Returns whether the visible peer set changed.
 pub fn reconcile_scan(
     peers: &mut HashMap<String, DiscoveredPeer>,
     seen: &mut HashMap<String, Instant>,

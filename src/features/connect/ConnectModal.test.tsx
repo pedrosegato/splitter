@@ -57,6 +57,36 @@ describe("ConnectModal", () => {
     );
   });
 
+  it("connects by manual IP with peerId null and default port", () => {
+    render(<ConnectModal open onOpenChange={vi.fn()} />, { wrapper: makeWrapper() });
+
+    const host = within(document.body).getByLabelText("endereço do peer");
+    fireEvent.change(host, { target: { value: "10.0.0.42" } });
+    fireEvent.click(within(document.body).getByRole("button", { name: /conectar/i }));
+
+    expect(mockConnectMutate).toHaveBeenCalledWith(
+      { host: "10.0.0.42", port: 7000, peerId: null },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("uses the typed port for a manual connect", () => {
+    render(<ConnectModal open onOpenChange={vi.fn()} />, { wrapper: makeWrapper() });
+
+    fireEvent.change(within(document.body).getByLabelText("endereço do peer"), {
+      target: { value: "10.0.0.42" },
+    });
+    fireEvent.change(within(document.body).getByLabelText("porta"), {
+      target: { value: "7100" },
+    });
+    fireEvent.click(within(document.body).getByRole("button", { name: /conectar/i }));
+
+    expect(mockConnectMutate).toHaveBeenCalledWith(
+      { host: "10.0.0.42", port: 7100, peerId: null },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
   it("calls onOpenChange(false) when cancelar is clicked", () => {
     const onOpenChange = vi.fn();
     render(<ConnectModal open onOpenChange={onOpenChange} />, { wrapper: makeWrapper() });

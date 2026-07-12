@@ -61,7 +61,7 @@ async pendingPeers() : Promise<Result<PendingPeerDto[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async connectPeer(host: string, port: number, peerId: string | null) : Promise<Result<boolean, string>> {
+async connectPeer(host: string, port: number, peerId: string | null) : Promise<Result<string | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("connect_peer", { host, port, peerId }) };
 } catch (e) {

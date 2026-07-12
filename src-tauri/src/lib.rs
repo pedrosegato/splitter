@@ -99,6 +99,7 @@ pub fn run() {
                             "mDNS discovery unavailable ({e}); continuing without LAN discovery"
                         );
                     }
+                    core.spawn_unicast_scan();
                     core.spawn_stats_emitter();
                     core.spawn_acceptor_supervisor();
                     core.spawn_device_watcher();

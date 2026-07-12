@@ -151,6 +151,52 @@ impl AppCore {
 }
 
 impl AppCore {
+    pub fn spawn_unicast_scan(self: &Arc<Self>) {
+        let core = self.clone();
+        let port = self.server.bind_addr.port();
+        let local_peer_id = self.identity.read().peer_id.to_string();
+        tauri::async_runtime::spawn(async move {
+            use std::time::Instant;
+            let ttl = Duration::from_secs(25);
+            let mut seen: HashMap<String, Instant> = HashMap::new();
+            let mut ticker = tokio::time::interval(Duration::from_secs(8));
+            loop {
+                ticker.tick().await;
+                let found = splitter_core::net::active_scan::scan_once(
+                    &local_peer_id,
+                    port,
+                    Duration::from_millis(400),
+                    128,
+                )
+                .await;
+                let mut connected: HashSet<String> = core
+                    .server
+                    .connections
+                    .read()
+                    .await
+                    .keys()
+                    .map(|u| u.to_string())
+                    .collect();
+                connected.extend(core.outgoing.read().await.keys().map(|u| u.to_string()));
+                let changed = splitter_core::net::active_scan::reconcile_scan(
+                    &mut *core.peers.write().await,
+                    &mut seen,
+                    found,
+                    &connected,
+                    Instant::now(),
+                    ttl,
+                );
+                if changed {
+                    let snapshot: Vec<DiscoveredPeer> =
+                        core.peers.read().await.values().cloned().collect();
+                    core.emit(PeersChanged(snapshot));
+                }
+            }
+        });
+    }
+}
+
+impl AppCore {
     pub fn spawn_stats_emitter(self: &Arc<Self>) {
         let core = self.clone();
         tauri::async_runtime::spawn(async move {

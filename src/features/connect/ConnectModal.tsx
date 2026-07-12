@@ -6,12 +6,16 @@ import {
 } from "@/components/ui/dialog";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { usePeers } from "@/hooks/usePeers";
 import { useConnectPeer, useOpenSession } from "@/hooks/useConnection";
 import type { DiscoveredPeer } from "@/bindings";
 import { Cable } from "lucide-react";
 import { motion } from "motion/react";
 import { variants } from "@/lib/motion";
+import { useState } from "react";
+
+const DEFAULT_PORT = 7000;
 
 type Props = {
   open: boolean;
@@ -60,6 +64,63 @@ function DiscoveredRow({
   );
 }
 
+function ManualConnectRow({ onSuccess }: { onSuccess: () => void }) {
+  const connectPeer = useConnectPeer();
+  const openSession = useOpenSession();
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const isPending = connectPeer.isPending || openSession.isPending;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = host.trim();
+    if (!trimmed || isPending) return;
+    const parsedPort = Number(port) || DEFAULT_PORT;
+    connectPeer.mutate(
+      { host: trimmed, port: parsedPort, peerId: null },
+      {
+        onSuccess: (peerId) => {
+          if (!peerId) return;
+          openSession.mutate({ remotePeerId: peerId }, { onSuccess });
+        },
+      },
+    );
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="flex items-center gap-[7px] px-[13px] py-[10px] border-t border-line"
+    >
+      <Input
+        value={host}
+        onChange={(e) => setHost(e.target.value)}
+        placeholder="192.168.1.5"
+        aria-label="endereço do peer"
+        className="h-8 flex-1 text-[12px]"
+      />
+      <Input
+        value={port}
+        onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
+        placeholder={String(DEFAULT_PORT)}
+        inputMode="numeric"
+        aria-label="porta"
+        className="h-8 w-16 text-[12px]"
+      />
+      <Button
+        type="submit"
+        size="sm"
+        variant="secondary"
+        disabled={!host.trim() || isPending}
+        className="h-8 gap-[6px] text-[11px]"
+      >
+        <Cable size={14} />
+        conectar
+      </Button>
+    </form>
+  );
+}
+
 export function ConnectModal({ open, onOpenChange }: Props) {
   const peers = usePeers();
   const discovered = peers.data ?? [];
@@ -99,6 +160,8 @@ export function ConnectModal({ open, onOpenChange }: Props) {
             ))
           )}
         </motion.div>
+
+        <ManualConnectRow onSuccess={() => onOpenChange(false)} />
 
         <div className="flex items-center justify-end px-[13px] py-[9px] border-t border-line">
           <Button

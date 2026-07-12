@@ -69,7 +69,7 @@ pub async fn connect_peer(
     host: String,
     port: u16,
     peer_id: Option<String>,
-) -> Result<bool, String> {
+) -> Result<Option<String>, String> {
     let addr = format!("{host}:{port}")
         .parse()
         .map_err(|_| format!("invalid address '{host}:{port}'"))?;
@@ -101,7 +101,7 @@ pub async fn connect_peer(
         crate::acceptor::spawn_acceptor((*core).clone(), pid, connection_id, events, addr);
         tx.send(SignalingMessage::DeviceListRequest {}).await.ok();
     }
-    Ok(outcome.accepted)
+    Ok(outcome.remote_peer_id.map(|p| p.to_string()))
 }
 
 #[tauri::command]

@@ -103,7 +103,7 @@ mod tests {
 
         established_tx.send(peer).unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while created.lock().unwrap().len() < 1 {
+            while created.lock().unwrap().is_empty() {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         })

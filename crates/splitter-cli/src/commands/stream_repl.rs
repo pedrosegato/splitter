@@ -224,12 +224,8 @@ async fn stream_set_mute(
     let snap = sessions.snapshot().await;
     if let Some(s) = snap.iter().find(|s| s.id == sid) {
         if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
-            notify_remote_control(
-                &conn.tx,
-                stream_id.get(),
-                StreamAction::SetMuted { muted },
-            )
-            .await;
+            notify_remote_control(&conn.tx, stream_id.get(), StreamAction::SetMuted { muted })
+                .await;
         }
     }
     Ok(())

@@ -179,9 +179,7 @@ pub(crate) async fn close_active_sessions_for_peer(core: &AppCore, peer_id: uuid
         .snapshot()
         .await
         .into_iter()
-        .filter(|s| {
-            s.remote_peer_id == peer_id && s.state == splitter_core::SessionState::Active
-        })
+        .filter(|s| s.remote_peer_id == peer_id && s.state == splitter_core::SessionState::Active)
         .collect();
     for sess in stale {
         for stream in &sess.streams {
@@ -265,18 +263,15 @@ pub async fn disconnect(core: State<'_, Arc<AppCore>>, session_id: String) -> Re
 mod tests {
     use super::*;
     use splitter_core::net::signaling::connection::spawn_peer_connection;
+    use splitter_core::net::signaling::{Codec, CodecParams, Endpoint};
     use splitter_core::net::stream::{Stream, StreamId, StreamRoute};
     use splitter_core::net::stream_runtime::{
         DeviceGuard, StreamControlSignal, StreamRuntime, StreamStats,
     };
-    use splitter_core::net::signaling::{Codec, CodecParams, Endpoint};
     use tokio::io::AsyncReadExt;
     use tokio::net::{TcpListener, TcpStream};
 
-    fn fake_runtime(
-        session_id: splitter_core::SessionId,
-        stream_id: StreamId,
-    ) -> StreamRuntime {
+    fn fake_runtime(session_id: splitter_core::SessionId, stream_id: StreamId) -> StreamRuntime {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamControlSignal>(4);
         let join = tokio::spawn(async move {
             while let Some(sig) = rx.recv().await {

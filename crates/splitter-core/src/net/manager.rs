@@ -425,7 +425,9 @@ mod tests {
         let id = SessionId::new();
         let local = Uuid::new_v4();
         let remote = Uuid::new_v4();
-        mgr.register_incoming(id, local, remote, None).await.unwrap();
+        mgr.register_incoming(id, local, remote, None)
+            .await
+            .unwrap();
         let err = mgr
             .register_incoming(id, local, remote, None)
             .await

@@ -173,11 +173,7 @@ impl ReconnectDriver for CliControlPlane {
 
 #[async_trait::async_trait]
 impl ControlPlaneHost for CliControlPlane {
-    fn spawn_loop(
-        &self,
-        peer_id: Uuid,
-        endpoints: ConnEndpoints,
-    ) -> tokio::task::AbortHandle {
+    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) -> tokio::task::AbortHandle {
         let connection_id = endpoints.connection_id;
         spawn_control_plane_loop(
             self.ctx.clone(),

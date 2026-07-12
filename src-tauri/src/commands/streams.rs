@@ -58,7 +58,9 @@ pub async fn open_session(
     let conn = find_peer_conn(&core, remote)
         .await
         .ok_or_else(|| "no live signaling connection to remote peer".to_string())?;
-    core.sessions.set_session_owner(&sid, conn.connection_id).await;
+    core.sessions
+        .set_session_owner(&sid, conn.connection_id)
+        .await;
     conn.tx
         .send(SignalingMessage::SessionRequest {
             session_id: sid.to_string(),
@@ -419,8 +421,12 @@ mod tests {
 
     #[test]
     fn mirrors_mute_and_volume_but_not_close() {
-        assert!(should_notify_remote(&StreamAction::SetMuted { muted: true }));
-        assert!(should_notify_remote(&StreamAction::SetVolume { volume: 0.5 }));
+        assert!(should_notify_remote(&StreamAction::SetMuted {
+            muted: true
+        }));
+        assert!(should_notify_remote(&StreamAction::SetVolume {
+            volume: 0.5
+        }));
         assert!(should_notify_remote(&StreamAction::Pause));
         assert!(!should_notify_remote(&StreamAction::Close));
     }

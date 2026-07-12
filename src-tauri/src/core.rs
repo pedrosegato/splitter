@@ -158,7 +158,10 @@ impl AppCore {
             let mut baseline = splitter_core::net::stream_runtime::StatsBaseline::default();
             loop {
                 ticker.tick().await;
-                let raw = core.stream_registry.snapshot_stats(1000, &mut baseline).await;
+                let raw = core
+                    .stream_registry
+                    .snapshot_stats(1000, &mut baseline)
+                    .await;
                 let stats: Vec<StreamStat> = raw
                     .into_iter()
                     .map(|(session_id, stream_id, snap)| StreamStat {
@@ -180,8 +183,7 @@ impl AppCore {
     pub fn spawn_device_watcher(self: &Arc<Self>) {
         let core = self.clone();
         tauri::async_runtime::spawn(async move {
-            let watcher =
-                splitter_core::net::device_watcher::start(Duration::from_secs(2));
+            let watcher = splitter_core::net::device_watcher::start(Duration::from_secs(2));
             let mut rx = watcher.subscribe();
             while let Ok(ev) = rx.recv().await {
                 match ev {
@@ -230,7 +232,11 @@ impl AppCore {
         let established = self.server.connection_established_tx.subscribe();
         let connections = self.server.connections.clone();
         tauri::async_runtime::spawn(async move {
-            splitter_core::net::signaling::spawn_connection_supervisor(established, connections, host);
+            splitter_core::net::signaling::spawn_connection_supervisor(
+                established,
+                connections,
+                host,
+            );
         });
     }
 }

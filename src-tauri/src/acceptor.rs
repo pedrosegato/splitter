@@ -268,7 +268,13 @@ impl ReconnectDriver for TauriControlPlane {
                 old.shutdown();
             }
             self.core.local_disconnects.write().await.remove(&pid);
-            spawn_acceptor(self.core.clone(), pid, connection_id, events, reconnect_addr);
+            spawn_acceptor(
+                self.core.clone(),
+                pid,
+                connection_id,
+                events,
+                reconnect_addr,
+            );
         }
     }
 
@@ -283,11 +289,7 @@ impl ReconnectDriver for TauriControlPlane {
 
 #[async_trait::async_trait]
 impl ControlPlaneHost for TauriControlPlane {
-    fn spawn_loop(
-        &self,
-        peer_id: Uuid,
-        endpoints: ConnEndpoints,
-    ) -> tokio::task::AbortHandle {
+    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) -> tokio::task::AbortHandle {
         let connection_id = endpoints.connection_id;
         spawn_control_plane(
             make_deps(&self.core),
@@ -326,7 +328,13 @@ mod tests {
 
     fn driven_acceptor(core: Arc<AppCore>, peer: Uuid) -> broadcast::Sender<PeerEvent> {
         let (tx, rx) = broadcast::channel(16);
-        spawn_acceptor(core, peer, Uuid::new_v4(), rx, "127.0.0.1:9".parse().unwrap());
+        spawn_acceptor(
+            core,
+            peer,
+            Uuid::new_v4(),
+            rx,
+            "127.0.0.1:9".parse().unwrap(),
+        );
         tx
     }
 

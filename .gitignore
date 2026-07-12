@@ -38,3 +38,6 @@ src-tauri/gen/
 
 # Logs
 *.log
+
+# Git worktrees (Superpowers isolation)
+.worktrees/

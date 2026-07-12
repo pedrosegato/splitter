@@ -32,3 +32,6 @@ pub struct PeerDisconnected {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SnapshotChanged;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DevicesChanged;

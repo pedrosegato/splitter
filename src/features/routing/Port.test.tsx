@@ -114,25 +114,37 @@ describe("Port + PortRegistryProvider", () => {
     expect(button.style.borderColor).toBe("");
   });
 
-  it("calls onActivate with correct args on click", async () => {
-    let captured: unknown;
+  it("calls onDragStart with the port ref on pointer down", () => {
+    let capturedRef: unknown;
     const { getByRole } = render(
       <PortRegistryProvider>
         <Port
           peerId="p9"
           kind="sink"
           deviceId="d9"
-          onActivate={(...args) => {
-            captured = args;
+          onDragStart={(ref) => {
+            capturedRef = ref;
           }}
         />
       </PortRegistryProvider>,
     );
 
     act(() => {
-      getByRole("button").click();
+      getByRole("button").dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true }),
+      );
     });
 
-    expect(captured).toEqual(["p9:sink:d9", "sink", "p9", "d9"]);
+    expect(capturedRef).toEqual({ peerId: "p9", deviceId: "d9", kind: "sink" });
+  });
+
+  it("exposes a data-port-id for hit-testing", () => {
+    const { getByRole } = render(
+      <PortRegistryProvider>
+        <Port peerId="A" kind="src" deviceId="mic" />
+      </PortRegistryProvider>,
+    );
+
+    expect(getByRole("button")).toHaveAttribute("data-port-id", "A:src:mic");
   });
 });

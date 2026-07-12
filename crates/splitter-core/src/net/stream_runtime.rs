@@ -13,7 +13,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 pub use crate::net::stream_pump::{spawn_sink_pump_inner, spawn_source_pump_inner};
-pub use crate::net::stream_registry::{StreamRegistry, StreamRuntimeSummary};
+pub use crate::net::stream_registry::{StatsBaseline, StreamRegistry, StreamRuntimeSummary};
 pub use crate::net::stream_stats::{StreamStats, StreamStatsSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -44,6 +44,7 @@ const twoStreamSessions: SessionSnapshot[] = [
   {
     id: "sess-1",
     remote_peer_id: "peer-remote",
+    remote_peer_name: "",
     state: "active",
     streams: [
       {
@@ -158,11 +159,13 @@ describe("StatsView", () => {
     expect(getByText("430")).toBeDefined();
   });
 
-  it("renders one row per stat entry with source_device → sink_device label", () => {
+  it("renders one row per stat entry with source and sink device labels", () => {
     setupMocks(twoStats, twoStreamSessions, baseStatsHistory);
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
-    expect(getByText("MacBook Mic → Studio Monitors")).toBeDefined();
-    expect(getByText("Sistema → Fones")).toBeDefined();
+    expect(getByText("MacBook Mic")).toBeDefined();
+    expect(getByText("Studio Monitors")).toBeDefined();
+    expect(getByText("Sistema")).toBeDefined();
+    expect(getByText("Fones")).toBeDefined();
   });
 
   it("shows fallback label when stream snapshot is not found", () => {
@@ -176,6 +179,12 @@ describe("StatsView", () => {
     setupMocks([], twoStreamSessions, {});
     const { getByText } = render(<StatsView />, { wrapper: makeWrapper() });
     expect(getByText("sem streams ativos")).toBeDefined();
+  });
+
+  it("renders sem streams ativos via the Empty primitive when stats is empty", () => {
+    setupMocks([], twoStreamSessions, {});
+    render(<StatsView />, { wrapper: makeWrapper() });
+    expect(screen.getByText(/sem streams ativos/i)).toBeInTheDocument();
   });
 
   it("renders three sparklines per stream row when history is present", () => {

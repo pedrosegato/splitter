@@ -2,7 +2,6 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useUiStore } from "@/stores/ui";
 
 vi.mock("@/hooks/useSnapshot");
 vi.mock("@/hooks/useDevices");
@@ -35,19 +34,13 @@ function makeWrapper() {
 }
 
 import { useWiring } from "./useWiring";
+import type { PortRef } from "./resolveConnection";
 
 describe("useWiring", () => {
   let mutateSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    useUiStore.setState({
-      activeTab: "routing",
-      selectedStreamId: null,
-      arm: null,
-      stats: [],
-    });
-
     mutateSpy = vi.fn();
     mockedUseSnapshot.mockReturnValue({ data: [SESSION] });
     mockedUseDevices.mockReturnValue({ data: DEVICES });
@@ -57,40 +50,17 @@ describe("useWiring", () => {
     mockedUseIdentity.mockReturnValue({ data: { peer_id: "peer-a", peer_name: "A" } });
   });
 
-  it("clicking a sink first arms it (order-agnostic, no error)", () => {
+  const src = (peerId: string, deviceId: string): PortRef => ({ peerId, deviceId, kind: "src" });
+  const sink = (peerId: string, deviceId: string): PortRef => ({ peerId, deviceId, kind: "sink" });
+
+  it("dragging a self system src to a remote sink calls openStream with sourceIsSystem=true", async () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
-      result.current.onPortActivate("peer-a:sink:mic-1", "sink", "peer-a", "mic-1");
-    });
-
-    expect(result.current.arm).toEqual({
-      peerId: "peer-a",
-      deviceId: "mic-1",
-      kind: "sink",
-    });
-    expect(mutateSpy).not.toHaveBeenCalled();
-  });
-
-  it("arm a system src then a sink on another peer calls openStream with sourceIsSystem=true", async () => {
-    const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
-
-    act(() => {
-      result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
-    });
-
-    expect(result.current.arm).toEqual({
-      peerId: "peer-a",
-      deviceId: "sys-1",
-      kind: "src",
-    });
-
-    act(() => {
-      result.current.onPortActivate("peer-b:sink:spk-1", "sink", "peer-b", "spk-1");
+      result.current.onPortConnect(src("peer-a", "sys-1"), sink("peer-b", "spk-1"));
     });
 
     await waitFor(() => expect(mutateSpy).toHaveBeenCalledOnce());
-
     expect(mutateSpy).toHaveBeenCalledWith({
       sessionId: "sess-1",
       sourceDeviceId: "sys-1",
@@ -99,28 +69,35 @@ describe("useWiring", () => {
       sinkDeviceId: "spk-1",
       bitrate: undefined,
     });
-    expect(result.current.arm).toBeNull();
   });
 
-  it("arm a mic src then a sink on another peer calls openStream with sourceIsSystem=false", async () => {
+  it("dragging a self mic src to a remote sink calls openStream with sourceIsSystem=false", async () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
-      result.current.onPortActivate("peer-a:src:mic-1", "src", "peer-a", "mic-1");
-    });
-
-    act(() => {
-      result.current.onPortActivate("peer-b:sink:spk-1", "sink", "peer-b", "spk-1");
+      result.current.onPortConnect(src("peer-a", "mic-1"), sink("peer-b", "spk-1"));
     });
 
     await waitFor(() => expect(mutateSpy).toHaveBeenCalledOnce());
-
     expect(mutateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ sourceIsSystem: false }),
     );
   });
 
-  it("remote system src then local sink calls requestStream with system SourceKind", async () => {
+  it("order-agnostic: dragging sink first then src still resolves the connection", async () => {
+    const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
+
+    act(() => {
+      result.current.onPortConnect(sink("peer-b", "spk-1"), src("peer-a", "sys-1"));
+    });
+
+    await waitFor(() => expect(mutateSpy).toHaveBeenCalledOnce());
+    expect(mutateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceDeviceId: "sys-1", sinkDeviceId: "spk-1" }),
+    );
+  });
+
+  it("dragging a remote system src to a local sink calls requestStream with system SourceKind", async () => {
     const requestMutate = vi.fn();
     mockedUseRequestStream.mockReturnValue({ mutate: requestMutate });
     mockedUsePeerDevices.mockReturnValue({
@@ -129,10 +106,7 @@ describe("useWiring", () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
-      result.current.onPortActivate("peer-b:src:rsys-1", "src", "peer-b", "rsys-1");
-    });
-    act(() => {
-      result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
+      result.current.onPortConnect(src("peer-b", "rsys-1"), sink("peer-a", "spk-1"));
     });
 
     await waitFor(() => expect(requestMutate).toHaveBeenCalledOnce());
@@ -143,7 +117,7 @@ describe("useWiring", () => {
     });
   });
 
-  it("remote mic src then local sink calls requestStream with mic SourceKind", async () => {
+  it("dragging a remote mic src to a local sink calls requestStream with mic SourceKind", async () => {
     const requestMutate = vi.fn();
     mockedUseRequestStream.mockReturnValue({ mutate: requestMutate });
     mockedUsePeerDevices.mockReturnValue({
@@ -152,10 +126,7 @@ describe("useWiring", () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
-      result.current.onPortActivate("peer-b:src:rmic-1", "src", "peer-b", "rmic-1");
-    });
-    act(() => {
-      result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
+      result.current.onPortConnect(src("peer-b", "rmic-1"), sink("peer-a", "spk-1"));
     });
 
     await waitFor(() => expect(requestMutate).toHaveBeenCalledOnce());
@@ -166,48 +137,34 @@ describe("useWiring", () => {
     });
   });
 
-  it("src then sink on the SAME peer does not connect", () => {
+  it("src to sink on the SAME peer does not connect", () => {
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
-      result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
-    });
-
-    expect(result.current.arm).not.toBeNull();
-
-    act(() => {
-      result.current.onPortActivate("peer-a:sink:spk-1", "sink", "peer-a", "spk-1");
+      result.current.onPortConnect(src("peer-a", "sys-1"), sink("peer-a", "spk-1"));
     });
 
     expect(mutateSpy).not.toHaveBeenCalled();
   });
 
-  it("no session: clicking a port does nothing (no hint, no arm)", () => {
+  it("two src ports do not connect", () => {
+    const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
+
+    act(() => {
+      result.current.onPortConnect(src("peer-a", "sys-1"), src("peer-b", "mic-9"));
+    });
+
+    expect(mutateSpy).not.toHaveBeenCalled();
+  });
+
+  it("no session: dragging a connection does nothing", () => {
     mockedUseSnapshot.mockReturnValue({ data: [] });
     const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
 
     act(() => {
-      result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
+      result.current.onPortConnect(src("peer-a", "sys-1"), sink("peer-b", "spk-1"));
     });
 
-    expect(result.current.arm).toBeNull();
     expect(mutateSpy).not.toHaveBeenCalled();
   });
-
-  it("Escape key clears arm", () => {
-    const { result } = renderHook(() => useWiring(), { wrapper: makeWrapper() });
-
-    act(() => {
-      result.current.onPortActivate("peer-a:src:sys-1", "src", "peer-a", "sys-1");
-    });
-
-    expect(result.current.arm).not.toBeNull();
-
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    });
-
-    expect(result.current.arm).toBeNull();
-  });
-
 });

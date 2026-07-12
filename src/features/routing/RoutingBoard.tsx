@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import { variants } from "@/lib/motion";
 import { PortRegistryProvider } from "./usePortRegistry";
 import { MachinePanel, panelCardClass } from "./MachinePanel";
 import { WireLayer } from "./WireLayer";
 import { ChannelDock } from "./ChannelDock";
 import { ConnectModal } from "@/features/connect/ConnectModal";
 import { useWiring } from "./useWiring";
+import { useDragConnect } from "./useDragConnect";
 import { useTrayHealth } from "./useTrayHealth";
 import { streamColor } from "./useWireGeometry";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -18,21 +21,24 @@ import { useUiStore } from "@/stores/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StreamSnapshot, DeviceDescriptor } from "@/bindings";
 
-function useRemoteName(remotePeerId: string | undefined): string {
+function useRemoteName(
+  remotePeerId: string | undefined,
+  sessionName: string | undefined,
+): string {
   const { data: peers } = usePeers();
   const knownNames = useUiStore((s) => s.knownNames);
   const rememberNames = useUiStore((s) => s.rememberNames);
   const match = remotePeerId
     ? peers?.find((p) => p.peer_id === remotePeerId)
     : undefined;
-  const matchName = match?.peer_name;
+  const resolvedName = sessionName || match?.peer_name;
 
   useEffect(() => {
-    if (remotePeerId && matchName) rememberNames({ [remotePeerId]: matchName });
-  }, [remotePeerId, matchName, rememberNames]);
+    if (remotePeerId && resolvedName) rememberNames({ [remotePeerId]: resolvedName });
+  }, [remotePeerId, resolvedName, rememberNames]);
 
   if (!remotePeerId) return "Remoto";
-  if (matchName) return matchName;
+  if (resolvedName) return resolvedName;
   if (knownNames[remotePeerId]) return knownNames[remotePeerId];
   return remotePeerId.slice(0, 8);
 }
@@ -109,6 +115,14 @@ function buildPortColorMap(streams: StreamSnapshot[]): Map<string, string> {
 }
 
 export function RoutingBoard() {
+  return (
+    <PortRegistryProvider>
+      <RoutingBoardContent />
+    </PortRegistryProvider>
+  );
+}
+
+function RoutingBoardContent() {
   const boardRef = useRef<HTMLDivElement | null>(null);
 
   const { data: identity } = useIdentity();
@@ -119,7 +133,6 @@ export function RoutingBoard() {
 
   const selectedStreamId = useUiStore((s) => s.selectedStreamId);
   const selectStream = useUiStore((s) => s.selectStream);
-  const clearArm = useUiStore((s) => s.clearArm);
 
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -142,7 +155,7 @@ export function RoutingBoard() {
     [devices],
   );
 
-  const remoteName = useRemoteName(remotePeerId);
+  const remoteName = useRemoteName(remotePeerId, session?.remote_peer_name);
 
   const { remoteSources, remoteSinks } = useMemo(
     () =>
@@ -160,7 +173,8 @@ export function RoutingBoard() {
     [portColorMap],
   );
 
-  const { onPortActivate } = useWiring();
+  const { onPortConnect } = useWiring();
+  const { drag, startDrag } = useDragConnect({ boardRef, onConnect: onPortConnect });
 
   useTrayHealth(snapshots);
 
@@ -183,15 +197,12 @@ export function RoutingBoard() {
   }
 
   return (
-    <PortRegistryProvider>
+    <>
       <div className="flex flex-col h-full">
         <div
           ref={boardRef}
           onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              selectStream(null);
-              clearArm();
-            }
+            if (e.target === e.currentTarget) selectStream(null);
           }}
           className="relative flex flex-1 items-center justify-center gap-[120px] bg-board"
           style={{
@@ -199,42 +210,51 @@ export function RoutingBoard() {
               "repeating-linear-gradient(to right, transparent, transparent 39px, var(--grid-line) 39px, var(--grid-line) 40px)",
           }}
         >
-          <MachinePanel
-            peerId={selfPeerId}
-            name={selfName}
-            side="left"
-            isSelf
-            connected
-            sinks={selfSinks}
-            sources={selfSources}
-            wiredPortIds={wiredPortIds}
-            portColor={portColor}
-            onPortActivate={onPortActivate}
-          />
+          <motion.div variants={variants.fade} initial="hidden" animate="show">
+            <MachinePanel
+              peerId={selfPeerId}
+              name={selfName}
+              side="left"
+              isSelf
+              connected
+              sinks={selfSinks}
+              sources={selfSources}
+              wiredPortIds={wiredPortIds}
+              portColor={portColor}
+              onDragStart={startDrag}
+              dragFrom={drag.from}
+              dragActive={drag.active}
+            />
+          </motion.div>
 
-          <MachinePanel
-            peerId={remotePeerId ?? "remote"}
-            name={remoteName}
-            side="right"
-            connected={connected}
-            sinks={remoteSinks}
-            sources={remoteSources}
-            wiredPortIds={wiredPortIds}
-            portColor={portColor}
-            onPortActivate={onPortActivate}
-            onConnectClick={() => setModalOpen(true)}
-            onDisconnect={
-              session
-                ? () => disconnect.mutate({ sessionId: session.id })
-                : undefined
-            }
-          />
+          <motion.div variants={variants.fade} initial="hidden" animate="show">
+            <MachinePanel
+              peerId={remotePeerId ?? "remote"}
+              name={remoteName}
+              side="right"
+              connected={connected}
+              sinks={remoteSinks}
+              sources={remoteSources}
+              wiredPortIds={wiredPortIds}
+              portColor={portColor}
+              onDragStart={startDrag}
+              dragFrom={drag.from}
+              dragActive={drag.active}
+              onConnectClick={() => setModalOpen(true)}
+              onDisconnect={
+                session
+                  ? () => disconnect.mutate({ sessionId: session.id })
+                  : undefined
+              }
+            />
+          </motion.div>
 
           <WireLayer
             boardRef={boardRef}
             streams={streams}
             selectedId={selectedStreamId}
             onSelect={selectStream}
+            drag={drag}
           />
         </div>
 
@@ -242,6 +262,6 @@ export function RoutingBoard() {
       </div>
 
       <ConnectModal open={modalOpen} onOpenChange={setModalOpen} />
-    </PortRegistryProvider>
+    </>
   );
 }

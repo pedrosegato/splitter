@@ -66,7 +66,13 @@ pub fn start(poll: std::time::Duration) -> DeviceWatcherHandle {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            let curr = enumerate_device_ids();
+            let curr = match tokio::task::spawn_blocking(enumerate_device_ids).await {
+                Ok(ids) => ids,
+                Err(e) => {
+                    tracing::warn!("device enumeration task failed: {e}");
+                    continue;
+                }
+            };
             let mut prev = snap_clone.lock().await;
             for ev in diff_snapshots(&prev, &curr) {
                 let _ = tx_clone.send(ev);

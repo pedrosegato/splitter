@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Dialog,
   DialogContent,
@@ -6,7 +7,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { usePermissions, useRequestPermission } from "@/hooks/usePermissions";
+import { variants } from "@/lib/motion";
 import type { PermStatus } from "@/bindings";
 import { useOnboarding } from "./useOnboarding";
 
@@ -17,18 +20,22 @@ function StepIndicator({ current }: { current: Step }) {
   const idx = STEPS.indexOf(current);
   return (
     <div className="flex gap-1.5 justify-center">
-      {STEPS.map((s, i) => (
-        <span
-          key={s}
-          className={`inline-block h-[3px] rounded-full transition-all ${
-            i === idx
-              ? "w-5 bg-gold"
-              : i < idx
-                ? "w-3 bg-gold/40"
-                : "w-3 bg-surface-2"
-          }`}
-        />
-      ))}
+      {STEPS.map((s, i) =>
+        i === idx ? (
+          <motion.span
+            key={s}
+            layoutId="wizard-dot"
+            className="inline-block h-[3px] w-5 rounded-full bg-gold"
+          />
+        ) : (
+          <span
+            key={s}
+            className={`inline-block h-[3px] rounded-full transition-all ${
+              i < idx ? "w-3 bg-gold/40" : "w-3 bg-surface-2"
+            }`}
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -58,11 +65,12 @@ function PermissionRow({
   };
 
   return (
-    <div className="flex items-center justify-between py-[7px] px-[11px] rounded-[2px] bg-elev-2">
+    <div className="flex items-center justify-between py-[7px] px-[11px] bg-elev-2">
       <div className="flex flex-col gap-0.5">
         <span className="text-[12.5px] text-ink">{label}</span>
-        <span
-          className={`font-mono text-[10px] ${
+        <Badge
+          variant="secondary"
+          className={`text-[10px] ${
             status === "granted"
               ? "text-green"
               : status === "denied"
@@ -71,17 +79,17 @@ function PermissionRow({
           }`}
         >
           {statusLabel[status]}
-        </span>
+        </Badge>
       </div>
       {needsRequest && (
-        <button
-          type="button"
+        <Button
+          size="sm"
           onClick={() => request.mutate(kind)}
           disabled={request.isPending}
-          className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-[11px]"
         >
           Permitir
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -130,13 +138,14 @@ function PermissionsStep({ onSkip }: { onSkip: () => void }) {
         <PermissionRow label="Áudio do sistema" status={screen} kind="screen" />
       )}
       <div className="flex justify-end mt-1">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onSkip}
-          className="font-mono text-[11px] text-ink-3 hover:text-ink-2 cursor-pointer"
+          className="text-[11px] text-ink-3 hover:text-ink-2"
         >
           Pular
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -159,7 +168,7 @@ function ReadyStep({ onComplete }: { onComplete: () => void }) {
       <p className="text-[13px] text-ink">Splitter está pronto para uso.</p>
       <Button
         onClick={onComplete}
-        className="font-mono text-[11px] bg-gold text-[#1c1c1f] hover:bg-gold/90 rounded-[2px] px-5 h-8"
+        className="text-[11px] bg-gold text-[#1c1c1f] hover:bg-gold/90 px-5 h-8"
       >
         Concluir
       </Button>
@@ -171,6 +180,7 @@ export function OnboardingWizard() {
   const onboarded = useOnboarding((s) => s.onboarded);
   const complete = useOnboarding((s) => s.complete);
   const [step, setStep] = useState<Step>("welcome");
+  const [direction, setDirection] = useState<1 | -1>(1);
   const { data: permissions } = usePermissions();
 
   if (onboarded) return null;
@@ -178,10 +188,12 @@ export function OnboardingWizard() {
   const idx = STEPS.indexOf(step);
 
   function next() {
+    setDirection(1);
     setStep(STEPS[idx + 1]);
   }
 
   function back() {
+    setDirection(-1);
     setStep(STEPS[idx - 1]);
   }
 
@@ -203,19 +215,30 @@ export function OnboardingWizard() {
         onInteractOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
         aria-describedby={undefined}
-        className="w-[400px] max-w-[400px] bg-surface border-line rounded-[3px] gap-0 p-0"
+        className="w-[400px] max-w-[400px] bg-surface border-line gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-[3px]">
-          <DialogTitle className="font-mono text-[9.5px] tracking-[0.5px] text-ink-3 font-semibold uppercase">
+        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg">
+          <DialogTitle className="text-[11px] text-ink-3 font-medium">
             {stepTitles[step]}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="px-[15px] py-[14px] min-h-[140px]">
-          {step === "welcome" && <WelcomeStep />}
-          {step === "permissions" && <PermissionsStep onSkip={next} />}
-          {step === "firewall" && <FirewallStep />}
-          {step === "ready" && <ReadyStep onComplete={complete} />}
+        <div className="px-[15px] py-[14px] min-h-[140px] overflow-hidden">
+          <AnimatePresence mode="wait" custom={direction}>
+            <motion.div
+              key={step}
+              custom={direction}
+              variants={variants.slide(direction)}
+              initial="enter"
+              animate="center"
+              exit="exit"
+            >
+              {step === "welcome" && <WelcomeStep />}
+              {step === "permissions" && <PermissionsStep onSkip={next} />}
+              {step === "firewall" && <FirewallStep />}
+              {step === "ready" && <ReadyStep onComplete={complete} />}
+            </motion.div>
+          </AnimatePresence>
         </div>
 
         <div className="px-[13px] py-[9px] border-t border-line flex items-center justify-between gap-2">
@@ -223,23 +246,24 @@ export function OnboardingWizard() {
 
           <div className="flex gap-2">
             {idx > 0 && step !== "ready" && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={back}
-                className="font-mono text-[11px] text-ink-2 bg-elev-2 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:text-ink hover:border-line"
+                className="text-[11px]"
               >
                 Voltar
-              </button>
+              </Button>
             )}
             {step !== "ready" && (
-              <button
-                type="button"
+              <Button
+                size="sm"
                 onClick={next}
                 disabled={step === "permissions" && !canAdvancePermissions}
-                className="font-mono text-[11px] text-ink bg-elev-1 border border-line-2 rounded-[2px] px-3 py-[5px] cursor-pointer hover:border-line disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[11px]"
               >
                 Próximo
-              </button>
+              </Button>
             )}
           </div>
         </div>

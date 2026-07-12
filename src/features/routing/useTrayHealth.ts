@@ -7,7 +7,7 @@ type TrayState = "idle" | "active" | "degraded" | "error";
 
 function deriveTrayState(
   snapshots: SessionSnapshot[] | undefined,
-  latestStats: ReturnType<typeof useUiStore.getState>["stats"],
+  hasDegraded: boolean,
 ): TrayState {
   const sessions = snapshots ?? [];
   if (sessions.length === 0) return "idle";
@@ -18,17 +18,16 @@ function deriveTrayState(
   const hasError = streams.some((s) => s.state === "error");
   if (hasError) return "error";
 
-  const hasDegraded = latestStats.some((stat) => stat.loss_pct > 5);
   if (hasDegraded) return "degraded";
 
   return "active";
 }
 
 export function useTrayHealth(snapshots: SessionSnapshot[] | undefined): void {
-  const stats = useUiStore((s) => s.stats);
+  const hasDegraded = useUiStore((s) => s.stats.some((stat) => stat.loss_pct > 5));
   const prevStateRef = useRef<TrayState | null>(null);
 
-  const derived = deriveTrayState(snapshots, stats);
+  const derived = deriveTrayState(snapshots, hasDegraded);
 
   useEffect(() => {
     if (derived === prevStateRef.current) return;

@@ -32,7 +32,8 @@ pub(crate) fn spawn_control_plane_loop(
     conn_tx: ConnTx,
     events: tokio::sync::broadcast::Receiver<PeerEvent>,
     peer_id: Uuid,
-) {
+    connection_id: Option<Uuid>,
+) -> tokio::task::AbortHandle {
     let deps = make_deps(&ctx);
     spawn_control_plane(
         deps,
@@ -40,7 +41,8 @@ pub(crate) fn spawn_control_plane_loop(
         conn_tx,
         events,
         Arc::new(CliControlPlane { ctx }),
-    );
+        connection_id,
+    )
 }
 
 #[async_trait::async_trait]
@@ -171,13 +173,15 @@ impl ReconnectDriver for CliControlPlane {
 
 #[async_trait::async_trait]
 impl ControlPlaneHost for CliControlPlane {
-    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) {
+    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) -> tokio::task::AbortHandle {
+        let connection_id = endpoints.connection_id;
         spawn_control_plane_loop(
             self.ctx.clone(),
             endpoints.tx,
             endpoints.events.subscribe(),
             peer_id,
-        );
+            Some(connection_id),
+        )
     }
 
     async fn on_peer_connected(&self, peer_id: Uuid) {
@@ -209,7 +213,7 @@ mod tests {
     ) {
         let (tx, rx) = broadcast::channel(16);
         let (conn_tx, conn_rx) = mpsc::channel(16);
-        spawn_control_plane_loop(ctx, conn_tx, rx, peer);
+        spawn_control_plane_loop(ctx, conn_tx, rx, peer, None);
         (tx, conn_rx)
     }
 
@@ -304,12 +308,13 @@ mod tests {
         let snap = await_sessions(&ctx, |s| {
             s.iter()
                 .any(|x| x.id == SessionId(new_sid) && x.state == SessionState::Active)
-                && s.iter()
-                    .find(|x| x.id == existing)
-                    .map(|x| x.state == SessionState::Closed)
-                    .unwrap_or(false)
+                && !s.iter().any(|x| x.id == existing)
         })
         .await;
+        assert!(
+            !snap.iter().any(|x| x.id == existing),
+            "the stale session must be evicted from the manager, not merely marked Closed"
+        );
         let active: Vec<_> = snap
             .iter()
             .filter(|x| x.state == SessionState::Active)
@@ -393,16 +398,10 @@ mod tests {
         }))
         .unwrap();
 
-        let snap = await_sessions(&ctx, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|s| s.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&ctx, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|s| s.id == sid),
+            "a remote session-close must evict the session from the manager, not leave it Closed"
         );
     }
 
@@ -422,16 +421,17 @@ mod tests {
         .unwrap();
 
         let snap = await_sessions(&ctx, |s| {
-            s.iter()
-                .find(|x| x.id == a)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
+            !s.iter().any(|x| x.id == a)
+                && !s.iter().any(|x| x.id == b)
+                && s.iter().any(|x| x.id == untouched)
         })
         .await;
-        let state_of = |id: SessionId| snap.iter().find(|s| s.id == id).unwrap().state;
-        assert_eq!(state_of(a), SessionState::Closed);
-        assert_eq!(state_of(b), SessionState::Closed);
-        assert_eq!(state_of(untouched), SessionState::Active);
+        assert!(
+            !snap.iter().any(|s| s.id == a) && !snap.iter().any(|s| s.id == b),
+            "both of the disconnected peer's sessions must be evicted, not merely Closed"
+        );
+        let untouched_state = snap.iter().find(|s| s.id == untouched).unwrap().state;
+        assert_eq!(untouched_state, SessionState::Active);
     }
 
     #[tokio::test]
@@ -446,16 +446,10 @@ mod tests {
         })
         .unwrap();
 
-        let snap = await_sessions(&ctx, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|s| s.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&ctx, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|s| s.id == sid),
+            "a remote disconnect must evict the peer's session from the manager, not leave it Closed"
         );
     }
 }

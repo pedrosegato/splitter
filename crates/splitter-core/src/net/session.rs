@@ -52,6 +52,7 @@ pub struct Session {
     pub id: SessionId,
     pub local_peer_id: Uuid,
     pub remote_peer_id: Uuid,
+    owner_connection: Option<Uuid>,
     state: SessionState,
     streams: HashMap<StreamId, Stream>,
     stream_id_counter: u8,
@@ -63,6 +64,7 @@ impl Session {
             id: SessionId::new(),
             local_peer_id: local,
             remote_peer_id: remote,
+            owner_connection: None,
             state: SessionState::PendingOutgoing,
             streams: HashMap::new(),
             stream_id_counter: 0,
@@ -74,10 +76,19 @@ impl Session {
             id,
             local_peer_id: local,
             remote_peer_id: remote,
+            owner_connection: None,
             state: SessionState::PendingIncoming,
             streams: HashMap::new(),
             stream_id_counter: 0,
         }
+    }
+
+    pub fn owner_connection(&self) -> Option<Uuid> {
+        self.owner_connection
+    }
+
+    pub fn set_owner_connection(&mut self, connection_id: Uuid) {
+        self.owner_connection = Some(connection_id);
     }
 
     pub fn state(&self) -> SessionState {

@@ -49,6 +49,12 @@ describe("App — settings gear button", () => {
     expect(getByRole("button", { name: "Configurações" })).toBeDefined();
   });
 
+  it("renders both tab triggers", () => {
+    const { getByRole } = render(<App />, { wrapper: makeWrapper() });
+    expect(getByRole("tab", { name: "Roteamento" })).toBeInTheDocument();
+    expect(getByRole("tab", { name: "Estatísticas" })).toBeInTheDocument();
+  });
+
   it("settings dialog is not visible on initial render", () => {
     render(<App />, { wrapper: makeWrapper() });
     expect(document.querySelector('[data-testid="settings-dialog"]')).toBeNull();

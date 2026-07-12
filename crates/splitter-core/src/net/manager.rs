@@ -26,6 +26,7 @@ pub struct StreamSnapshot {
 pub struct SessionSnapshot {
     pub id: SessionId,
     pub remote_peer_id: Uuid,
+    pub remote_peer_name: String,
     pub state: SessionState,
     pub streams: Vec<StreamSnapshot>,
 }
@@ -81,6 +82,7 @@ impl SessionManager {
         id: SessionId,
         local: Uuid,
         remote: Uuid,
+        owner_connection: Option<Uuid>,
     ) -> Result<(), NetError> {
         let mut guard = self.sessions.write().await;
         if guard.contains_key(&id) {
@@ -88,8 +90,36 @@ impl SessionManager {
                 reason: format!("session_id {id} already exists"),
             });
         }
-        guard.insert(id, Session::new_incoming(id, local, remote));
+        let mut session = Session::new_incoming(id, local, remote);
+        if let Some(conn) = owner_connection {
+            session.set_owner_connection(conn);
+        }
+        guard.insert(id, session);
         Ok(())
+    }
+
+    pub async fn set_session_owner(&self, id: &SessionId, connection_id: Uuid) {
+        if let Some(s) = self.sessions.write().await.get_mut(id) {
+            s.set_owner_connection(connection_id);
+        }
+    }
+
+    pub async fn sessions_owned_by_connection(
+        &self,
+        remote_peer_id: Uuid,
+        connection_id: Option<Uuid>,
+    ) -> Vec<SessionId> {
+        self.sessions
+            .read()
+            .await
+            .values()
+            .filter(|s| s.remote_peer_id == remote_peer_id)
+            .filter(|s| match s.owner_connection() {
+                None => true,
+                Some(owner) => Some(owner) == connection_id,
+            })
+            .map(|s| s.id)
+            .collect()
     }
 
     pub async fn accept(&self, id: &SessionId) -> Result<(), NetError> {
@@ -134,6 +164,19 @@ impl SessionManager {
         .await
     }
 
+    pub async fn set_stream_volume(
+        &self,
+        id: &SessionId,
+        stream_id: StreamId,
+        volume: f32,
+    ) -> Result<(), NetError> {
+        self.with_stream_mut(id, stream_id, |st| {
+            st.set_volume(volume);
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn next_stream_id(&self, id: &SessionId) -> Result<StreamId, NetError> {
         self.with_session_mut(id, |s| Ok(s.next_stream_id())).await
     }
@@ -153,6 +196,7 @@ impl SessionManager {
             .map(|s| SessionSnapshot {
                 id: s.id,
                 remote_peer_id: s.remote_peer_id,
+                remote_peer_name: String::new(),
                 state: s.state(),
                 streams: s
                     .streams()
@@ -207,6 +251,42 @@ mod tests {
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].id, id);
         assert_eq!(snap[0].state, SessionState::PendingOutgoing);
+    }
+
+    #[tokio::test]
+    async fn owner_tagged_session_is_only_owned_by_its_connection() {
+        let mgr = SessionManager::new();
+        let remote = Uuid::new_v4();
+        let owner = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let id = mgr.open_outgoing(Uuid::new_v4(), remote).await;
+        mgr.set_session_owner(&id, owner).await;
+
+        assert_eq!(
+            mgr.sessions_owned_by_connection(remote, Some(owner)).await,
+            vec![id],
+            "the owning connection must own the session"
+        );
+        assert!(
+            mgr.sessions_owned_by_connection(remote, Some(other))
+                .await
+                .is_empty(),
+            "a foreign connection must not own an owner-tagged session"
+        );
+    }
+
+    #[tokio::test]
+    async fn untagged_session_is_owned_by_any_connection() {
+        let mgr = SessionManager::new();
+        let remote = Uuid::new_v4();
+        let id = mgr.open_outgoing(Uuid::new_v4(), remote).await;
+
+        assert_eq!(
+            mgr.sessions_owned_by_connection(remote, Some(Uuid::new_v4()))
+                .await,
+            vec![id],
+            "an untagged session falls back to any connection for backward compatibility"
+        );
     }
 
     #[tokio::test]
@@ -287,6 +367,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn set_stream_volume_updates_snapshot() {
+        let mgr = SessionManager::new();
+        let id = mgr.open_outgoing(Uuid::new_v4(), Uuid::new_v4()).await;
+        mgr.accept(&id).await.unwrap();
+        mgr.add_stream(&id, Stream::new_negotiating(StreamId(0), route(), 5004))
+            .await
+            .unwrap();
+
+        mgr.set_stream_volume(&id, StreamId(0), 0.25).await.unwrap();
+
+        let snap = mgr.snapshot().await;
+        assert!((snap[0].streams[0].volume - 0.25).abs() < 1e-6);
+    }
+
+    #[tokio::test]
     async fn set_stream_muted_unknown_session_errors() {
         let mgr = SessionManager::new();
         let fake = SessionId::new();
@@ -330,8 +425,13 @@ mod tests {
         let id = SessionId::new();
         let local = Uuid::new_v4();
         let remote = Uuid::new_v4();
-        mgr.register_incoming(id, local, remote).await.unwrap();
-        let err = mgr.register_incoming(id, local, remote).await.unwrap_err();
+        mgr.register_incoming(id, local, remote, None)
+            .await
+            .unwrap();
+        let err = mgr
+            .register_incoming(id, local, remote, None)
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, NetError::SignalingProtocol { .. }),
             "duplicate session_id is a genuine protocol violation: {err}"

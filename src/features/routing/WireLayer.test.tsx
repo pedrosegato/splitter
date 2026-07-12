@@ -1,6 +1,7 @@
-import { render, act, fireEvent } from "@testing-library/react";
+import { render, act, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useRef } from "react";
+import { motionValue } from "motion/react";
 import { WireLayer } from "./WireLayer";
 import { PortRegistryProvider, usePortRegistry } from "./usePortRegistry";
 import type { StreamSnapshot } from "@/bindings";
@@ -203,7 +204,7 @@ describe("WireLayer", () => {
     );
 
     expect(visibleWire).toBeDefined();
-    expect(visibleWire!.style.stroke).toBe("var(--color-s0)");
+    expect(visibleWire!.getAttribute("stroke")).toBe("var(--color-s0)");
   });
 
   it("clicking the hit path calls onSelect with the stream id", () => {
@@ -273,7 +274,9 @@ describe("WireLayer", () => {
     );
 
     const flowPath = Array.from(container.querySelectorAll("path")).find(
-      (p) => p.getAttribute("stroke") === "#fff",
+      (p) =>
+        p.getAttribute("stroke") === "#fff" &&
+        p.getAttribute("stroke-dasharray") === "1 10",
     );
     expect(flowPath).toBeDefined();
   });
@@ -295,7 +298,9 @@ describe("WireLayer", () => {
     );
 
     const flowPath = Array.from(container.querySelectorAll("path")).find(
-      (p) => p.getAttribute("stroke") === "#fff",
+      (p) =>
+        p.getAttribute("stroke") === "#fff" &&
+        p.getAttribute("stroke-dasharray") === "1 10",
     );
     expect(flowPath).toBeUndefined();
   });
@@ -323,5 +328,73 @@ describe("WireLayer", () => {
         p.getAttribute("stroke-width") === "4",
     );
     expect(selected).toBeDefined();
+  });
+
+  it("renders no live-drag path when no drag prop is passed", async () => {
+    const srcEl = makePortEl(100, 200);
+    const sinkEl = makePortEl(700, 200);
+
+    const { container } = render(
+      <Wrapper
+        streams={[makeStream(1)]}
+        selectedId={null}
+        onSelect={vi.fn()}
+        registryEntries={[
+          { id: "peer-a:src:dev-1", el: srcEl },
+          { id: "peer-b:sink:dev-2", el: sinkEl },
+        ]}
+      />,
+    );
+
+    await waitFor(() => {
+      const goldPaths = Array.from(container.querySelectorAll("path")).filter(
+        (p) => p.getAttribute("stroke") === "var(--color-gold)",
+      );
+      expect(goldPaths).toHaveLength(0);
+    });
+
+    const visibleWires = Array.from(container.querySelectorAll("path")).filter(
+      (p) =>
+        p.getAttribute("stroke") !== "transparent" &&
+        p.getAttribute("stroke-width") === "2.8",
+    );
+    expect(visibleWires).toHaveLength(1);
+  });
+
+  it("renders no live-drag path when drag is inactive", async () => {
+    const srcEl = makePortEl(100, 200);
+    const sinkEl = makePortEl(700, 200);
+
+    const inactiveDrag = {
+      active: false,
+      from: null,
+      x: motionValue(0),
+      y: motionValue(0),
+    };
+
+    const { container } = render(
+      <PortRegistryProvider>
+        <RegistrySeeder
+          entries={[
+            { id: "peer-a:src:dev-1", el: srcEl },
+            { id: "peer-b:sink:dev-2", el: sinkEl },
+          ]}
+        />
+        <WireLayer
+          boardRef={{ current: makeBoardEl() }}
+          streams={[makeStream(1)]}
+          selectedId={null}
+          onSelect={vi.fn()}
+          drag={inactiveDrag}
+        />
+      </PortRegistryProvider>,
+    );
+
+    await waitFor(() => {
+      const goldPaths = Array.from(container.querySelectorAll("path")).filter(
+        (p) => p.getAttribute("stroke") === "var(--color-gold)",
+      );
+      expect(goldPaths).toHaveLength(0);
+    });
   });
 });

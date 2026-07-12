@@ -17,6 +17,7 @@ pub struct ConnEndpoints {
     pub tx: mpsc::Sender<SignalingMessage>,
     pub remote_addr: SocketAddr,
     pub events: broadcast::Sender<PeerEvent>,
+    pub connection_id: Uuid,
 }
 
 pub async fn find_conn(
@@ -31,6 +32,7 @@ pub async fn find_conn(
                 tx: c.tx.clone(),
                 remote_addr: c.remote_addr,
                 events: c.events.clone(),
+                connection_id: c.connection_id,
             });
         }
     }
@@ -41,6 +43,7 @@ pub async fn find_conn(
                 tx: c.tx.clone(),
                 remote_addr: c.remote_addr,
                 events: c.events.clone(),
+                connection_id: c.connection_id,
             });
         }
     }
@@ -212,7 +215,9 @@ mod tests {
                 tx,
                 events,
                 remote_addr: addr,
+                connection_id: Uuid::new_v4(),
                 abort: tokio::spawn(async {}).abort_handle(),
+                abort_on_drop: std::sync::atomic::AtomicBool::new(true),
             },
             rx,
         )

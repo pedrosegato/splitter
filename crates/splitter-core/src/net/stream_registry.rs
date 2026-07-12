@@ -15,10 +15,11 @@ pub struct StreamRuntimeSummary {
     pub bound_device_id: Option<String>,
 }
 
+pub type StatsBaseline = HashMap<(SessionId, StreamId), StreamStatsSnapshot>;
+
 #[derive(Debug, Default)]
 pub struct StreamRegistry {
     pub(crate) inner: RwLock<HashMap<(SessionId, StreamId), StreamRuntime>>,
-    prev_snapshots: RwLock<HashMap<(SessionId, StreamId), StreamStatsSnapshot>>,
 }
 
 impl StreamRegistry {
@@ -108,9 +109,9 @@ impl StreamRegistry {
     pub async fn snapshot_stats(
         &self,
         window_ms: u32,
+        prev: &mut StatsBaseline,
     ) -> Vec<(SessionId, StreamId, StreamStatsSnapshot)> {
         let guard = self.inner.read().await;
-        let mut prev = self.prev_snapshots.write().await;
         let mut out = Vec::with_capacity(guard.len());
         for (&key, rt) in guard.iter() {
             let last = prev.get(&key).cloned().unwrap_or_default();
@@ -191,22 +192,23 @@ mod registry_tests {
         let rt = fake_runtime(sid, StreamId(7));
         rt.stats.packets_sent.store(123, Ordering::Relaxed);
         reg.register(rt).await.unwrap();
-        let snap = reg.snapshot_stats(1_000).await;
+        let mut baseline = StatsBaseline::default();
+        let snap = reg.snapshot_stats(1_000, &mut baseline).await;
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].2.packets_sent, 123);
     }
 
     #[tokio::test]
-    async fn current_stats_does_not_mutate_prev_snapshots() {
+    async fn baseline_advances_only_through_its_own_snapshot_calls() {
         let reg = StreamRegistry::new();
         let sid = SessionId::new();
         let rt = fake_runtime(sid, StreamId(3));
         rt.stats.bytes_sent.store(8_000, Ordering::Relaxed);
         reg.register(rt).await.unwrap();
 
-        let before = reg.snapshot_stats(1_000).await;
+        let mut baseline = StatsBaseline::default();
+        let before = reg.snapshot_stats(1_000, &mut baseline).await;
         assert_eq!(before.len(), 1);
-        let bitrate_after_first_snapshot = before[0].2.bitrate_kbps_sent;
 
         reg.inner
             .read()
@@ -221,15 +223,51 @@ mod registry_tests {
         let _ = reg.current_stats().await;
         let _ = reg.current_stats().await;
 
-        let after = reg.snapshot_stats(1_000).await;
+        let after = reg.snapshot_stats(1_000, &mut baseline).await;
         assert_eq!(after.len(), 1);
-        let bitrate_after_current_stats = after[0].2.bitrate_kbps_sent;
 
         assert_eq!(
-            bitrate_after_current_stats,
+            after[0].2.bitrate_kbps_sent,
             ((16_000u64 - 8_000) * 8 / 1_000) as u32,
-            "current_stats must not have advanced prev_snapshots: expected delta from first snapshot baseline, not from current_stats call"
+            "the delta must be measured from this baseline's previous snapshot, unaffected by current_stats"
         );
-        let _ = bitrate_after_first_snapshot;
+    }
+
+    #[tokio::test]
+    async fn independent_baselines_do_not_starve_each_other() {
+        let reg = StreamRegistry::new();
+        let sid = SessionId::new();
+        let rt = fake_runtime(sid, StreamId(5));
+        rt.stats.bytes_sent.store(8_000, Ordering::Relaxed);
+        reg.register(rt).await.unwrap();
+
+        let mut consumer_a = StatsBaseline::default();
+        let mut consumer_b = StatsBaseline::default();
+
+        let _ = reg.snapshot_stats(1_000, &mut consumer_a).await;
+
+        reg.inner
+            .read()
+            .await
+            .values()
+            .next()
+            .unwrap()
+            .stats
+            .bytes_sent
+            .store(16_000, Ordering::Relaxed);
+
+        let a = reg.snapshot_stats(1_000, &mut consumer_a).await;
+        let b = reg.snapshot_stats(1_000, &mut consumer_b).await;
+
+        assert_eq!(
+            a[0].2.bitrate_kbps_sent,
+            ((16_000u64 - 8_000) * 8 / 1_000) as u32,
+            "consumer A sees the delta since its own last snapshot"
+        );
+        assert_eq!(
+            b[0].2.bitrate_kbps_sent,
+            (16_000u64 * 8 / 1_000) as u32,
+            "consumer B, with its own fresh baseline, is not starved to near-zero by consumer A's snapshot"
+        );
     }
 }

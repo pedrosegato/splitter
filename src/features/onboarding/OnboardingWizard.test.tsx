@@ -1,4 +1,4 @@
-import { render, fireEvent, within } from "@testing-library/react";
+import { render, fireEvent, within, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OnboardingWizard } from "./OnboardingWizard";
@@ -48,7 +48,7 @@ describe("OnboardingWizard", () => {
     expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeNull();
   });
 
-  it("advances through all steps and calls complete on Concluir", () => {
+  it("advances through all steps and calls complete on Concluir", async () => {
     render(<OnboardingWizard />, { wrapper: makeWrapper() });
 
     const body = document.body;
@@ -64,7 +64,24 @@ describe("OnboardingWizard", () => {
     fireEvent.click(within(body).getByRole("button", { name: "Próximo" }));
     expect(within(body).getByText("Pronto")).toBeTruthy();
 
+    await waitFor(() =>
+      expect(within(body).getByRole("button", { name: "Concluir" })).toBeTruthy(),
+    );
     fireEvent.click(within(body).getByRole("button", { name: "Concluir" }));
     expect(mockComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the current step content after navigating forward and back", async () => {
+    render(<OnboardingWizard />, { wrapper: makeWrapper() });
+
+    const body = document.body;
+
+    fireEvent.click(within(body).getByRole("button", { name: "Próximo" }));
+    expect(within(body).getByText("Permissões")).toBeTruthy();
+
+    fireEvent.click(within(body).getByRole("button", { name: "Voltar" }));
+    await waitFor(() =>
+      expect(within(body).getByText("Bem-vindo ao Splitter")).toBeTruthy(),
+    );
   });
 });

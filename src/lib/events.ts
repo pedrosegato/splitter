@@ -24,6 +24,10 @@ export async function mountEventBridge(qc: QueryClient): Promise<() => void> {
       qc.invalidateQueries({ queryKey: ["snapshot"] });
       qc.invalidateQueries({ queryKey: ["peerDevices"] });
     }),
+    events.devicesChanged.listen(() => {
+      qc.invalidateQueries({ queryKey: ["devices"] });
+      qc.invalidateQueries({ queryKey: ["peerDevices"] });
+    }),
   ]);
   return () => unlisten.forEach((u) => u());
 }

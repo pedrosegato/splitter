@@ -6,7 +6,6 @@ beforeEach(() => {
   useUiStore.setState({
     activeTab: "routing",
     selectedStreamId: null,
-    arm: null,
     stats: [],
     statsHistory: {},
   });
@@ -17,7 +16,6 @@ describe("useUiStore", () => {
     const s = useUiStore.getState();
     expect(s.activeTab).toBe("routing");
     expect(s.selectedStreamId).toBeNull();
-    expect(s.arm).toBeNull();
     expect(s.stats).toEqual([]);
     expect(s.statsHistory).toEqual({});
   });
@@ -42,18 +40,6 @@ describe("useUiStore", () => {
     useUiStore.getState().selectStream(7);
     useUiStore.getState().selectStream(null);
     expect(useUiStore.getState().selectedStreamId).toBeNull();
-  });
-
-  it("armSource sets arm and clearArm removes it", () => {
-    useUiStore.getState().armSource("peer-1", "device-abc", "src");
-    expect(useUiStore.getState().arm).toEqual({
-      peerId: "peer-1",
-      deviceId: "device-abc",
-      kind: "src",
-    });
-
-    useUiStore.getState().clearArm();
-    expect(useUiStore.getState().arm).toBeNull();
   });
 
   it("pushStats updates stats and statsHistory", () => {

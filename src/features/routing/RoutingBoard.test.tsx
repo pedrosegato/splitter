@@ -60,6 +60,7 @@ const STREAM: StreamSnapshot = {
 const SESSION: SessionSnapshot = {
   id: "sess-1",
   remote_peer_id: "peer-remote",
+  remote_peer_name: "",
   state: "active",
   streams: [STREAM],
 };
@@ -91,7 +92,9 @@ beforeEach(() => {
   mockedUsePeers.mockReturnValue({ data: PEERS });
   mockedUsePendingPeers.mockReturnValue({ data: [] });
   mockedUseDisconnect.mockReturnValue({ mutate: vi.fn() });
-  mockedUseWiring.mockReturnValue({ onPortActivate: vi.fn(), hint: null, arm: null });
+  mockedUseWiring.mockReturnValue({
+    onPortConnect: vi.fn(),
+  });
 });
 
 import { RoutingBoard } from "./RoutingBoard";
@@ -100,10 +103,10 @@ describe("RoutingBoard — with session", () => {
   it("left panel shows self device names under DESTINOS and FONTES", () => {
     const { getByText, getAllByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
 
-    const destinosLabels = getAllByText("DESTINOS");
+    const destinosLabels = getAllByText("Destinos");
     expect(destinosLabels.length).toBeGreaterThanOrEqual(1);
 
-    const fontesLabels = getAllByText("FONTES");
+    const fontesLabels = getAllByText("Fontes");
     expect(fontesLabels.length).toBeGreaterThanOrEqual(1);
 
     expect(getByText("Alto-falantes")).toBeDefined();
@@ -121,9 +124,20 @@ describe("RoutingBoard — with session", () => {
     expect(getByText("Studio PC")).toBeDefined();
   });
 
+  it("uses the session's remote_peer_name even when the peer is not discovered", () => {
+    mockedUsePeers.mockReturnValue({ data: [] });
+    mockedUseSnapshot.mockReturnValue({
+      data: [{ ...SESSION, remote_peer_name: "Windows Studio" }],
+    });
+    const { getByText, queryByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
+    expect(getByText("Windows Studio")).toBeDefined();
+    expect(queryByText("peer-rem")).toBeNull();
+  });
+
   it("ChannelDock renders 1 channel strip for the session stream", () => {
-    const { getByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
-    expect(getByText("remote-mic → spk-1")).toBeDefined();
+    const { getAllByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
+    expect(getAllByText("remote-mic").length).toBeGreaterThan(0);
+    expect(getAllByText("spk-1").length).toBeGreaterThan(0);
   });
 
   it("WireLayer SVG is present in the DOM", () => {
@@ -136,6 +150,13 @@ describe("RoutingBoard — with session", () => {
     const { getByText, queryByText } = render(<RoutingBoard />, { wrapper: makeWrapper() });
     expect(getByText("Este Mac")).toBeDefined();
     expect(queryByText("ESTE PC")).toBeNull();
+  });
+
+  it("renders ports with data-port-id for drag targeting", () => {
+    const { container } = render(<RoutingBoard />, { wrapper: makeWrapper() });
+    const ports = container.querySelectorAll("[data-port-id]");
+    expect(ports.length).toBeGreaterThan(0);
+    expect(ports[0].getAttribute("data-port-id")).toMatch(/^.+:(src|sink):.+$/);
   });
 });
 

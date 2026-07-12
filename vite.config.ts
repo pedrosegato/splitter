@@ -16,6 +16,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    setupFiles: ["src/test/setup.ts"],
     alias: {
       "@tauri-apps/api/core": path.resolve(__dirname, "src/__mocks__/tauri-core.ts"),
       "@tauri-apps/api/event": path.resolve(__dirname, "src/__mocks__/tauri-event.ts"),

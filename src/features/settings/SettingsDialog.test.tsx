@@ -109,7 +109,7 @@ describe("SettingsDialog", () => {
       wrapper: makeWrapper(),
     });
 
-    const btn = within(document.body).getByRole("button", { name: "Escuro" });
+    const btn = within(document.body).getByRole("radio", { name: "Escuro" });
     fireEvent.click(btn);
 
     expect(useThemeStore.getState().theme).toBe("dark");
@@ -121,7 +121,7 @@ describe("SettingsDialog", () => {
       wrapper: makeWrapper(),
     });
 
-    const btn = within(document.body).getByRole("button", { name: "Claro" });
+    const btn = within(document.body).getByRole("radio", { name: "Claro" });
     fireEvent.click(btn);
 
     expect(useThemeStore.getState().theme).toBe("light");

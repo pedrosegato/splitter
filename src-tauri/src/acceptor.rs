@@ -1,7 +1,7 @@
 use crate::core::AppCore;
 use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
 use splitter_core::net::session::SessionId;
-use splitter_core::net::signaling::client_ops::{find_conn_tx, ConnEndpoints};
+use splitter_core::net::signaling::client_ops::{find_conn, ConnEndpoints};
 use splitter_core::net::signaling::{
     spawn_control_plane, spawn_reconnect, ConnectOutcome, ControlPlaneDeps, ControlPlaneHost,
     ControlPlaneObserver, PeerEvent, ReconnectDriver, SourceKind, StreamAction,
@@ -27,6 +27,10 @@ pub struct TauriControlPlane {
     pub core: Arc<AppCore>,
 }
 
+pub(crate) fn should_reconnect(had_active_session: bool, locally_torn_down: bool) -> bool {
+    had_active_session && !locally_torn_down
+}
+
 fn make_deps(core: &Arc<AppCore>) -> Arc<ControlPlaneDeps> {
     Arc::new(ControlPlaneDeps {
         sessions: core.sessions.clone(),
@@ -43,19 +47,21 @@ fn observer(core: &Arc<AppCore>) -> Arc<TauriControlPlane> {
 pub fn spawn_acceptor(
     core: Arc<AppCore>,
     peer_id: Uuid,
+    connection_id: Uuid,
     events: broadcast::Receiver<PeerEvent>,
     _addr: SocketAddr,
 ) {
     let deps = make_deps(&core);
     let obs = observer(&core);
     tokio::spawn(async move {
-        let conn_tx = find_conn_tx(&core.server.connections, &core.outgoing, peer_id)
-            .await
-            .unwrap_or_else(|| {
+        let conn_tx = match find_conn(&core.server.connections, &core.outgoing, peer_id).await {
+            Some(c) => c.tx,
+            None => {
                 let (tx, _rx) = mpsc::channel(1);
                 tx
-            });
-        spawn_control_plane(deps, peer_id, conn_tx, events, obs);
+            }
+        };
+        spawn_control_plane(deps, peer_id, conn_tx, events, obs, Some(connection_id));
     });
 }
 
@@ -191,7 +197,8 @@ impl ControlPlaneObserver for TauriControlPlane {
             peer_id: peer_id.to_string(),
             reason: reason.to_string(),
         });
-        if had_active_session {
+        let locally_torn_down = self.core.local_disconnects.write().await.remove(&peer_id);
+        if should_reconnect(had_active_session, locally_torn_down) {
             spawn_reconnect(peer_id, observer(&self.core));
         }
         // A concurrent reconnect may have re-inserted a live handle under the
@@ -254,8 +261,20 @@ impl ReconnectDriver for TauriControlPlane {
         if let Some(pid) = outcome.remote_peer_id {
             let events = outcome.handle.events.subscribe();
             let reconnect_addr = outcome.handle.remote_addr;
-            self.core.outgoing.write().await.insert(pid, outcome.handle);
-            spawn_acceptor(self.core.clone(), pid, events, reconnect_addr);
+            let connection_id = outcome.handle.connection_id;
+            crate::commands::peers::close_active_sessions_for_peer(&self.core, pid).await;
+            let previous = self.core.outgoing.write().await.insert(pid, outcome.handle);
+            if let Some(old) = previous {
+                old.shutdown();
+            }
+            self.core.local_disconnects.write().await.remove(&pid);
+            spawn_acceptor(
+                self.core.clone(),
+                pid,
+                connection_id,
+                events,
+                reconnect_addr,
+            );
         }
     }
 
@@ -270,14 +289,20 @@ impl ReconnectDriver for TauriControlPlane {
 
 #[async_trait::async_trait]
 impl ControlPlaneHost for TauriControlPlane {
-    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) {
+    fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) -> tokio::task::AbortHandle {
+        let connection_id = endpoints.connection_id;
         spawn_control_plane(
             make_deps(&self.core),
             peer_id,
             endpoints.tx,
             endpoints.events.subscribe(),
             observer(&self.core),
-        );
+            Some(connection_id),
+        )
+    }
+
+    async fn on_peer_connected(&self, peer_id: Uuid) {
+        self.core.local_disconnects.write().await.remove(&peer_id);
     }
 }
 
@@ -303,7 +328,13 @@ mod tests {
 
     fn driven_acceptor(core: Arc<AppCore>, peer: Uuid) -> broadcast::Sender<PeerEvent> {
         let (tx, rx) = broadcast::channel(16);
-        spawn_acceptor(core, peer, rx, "127.0.0.1:9".parse().unwrap());
+        spawn_acceptor(
+            core,
+            peer,
+            Uuid::new_v4(),
+            rx,
+            "127.0.0.1:9".parse().unwrap(),
+        );
         tx
     }
 
@@ -360,6 +391,22 @@ mod tests {
             .await
             .unwrap();
         sid
+    }
+
+    #[test]
+    fn should_reconnect_policy() {
+        assert!(
+            should_reconnect(true, false),
+            "a genuine remote drop with an active session must auto-reconnect"
+        );
+        assert!(
+            !should_reconnect(true, true),
+            "a locally initiated teardown must not auto-reconnect"
+        );
+        assert!(
+            !should_reconnect(false, false),
+            "no active session means nothing to reconnect"
+        );
     }
 
     #[tokio::test]
@@ -486,16 +533,10 @@ mod tests {
         }))
         .unwrap();
 
-        let snap = await_sessions(&core, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|x| x.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&core, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|x| x.id == sid),
+            "a remote session-close must evict the session from the manager, not leave it Closed"
         );
     }
 
@@ -570,6 +611,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inbound_reestablish_clears_local_disconnect_flag() {
+        let core = new_core().await;
+        let peer = Uuid::new_v4();
+        core.local_disconnects.write().await.insert(peer);
+
+        let host = TauriControlPlane { core: core.clone() };
+        host.on_peer_connected(peer).await;
+
+        assert!(
+            !core.local_disconnects.read().await.contains(&peer),
+            "an inbound re-establish must clear the stale local-disconnect flag so a later genuine drop can auto-reconnect"
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_disconnect_consumes_local_disconnect_flag() {
+        let core = new_core().await;
+        let peer = Uuid::new_v4();
+        core.local_disconnects.write().await.insert(peer);
+
+        let obs = TauriControlPlane { core: core.clone() };
+        obs.on_peer_disconnected(peer, "test", false).await;
+
+        assert!(
+            !core.local_disconnects.read().await.contains(&peer),
+            "reading the local-disconnect flag on disconnect must consume it so it suppresses exactly one reconnect"
+        );
+    }
+
+    #[tokio::test]
     async fn disconnect_tears_down_sessions_and_skips_reconnect() {
         let core = new_core().await;
         let local = core.identity.read().peer_id;
@@ -582,16 +653,10 @@ mod tests {
         })
         .unwrap();
 
-        let snap = await_sessions(&core, |s| {
-            s.iter()
-                .find(|x| x.id == sid)
-                .map(|x| x.state == SessionState::Closed)
-                .unwrap_or(false)
-        })
-        .await;
-        assert_eq!(
-            snap.iter().find(|x| x.id == sid).unwrap().state,
-            SessionState::Closed
+        let snap = await_sessions(&core, |s| !s.iter().any(|x| x.id == sid)).await;
+        assert!(
+            !snap.iter().any(|x| x.id == sid),
+            "a remote disconnect must evict the peer's session from the manager, not leave it Closed"
         );
     }
 

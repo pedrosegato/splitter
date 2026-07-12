@@ -3,7 +3,9 @@ use splitter_core::net::signaling::client_ops::{
     wait_for_stream_open_ack, ConnectionMap,
 };
 use splitter_core::net::signaling::StreamAction;
-use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
+use splitter_core::net::stream_runtime::{
+    open_stream_as_source, SourceKind, StatsBaseline, StreamControlSignal,
+};
 use splitter_core::{PeerIdentity, SessionId, SessionManager, StreamId, StreamRegistry};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -27,8 +29,8 @@ pub(crate) async fn handle(
         "open" => stream_open(rest, identity, sessions, registry, server, outgoing).await,
         "close" => stream_close(rest, sessions, registry, server, outgoing).await,
         "volume" => stream_volume(rest, sessions, registry, server, outgoing).await,
-        "mute" => stream_set_mute(rest, true, sessions, registry).await,
-        "unmute" => stream_set_mute(rest, false, sessions, registry).await,
+        "mute" => stream_set_mute(rest, true, sessions, registry, server, outgoing).await,
+        "unmute" => stream_set_mute(rest, false, sessions, registry, server, outgoing).await,
         "pause" => stream_set_paused(rest, true, sessions, registry, server, outgoing).await,
         "resume" => stream_set_paused(rest, false, sessions, registry, server, outgoing).await,
         "stats" => stream_stats(rest, registry).await,
@@ -210,13 +212,22 @@ async fn stream_volume(
 async fn stream_set_mute(
     rest: &[&str],
     muted: bool,
-    _sessions: &Arc<SessionManager>,
+    sessions: &Arc<SessionManager>,
     registry: &Arc<StreamRegistry>,
+    server: &splitter_core::net::signaling::server::SignalingServerHandle,
+    outgoing: &OutgoingConns,
 ) -> anyhow::Result<()> {
     let (sid, stream_id) = parse_session_stream(rest)?;
     registry
         .send_control(&sid, stream_id, StreamControlSignal::SetMuted(muted))
         .await?;
+    let snap = sessions.snapshot().await;
+    if let Some(s) = snap.iter().find(|s| s.id == sid) {
+        if let Some(conn) = find_conn(&server.connections, outgoing, s.remote_peer_id).await {
+            notify_remote_control(&conn.tx, stream_id.get(), StreamAction::SetMuted { muted })
+                .await;
+        }
+    }
     Ok(())
 }
 
@@ -259,7 +270,17 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
     } else {
         Some(parse_session_stream(rest)?)
     };
-    let snaps = registry.snapshot_stats(1_000).await;
+    let mut baseline = StatsBaseline::default();
+    let _ = registry.snapshot_stats(1_000, &mut baseline).await;
+
+    let mut sys = System::new();
+    sys.refresh_cpu_usage();
+    let sampled_at = std::time::Instant::now();
+    tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
+    sys.refresh_cpu_usage();
+    let window_ms = (sampled_at.elapsed().as_millis() as u32).max(1);
+
+    let snaps = registry.snapshot_stats(window_ms, &mut baseline).await;
     let filtered: Vec<_> = match target {
         Some(t) => snaps
             .into_iter()
@@ -268,10 +289,6 @@ async fn stream_stats(rest: &[&str], registry: &Arc<StreamRegistry>) -> anyhow::
         None => snaps,
     };
 
-    let mut sys = System::new();
-    sys.refresh_cpu_usage();
-    tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
-    sys.refresh_cpu_usage();
     let cpu_pct = {
         let cpus = sys.cpus();
         if cpus.is_empty() {

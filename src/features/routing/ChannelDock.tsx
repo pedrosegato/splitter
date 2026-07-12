@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import type { StreamSnapshot } from "@/bindings";
 import { useUiStore } from "@/stores/ui";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,18 +22,20 @@ export function ChannelDock({ sessionId, streams, isLoading }: Props) {
       {isLoading ? (
         <div className="flex items-center gap-3 px-4">
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="w-[72px] h-[64px] bg-line-2 rounded-[2px]" />
+            <Skeleton key={i} className="w-[72px] h-[64px] bg-line-2" />
           ))}
         </div>
       ) : (
-        streams.map((stream) => (
-          <ChannelStrip
-            key={stream.id}
-            sessionId={sessionId!}
-            stream={stream}
-            selected={selectedStreamId === stream.id}
-          />
-        ))
+        <AnimatePresence initial={false}>
+          {streams.map((stream) => (
+            <ChannelStrip
+              key={stream.id}
+              sessionId={sessionId!}
+              stream={stream}
+              selected={selectedStreamId === stream.id}
+            />
+          ))}
+        </AnimatePresence>
       )}
     </div>
   );

@@ -1,41 +1,59 @@
 import { describe, expect, test } from "vitest";
-import { curve, streamColor } from "./useWireGeometry";
+import { cable, catenaryDroop, sagFor, streamColor } from "./useWireGeometry";
 
-describe("curve", () => {
-  test("emits a cubic bezier starting at point a", () => {
-    const d = curve({ x: 260, y: 100 }, { x: 560, y: 200 }, 410);
-    expect(d.startsWith("M260,100 C")).toBe(true);
+describe("catenaryDroop", () => {
+  test("is zero at the anchors and one at the belly", () => {
+    expect(catenaryDroop(0)).toBeCloseTo(0);
+    expect(catenaryDroop(1)).toBeCloseTo(0);
+    expect(catenaryDroop(0.5)).toBeCloseTo(1);
   });
 
-  test("control points exit outward by panel side", () => {
-    const centerX = 410;
-    const a = { x: 260, y: 100 };
-    const b = { x: 560, y: 200 };
+  test("is symmetric around the midpoint", () => {
+    expect(catenaryDroop(0.25)).toBeCloseTo(catenaryDroop(0.75));
+  });
+});
 
-    const d = curve(a, b, centerX);
-
-    const match = d.match(
-      /^M(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) C(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/,
-    );
-    expect(match).not.toBeNull();
-
-    const cp1x = Number(match![3]);
-    const cp2x = Number(match![5]);
-
-    expect(cp1x).toBeGreaterThan(a.x);
-    expect(cp2x).toBeLessThan(b.x);
+describe("cable", () => {
+  test("starts at point a as a polyline", () => {
+    const d = cable({ x: 260, y: 100 }, { x: 560, y: 200 }, 40);
+    expect(d.startsWith("M260,100 L")).toBe(true);
   });
 
-  test("control point dx is at least 46 px", () => {
-    const d = curve({ x: 300, y: 50 }, { x: 320, y: 50 }, 410);
+  function points(d: string): Array<{ x: number; y: number }> {
+    return d
+      .replace(/[ML]/g, " ")
+      .trim()
+      .split(/\s+/)
+      .map((pair) => {
+        const [x, y] = pair.split(",").map(Number);
+        return { x, y };
+      });
+  }
 
-    const match = d.match(
-      /^M(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) C(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/,
-    );
-    expect(match).not.toBeNull();
+  test("belly droops by ~sag below the straight line", () => {
+    const a = { x: 0, y: 0 };
+    const b = { x: 100, y: 0 };
+    const sag = 50;
+    const pts = points(cable(a, b, sag));
+    const maxY = Math.max(...pts.map((p) => p.y));
+    expect(maxY).toBeGreaterThan(sag * 0.98);
+    expect(maxY).toBeLessThan(sag * 1.02);
+  });
 
-    const cp1x = Number(match![3]);
-    expect(Math.abs(cp1x - 300)).toBeGreaterThanOrEqual(46);
+  test("endpoints match a and b", () => {
+    const a = { x: 12, y: 34 };
+    const b = { x: 300, y: 90 };
+    const pts = points(cable(a, b, 40));
+    expect(pts[0]).toEqual(a);
+    expect(pts[pts.length - 1]).toEqual(b);
+  });
+});
+
+describe("sagFor", () => {
+  test("grows with span, clamps, and stays slacker for short cables", () => {
+    expect(sagFor({ x: 0, y: 0 }, { x: 10, y: 0 })).toBeCloseTo(36.2);
+    expect(sagFor({ x: 0, y: 0 }, { x: 300, y: 0 })).toBeCloseTo(100);
+    expect(sagFor({ x: 0, y: 0 }, { x: 2000, y: 0 })).toBe(170);
   });
 });
 

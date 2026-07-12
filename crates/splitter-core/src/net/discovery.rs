@@ -78,11 +78,29 @@ pub(crate) fn map_resolved(
     }))
 }
 
+fn interfaces_to_disable() -> Vec<mdns_sd::IfKind> {
+    #[cfg(target_os = "macos")]
+    {
+        vec![
+            mdns_sd::IfKind::Name("awdl0".to_string()),
+            mdns_sd::IfKind::Name("llw0".to_string()),
+        ]
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}
+
 impl Discovery {
     pub fn start(identity: &PeerIdentity, signaling_port: u16) -> Result<Self, NetError> {
         let daemon = ServiceDaemon::new().map_err(|e| NetError::Mdns {
             reason: format!("daemon: {e}"),
         })?;
+
+        for kind in interfaces_to_disable() {
+            let _ = daemon.disable_interface(kind);
+        }
 
         let info = build_service_info(identity, signaling_port)?;
 
@@ -190,6 +208,25 @@ mod tests {
 
     fn addr(octets: [u8; 4]) -> IpAddr {
         IpAddr::V4(Ipv4Addr::from(octets))
+    }
+
+    #[test]
+    fn disables_awdl_and_llw_on_macos() {
+        let disabled = interfaces_to_disable();
+        #[cfg(target_os = "macos")]
+        {
+            let names: Vec<String> = disabled
+                .iter()
+                .filter_map(|k| match k {
+                    mdns_sd::IfKind::Name(name) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert!(names.contains(&"awdl0".to_string()));
+            assert!(names.contains(&"llw0".to_string()));
+        }
+        #[cfg(not(target_os = "macos"))]
+        assert!(disabled.is_empty());
     }
 
     #[test]

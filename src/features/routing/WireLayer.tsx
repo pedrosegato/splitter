@@ -132,10 +132,7 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
   const hasSelection = selectedId !== null;
 
   return (
-    <svg
-      className="absolute inset-0 w-full h-full pointer-events-none z-[5]"
-      style={{ transform: "translateZ(0)" }}
-    >
+    <svg className="absolute inset-0 w-full h-full pointer-events-none z-[1]">
       {showLiveDrag && (
         <motion.path
           d={liveDragPath}

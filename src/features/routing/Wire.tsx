@@ -172,8 +172,6 @@ function WireImpl({
           style={{ pointerEvents: "none", transformOrigin: "center" }}
         />
       )}
-      <motion.circle cx={a.x} cy={a.y} r={6} fill={color} style={{ opacity }} />
-      <motion.circle cx={b.x} cy={b.y} r={6} fill={color} style={{ opacity }} />
     </g>
   );
 }

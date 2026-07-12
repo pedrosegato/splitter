@@ -130,6 +130,12 @@ pub enum SignalingMessage {
         source: SourceKind,
         sink_device: String,
     },
+    Probe {},
+    ProbeAck {
+        peer_id: String,
+        peer_name: String,
+        app_version: String,
+    },
 }
 
 impl SignalingMessage {
@@ -226,6 +232,28 @@ mod tests {
         let msg = sample_hello();
         let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
         assert!(raw.contains("\"type\":\"hello\""));
+    }
+
+    #[test]
+    fn probe_round_trip() {
+        let msg = SignalingMessage::Probe {};
+        let bytes = msg.encode_to_bytes().unwrap();
+        let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
+        assert_eq!(msg, back);
+        let raw = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(raw.contains("\"type\":\"probe\""));
+    }
+
+    #[test]
+    fn probe_ack_round_trip() {
+        let msg = SignalingMessage::ProbeAck {
+            peer_id: "22222222-2222-2222-2222-222222222222".into(),
+            peer_name: "Studio Mac".into(),
+            app_version: "0.1.0".into(),
+        };
+        let bytes = msg.encode_to_bytes().unwrap();
+        let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
+        assert_eq!(msg, back);
     }
 
     #[test]

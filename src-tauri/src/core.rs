@@ -166,10 +166,10 @@ impl AppCore {
                     &local_peer_id,
                     port,
                     Duration::from_millis(400),
-                    64,
+                    128,
                 )
                 .await;
-                let connected: HashSet<String> = core
+                let mut connected: HashSet<String> = core
                     .server
                     .connections
                     .read()
@@ -177,6 +177,7 @@ impl AppCore {
                     .keys()
                     .map(|u| u.to_string())
                     .collect();
+                connected.extend(core.outgoing.read().await.keys().map(|u| u.to_string()));
                 let changed = splitter_core::net::active_scan::reconcile_scan(
                     &mut *core.peers.write().await,
                     &mut seen,

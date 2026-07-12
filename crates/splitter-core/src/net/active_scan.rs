@@ -23,7 +23,9 @@ fn iface_is_scannable(iface: &IfaceV4) -> bool {
     if iface.name.starts_with("awdl") || iface.name.starts_with("llw") {
         return false;
     }
-    true
+    // Only sweep RFC1918 LAN ranges: never fan TCP SYNs out over a routable
+    // public subnet even if a public /24 interface exists.
+    iface.ip.is_private()
 }
 
 pub fn scan_targets(ifaces: &[IfaceV4]) -> Vec<Ipv4Addr> {
@@ -204,6 +206,15 @@ mod tests {
         assert!(targets.is_empty());
     }
 
+    #[test]
+    fn public_ip_range_is_skipped() {
+        let targets = scan_targets(&[iface("en0", [8, 8, 8, 1], [255, 255, 255, 0])]);
+        assert!(
+            targets.is_empty(),
+            "a routable public subnet must never be swept"
+        );
+    }
+
     fn peer(id: &str) -> DiscoveredPeer {
         DiscoveredPeer {
             peer_id: id.into(),
@@ -250,9 +261,19 @@ mod tests {
         peers.insert("gone".to_string(), peer("gone"));
         seen.insert("gone".to_string(), old);
 
-        let changed = reconcile_scan(&mut peers, &mut seen, vec![], &HashSet::new(), Instant::now(), ttl);
+        let changed = reconcile_scan(
+            &mut peers,
+            &mut seen,
+            vec![],
+            &HashSet::new(),
+            Instant::now(),
+            ttl,
+        );
         assert!(changed);
-        assert!(!peers.contains_key("gone"), "stale unicast peer must be pruned");
+        assert!(
+            !peers.contains_key("gone"),
+            "stale unicast peer must be pruned"
+        );
     }
 
     #[test]
@@ -265,7 +286,14 @@ mod tests {
         seen.insert("linked".to_string(), old);
         let connected: HashSet<String> = ["linked".to_string()].into_iter().collect();
 
-        reconcile_scan(&mut peers, &mut seen, vec![], &connected, Instant::now(), ttl);
+        reconcile_scan(
+            &mut peers,
+            &mut seen,
+            vec![],
+            &connected,
+            Instant::now(),
+            ttl,
+        );
         assert!(
             peers.contains_key("linked"),
             "a connected peer must never be pruned by the scanner"

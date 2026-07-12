@@ -199,6 +199,7 @@ pub(crate) async fn run(
     {
         let discovered = ctx.discovered.clone();
         let connections = server.connections.clone();
+        let outgoing = ctx.outgoing_connections.clone();
         let local = local_peer_id.to_string();
         let port = server.bind_addr.port();
         tokio::spawn(async move {
@@ -211,15 +212,16 @@ pub(crate) async fn run(
                     &local,
                     port,
                     Duration::from_millis(400),
-                    64,
+                    128,
                 )
                 .await;
-                let connected: std::collections::HashSet<String> = connections
+                let mut connected: std::collections::HashSet<String> = connections
                     .read()
                     .await
                     .keys()
                     .map(|u| u.to_string())
                     .collect();
+                connected.extend(outgoing.read().await.keys().map(|u| u.to_string()));
                 splitter_core::net::active_scan::reconcile_scan(
                     &mut *discovered.write().await,
                     &mut seen,

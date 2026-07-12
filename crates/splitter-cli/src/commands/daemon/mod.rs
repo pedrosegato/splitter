@@ -73,8 +73,16 @@ pub(crate) async fn run(
         dispatcher_rx,
     ));
 
-    // Keep Discovery in scope so graceful_shutdown can call .shutdown() on it.
-    let discovery = Discovery::start(&identity, signaling_port)?;
+    // mDNS is best-effort: networks that block multicast (CI sandboxes, restricted
+    // LANs, some containers) can't start it. Signaling still works over direct and
+    // loopback connections, so a discovery failure must not down the daemon.
+    let discovery = match Discovery::start(&identity, signaling_port) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            tracing::warn!("mDNS discovery unavailable ({e}); continuing without LAN discovery");
+            None
+        }
+    };
     let discovered = Arc::default();
 
     {

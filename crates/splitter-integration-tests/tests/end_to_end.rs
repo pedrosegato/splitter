@@ -122,7 +122,7 @@ async fn two_daemon_processes_exchange_hello_and_close() {
 
     let mut stdout_b = BufReader::new(peer_b.stdout.take().expect("stdout B"));
 
-    let deadline = Duration::from_secs(30);
+    let deadline = Duration::from_secs(10);
 
     async fn read_ready_port(
         reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>,

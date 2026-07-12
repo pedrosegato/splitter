@@ -29,7 +29,7 @@ enum ReplEvent {
 pub(crate) async fn run_repl(
     ctx: &DaemonContext,
     server: SignalingServerHandle,
-    mut discovery: Discovery,
+    mut discovery: Option<Discovery>,
 ) -> anyhow::Result<()> {
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
@@ -60,7 +60,7 @@ pub(crate) async fn run_repl(
             },
             _ = &mut ctrl_c => ReplEvent::Shutdown("SIGINT"),
             _ = sigterm_future(sigterm.as_mut()) => ReplEvent::Shutdown("SIGTERM"),
-            disc_ev = discovery.next_event() => ReplEvent::Discovery(disc_ev),
+            disc_ev = discovery_future(discovery.as_mut()) => ReplEvent::Discovery(disc_ev),
         };
 
         if let Some(reason) = process_repl_event(ctx, &server, event).await {
@@ -72,7 +72,9 @@ pub(crate) async fn run_repl(
                 &ctx.outgoing_connections,
             )
             .await;
-            discovery.shutdown();
+            if let Some(d) = discovery.as_mut() {
+                d.shutdown();
+            }
             // Drop server last: closes the TCP accept loop and all peer connections.
             drop(server);
             tracing::info!("daemon shutdown complete");
@@ -84,6 +86,14 @@ pub(crate) async fn run_repl(
         }
     }
     Ok(())
+}
+
+// Yields a never-resolving future when discovery is unavailable so the select! arm is inert.
+async fn discovery_future(discovery: Option<&mut Discovery>) -> Option<DiscoveryEvent> {
+    match discovery {
+        Some(d) => d.next_event().await,
+        None => std::future::pending().await,
+    }
 }
 
 // Yields a never-resolving future when SIGTERM is unavailable so the select! arm is inert.

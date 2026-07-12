@@ -4653,6 +4653,8 @@ dependencies = [
  "dirs 5.0.1",
  "futures",
  "gethostname",
+ "if-addrs",
+ "ipnet",
  "libc",
  "mdns-sd",
  "prometheus",

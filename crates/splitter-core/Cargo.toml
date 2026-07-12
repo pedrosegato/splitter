@@ -33,6 +33,8 @@ constant_time_eq = { workspace = true }
 async-trait = { workspace = true }
 futures = "0.3"
 crossbeam-queue = "0.3"
+if-addrs = "0.13"
+ipnet = "2"
 specta = { version = "=2.0.0-rc.22", features = ["derive", "uuid"], optional = true }
 
 [features]

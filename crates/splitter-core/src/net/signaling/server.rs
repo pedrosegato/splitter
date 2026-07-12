@@ -123,6 +123,18 @@ impl SignalingServer {
                             return;
                         }
                     };
+                    if let SignalingMessage::Probe {} = first {
+                        handle.disarm();
+                        let _ = handle
+                            .tx
+                            .send(SignalingMessage::ProbeAck {
+                                peer_id: id_inner.peer_id.to_string(),
+                                peer_name: id_inner.peer_name.clone(),
+                                app_version: env!("CARGO_PKG_VERSION").into(),
+                            })
+                            .await;
+                        return;
+                    }
                     let SignalingMessage::Hello {
                         protocol_version,
                         peer_id,
@@ -396,6 +408,51 @@ mod tests {
         assert!(ok, "server never queued the pending peer");
         let pending = server.pending.list().await;
         assert_eq!(pending[0].peer_id, client_peer_id);
+    }
+
+    #[tokio::test]
+    async fn probe_gets_ack_without_creating_pending() {
+        let (server, identity, _trust, _sessions, _dir) = setup().await;
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream, None).unwrap();
+        let mut events = client.events.subscribe();
+        client
+            .tx
+            .send(SignalingMessage::Probe {})
+            .await
+            .unwrap();
+
+        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                match events.recv().await {
+                    Ok(crate::net::signaling::connection::PeerEvent::Message(
+                        SignalingMessage::ProbeAck {
+                            peer_id,
+                            peer_name,
+                            app_version,
+                        },
+                    )) => return Some((peer_id, peer_name, app_version)),
+                    Ok(_) => continue,
+                    Err(_) => return None,
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        let (peer_id, peer_name, app_version) = ack.expect("no ProbeAck received");
+        assert_eq!(peer_id, identity.peer_id.to_string());
+        assert_eq!(peer_name, "server");
+        assert_eq!(app_version, env!("CARGO_PKG_VERSION"));
+
+        assert!(
+            server.pending.list().await.is_empty(),
+            "a probe must not create a pending peer"
+        );
+        assert!(
+            server.connections.read().await.is_empty(),
+            "a probe must not register a connection"
+        );
     }
 
     #[tokio::test]

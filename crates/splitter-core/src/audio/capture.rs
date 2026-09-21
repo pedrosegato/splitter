@@ -58,8 +58,8 @@ impl CaptureHandle {
     // WHY: WASAPI loopback capture requires using the *output* device as the capture
     // source, but build_input_stream must be called with a SampleFormat that the WASAPI
     // driver will actually accept.  The previous approach called default_input_config()
-    // and fell back to default_output_config(), which worked on Pedro's machine (F32
-    // shared-mode output) but silently breaks on systems whose output is configured for
+    // and fell back to default_output_config(), which works on F32 shared-mode
+    // outputs but silently breaks on systems whose output is configured for
     // I32 or I24 — cpal would then try to build a stream with the wrong format and
     // return a BuildStream error.
     //

@@ -105,6 +105,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run format:check
       - run: npm run typecheck && npm test && npm run build
 
   cargo-audit:

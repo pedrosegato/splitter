@@ -416,11 +416,7 @@ mod tests {
         let stream = TcpStream::connect(server.bind_addr).await.unwrap();
         let client = spawn_peer_connection(stream, None).unwrap();
         let mut events = client.events.subscribe();
-        client
-            .tx
-            .send(SignalingMessage::Probe {})
-            .await
-            .unwrap();
+        client.tx.send(SignalingMessage::Probe {}).await.unwrap();
 
         let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {

@@ -42,3 +42,6 @@ src-tauri/gen/
 
 # Git worktrees (Superpowers isolation)
 .worktrees/
+
+# Lint cache
+.eslintcache

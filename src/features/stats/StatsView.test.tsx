@@ -1,9 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { StreamStat, SessionSnapshot } from "@/bindings";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { SessionSnapshot, StreamStat } from "@/bindings";
 import type { StreamHistory } from "@/stores/ui";
+
 import { aggregate } from "./aggregate";
 
 const mockUseUiStoreSelector = vi.fn();
@@ -84,7 +86,11 @@ function makeWrapper() {
 
 const baseStatsHistory: Record<number, StreamHistory> = {
   1: { rtt: [10, 12, 8, 11, 10], loss: [0.5, 0.3, 0.7, 0.5, 0.4], kbps: [150, 160, 155, 148, 150] },
-  2: { rtt: [30, 28, 32, 29, 31], loss: [1.5, 1.3, 1.7, 1.4, 1.6], kbps: [280, 290, 275, 285, 280] },
+  2: {
+    rtt: [30, 28, 32, 29, 31],
+    loss: [1.5, 1.3, 1.7, 1.4, 1.6],
+    kbps: [280, 290, 275, 285, 280],
+  },
 };
 
 function setupMocks(
@@ -93,19 +99,26 @@ function setupMocks(
   statsHistory: Record<number, StreamHistory> = {},
 ) {
   mockUseUiStoreSelector.mockImplementation(
-    (selector: (s: { stats: StreamStat[]; statsHistory: Record<number, StreamHistory> }) => unknown) =>
-      selector({ stats, statsHistory }),
+    (
+      selector: (s: {
+        stats: StreamStat[];
+        statsHistory: Record<number, StreamHistory>;
+      }) => unknown,
+    ) => selector({ stats, statsHistory }),
   );
   mockUseSnapshot.mockReturnValue({ data: sessions });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal("ResizeObserver", class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
 describe("aggregate", () => {

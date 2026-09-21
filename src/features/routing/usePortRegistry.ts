@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
 import { createContext, useContext, useMemo, useRef } from "react";
 import { createElement } from "react";
-import type { ReactNode } from "react";
+
 import type { PortRef } from "./resolveConnection";
 
 type Registry = {

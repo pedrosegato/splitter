@@ -1,10 +1,12 @@
-import { render, act, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import type { StreamSnapshot } from "@/bindings";
-import { ChannelStrip } from "./ChannelStrip";
+
 import { ChannelDock } from "./ChannelDock";
+import { ChannelStrip } from "./ChannelStrip";
 
 const mockStreamControlMutate = vi.fn();
 const mockCloseStreamMutate = vi.fn();
@@ -16,8 +18,12 @@ vi.mock("@/hooks/useStreams", () => ({
 }));
 
 vi.mock("@/stores/ui", () => ({
-  useUiStore: (selector: (s: { selectStream: typeof mockSelectStream; selectedStreamId: number | null }) => unknown) =>
-    selector({ selectStream: mockSelectStream, selectedStreamId: null }),
+  useUiStore: (
+    selector: (s: {
+      selectStream: typeof mockSelectStream;
+      selectedStreamId: number | null;
+    }) => unknown,
+  ) => selector({ selectStream: mockSelectStream, selectedStreamId: null }),
 }));
 
 function makeWrapper() {
@@ -46,11 +52,14 @@ function makeStream(overrides: Partial<StreamSnapshot> = {}): StreamSnapshot {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal("ResizeObserver", class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
 describe("ChannelStrip", () => {
@@ -222,30 +231,30 @@ describe("ChannelStrip", () => {
 
 describe("ChannelDock", () => {
   it("collapses (renders nothing) when streams array is empty", () => {
-    const { container } = render(
-      <ChannelDock sessionId="sess-1" streams={[]} />,
-      { wrapper: makeWrapper() },
-    );
+    const { container } = render(<ChannelDock sessionId="sess-1" streams={[]} />, {
+      wrapper: makeWrapper(),
+    });
 
     expect(container.firstChild).toBeNull();
   });
 
   it("collapses (renders nothing) when sessionId is null", () => {
     const stream = makeStream();
-    const { container } = render(
-      <ChannelDock sessionId={null} streams={[stream]} />,
-      { wrapper: makeWrapper() },
-    );
+    const { container } = render(<ChannelDock sessionId={null} streams={[stream]} />, {
+      wrapper: makeWrapper(),
+    });
 
     expect(container.firstChild).toBeNull();
   });
 
   it("renders one strip per stream", () => {
-    const streams = [makeStream({ id: 1 }), makeStream({ id: 2, source_device: "Guitar", sink_device: "Studio Out" })];
-    const { getByText } = render(
-      <ChannelDock sessionId="sess-1" streams={streams} />,
-      { wrapper: makeWrapper() },
-    );
+    const streams = [
+      makeStream({ id: 1 }),
+      makeStream({ id: 2, source_device: "Guitar", sink_device: "Studio Out" }),
+    ];
+    const { getByText } = render(<ChannelDock sessionId="sess-1" streams={streams} />, {
+      wrapper: makeWrapper(),
+    });
 
     expect(getByText("MacBook Mic")).toBeDefined();
     expect(getByText("PC Speaker")).toBeDefined();

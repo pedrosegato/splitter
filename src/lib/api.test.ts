@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+
 import { unwrap } from "./api";
 
 describe("unwrap", () => {
@@ -9,7 +10,7 @@ describe("unwrap", () => {
 
   it("throws with the error message when status is error", async () => {
     await expect(
-      unwrap(Promise.resolve({ status: "error", error: "something went wrong" } as const))
+      unwrap(Promise.resolve({ status: "error", error: "something went wrong" } as const)),
     ).rejects.toThrow("something went wrong");
   });
 });

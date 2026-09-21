@@ -1,12 +1,13 @@
-import { renderHook, waitFor, act } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useDevices } from "./useDevices";
-import { useSetSetting, useResetSettings } from "./useSettings";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import { useConnectPeer, useDisconnect } from "./useConnection";
-import { useIdentity } from "./useIdentity";
 import { useSetDeviceName } from "./useDeviceName";
+import { useDevices } from "./useDevices";
+import { useIdentity } from "./useIdentity";
+import { useResetSettings, useSetSetting } from "./useSettings";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -32,16 +33,18 @@ vi.mock("@/lib/api", () => ({
     closeStream: vi.fn(),
     streamControl: vi.fn(),
   },
-  unwrap: vi.fn((p: Promise<{ status: "ok"; data: unknown } | { status: "error"; error: string }>) =>
-    p.then((r) => {
-      if (r.status === "ok") return r.data;
-      throw new Error(r.status === "error" ? r.error : "unknown");
-    }),
+  unwrap: vi.fn(
+    (p: Promise<{ status: "ok"; data: unknown } | { status: "error"; error: string }>) =>
+      p.then((r) => {
+        if (r.status === "ok") return r.data;
+        throw new Error(r.status === "error" ? r.error : "unknown");
+      }),
   ),
 }));
 
-import { commands, unwrap } from "@/lib/api";
 import { toast } from "sonner";
+
+import { commands, unwrap } from "@/lib/api";
 
 const mockedCommands = commands as unknown as Record<string, ReturnType<typeof vi.fn>>;
 const mockedUnwrap = unwrap as unknown as ReturnType<typeof vi.fn>;
@@ -69,7 +72,9 @@ describe("useDevices", () => {
     ];
     mockedCommands.listDevices.mockResolvedValue({ status: "ok", data: devices });
     mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
-      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+      (p as Promise<{ status: string; data: unknown }>).then(
+        (r: { status: string; data: unknown }) => r.data,
+      ),
     );
 
     const { wrapper } = makeWrapper();
@@ -83,9 +88,11 @@ describe("useDevices", () => {
   it("exposes error when command fails", async () => {
     mockedCommands.listDevices.mockResolvedValue({ status: "error", error: "no devices" });
     mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
-      (p as Promise<{ status: string; error: string }>).then((r: { status: string; error: string }) => {
-        throw new Error(r.error);
-      }),
+      (p as Promise<{ status: string; error: string }>).then(
+        (r: { status: string; error: string }) => {
+          throw new Error(r.error);
+        },
+      ),
     );
 
     const { wrapper } = makeWrapper();
@@ -105,7 +112,9 @@ describe("useSetSetting mutation", () => {
     const updatedSettings = { auto_accept_trusted: true };
     mockedCommands.settingsSet.mockResolvedValue({ status: "ok", data: updatedSettings });
     mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
-      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+      (p as Promise<{ status: string; data: unknown }>).then(
+        (r: { status: string; data: unknown }) => r.data,
+      ),
     );
 
     const { wrapper, queryClient } = makeWrapper();
@@ -133,7 +142,9 @@ describe("useSetDeviceName mutation", () => {
       data: { peer_id: "p", peer_name: "New Name" },
     });
     mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
-      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+      (p as Promise<{ status: string; data: unknown }>).then(
+        (r: { status: string; data: unknown }) => r.data,
+      ),
     );
 
     const { wrapper, queryClient } = makeWrapper();
@@ -173,7 +184,9 @@ describe("useResetSettings mutation", () => {
   it("calls settingsReset and invalidates settings on success", async () => {
     mockedCommands.settingsReset.mockResolvedValue({ status: "ok", data: {} });
     mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
-      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+      (p as Promise<{ status: string; data: unknown }>).then(
+        (r: { status: string; data: unknown }) => r.data,
+      ),
     );
 
     const { wrapper, queryClient } = makeWrapper();
@@ -199,7 +212,9 @@ describe("useIdentity", () => {
     const identity = { peer_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", peer_name: "Studio PC" };
     mockedCommands.identity.mockResolvedValue({ status: "ok", data: identity });
     mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
-      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+      (p as Promise<{ status: string; data: unknown }>).then(
+        (r: { status: string; data: unknown }) => r.data,
+      ),
     );
 
     const { wrapper } = makeWrapper();
@@ -233,7 +248,9 @@ describe("toast.error on mutation failure", () => {
   it("calls toast.success when useDisconnect succeeds", async () => {
     mockedCommands.disconnect.mockResolvedValue({ status: "ok", data: null });
     mockedUnwrap.mockImplementation((p: Promise<unknown>) =>
-      (p as Promise<{ status: string; data: unknown }>).then((r: { status: string; data: unknown }) => r.data),
+      (p as Promise<{ status: string; data: unknown }>).then(
+        (r: { status: string; data: unknown }) => r.data,
+      ),
     );
 
     const { wrapper } = makeWrapper();

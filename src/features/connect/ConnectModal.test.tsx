@@ -1,6 +1,7 @@
-import { render, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fireEvent, render, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import { ConnectModal } from "./ConnectModal";
 
 const mockConnectMutate = vi.fn();

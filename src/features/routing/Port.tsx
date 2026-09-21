@@ -1,9 +1,11 @@
 import { useCallback } from "react";
 import { motion } from "motion/react";
-import { cn } from "@/lib/utils";
+
 import { springs } from "@/lib/motion";
-import { usePortRegistry } from "./usePortRegistry";
+import { cn } from "@/lib/utils";
+
 import type { PortRef } from "./resolveConnection";
+import { usePortRegistry } from "./usePortRegistry";
 
 type PortProps = {
   peerId: string;
@@ -43,8 +45,8 @@ export function Port({
       data-port-id={portId}
       aria-label={`${kind === "src" ? "Source" : "Sink"} port for device ${deviceId} on peer ${peerId}`}
       className={cn(
-        "w-3 h-3 rounded-full border-2 cursor-crosshair transition-all duration-100",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold/40",
+        "h-3 w-3 cursor-crosshair rounded-full border-2 transition-all duration-100",
+        "focus-visible:ring-gold/40 focus-visible:ring-1 focus-visible:outline-none",
         "border-line-2 bg-board hover:border-gold focus-visible:border-gold",
       )}
       style={wired && color ? { backgroundColor: color, borderColor: color } : undefined}

@@ -14,8 +14,8 @@ export const useThemeStore = create<ThemeState>()(
       theme: "dark",
       setTheme: (theme) => set({ theme }),
     }),
-    { name: "splitter-theme" }
-  )
+    { name: "splitter-theme" },
+  ),
 );
 
 export function applyTheme(theme: Theme) {

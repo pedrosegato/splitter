@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react"
-import { describe, it, expect } from "vitest"
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./dialog"
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./dialog";
 
 describe("Dialog", () => {
   it("opens with an accessible title", async () => {
@@ -10,8 +11,8 @@ describe("Dialog", () => {
         <DialogContent>
           <DialogTitle>Configurações</DialogTitle>
         </DialogContent>
-      </Dialog>
-    )
-    expect(screen.getByText("Configurações")).toBeInTheDocument()
-  })
-})
+      </Dialog>,
+    );
+    expect(screen.getByText("Configurações")).toBeInTheDocument();
+  });
+});

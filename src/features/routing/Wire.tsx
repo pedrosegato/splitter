@@ -1,16 +1,18 @@
 import { memo, useEffect } from "react";
 import {
-  motion,
   animate,
+  motion,
   useMotionValue,
-  useSpring,
-  useTransform,
-  useTime,
   usePresence,
+  useSpring,
+  useTime,
+  useTransform,
 } from "motion/react";
+
 import { springs } from "@/lib/motion";
-import { cable, sagFor, type Pt } from "./useWireGeometry";
+
 import { useAnimateGate } from "./useAnimateGate";
+import { cable, type Pt, sagFor } from "./useWireGeometry";
 
 type WireProps = {
   id: number;
@@ -61,9 +63,7 @@ function WireImpl({
   const swayAmp = 2.5;
   const phase = id * 1.3;
 
-  const swayInputs = reducedMotion
-    ? [ax, ay, bx, by, sag]
-    : [ax, ay, bx, by, sag, time, gate];
+  const swayInputs = reducedMotion ? [ax, ay, bx, by, sag] : [ax, ay, bx, by, sag, time, gate];
 
   const d = useTransform(swayInputs, (v) => {
     const [axv, ayv, bxv, byv, s] = v as number[];
@@ -73,9 +73,7 @@ function WireImpl({
     return cable({ x: axv, y: ayv }, { x: bxv, y: byv }, eff);
   });
 
-  const baseOpacity = muted
-    ? 0.18
-    : (0.3 + 0.7 * volume) * (hasSelection && !selected ? 0.45 : 1);
+  const baseOpacity = muted ? 0.18 : (0.3 + 0.7 * volume) * (hasSelection && !selected ? 0.45 : 1);
 
   const opacity = useMotionValue(reducedMotion ? baseOpacity : 0);
   useEffect(() => {
@@ -148,7 +146,7 @@ function WireImpl({
           strokeDasharray="1 10"
           strokeLinecap="round"
           opacity={0.65}
-          className="[animation:flow_1s_linear_infinite] [pointer-events:none] motion-reduce:animate-none"
+          className="[pointer-events:none] [animation:flow_1s_linear_infinite] motion-reduce:animate-none"
           style={{ fill: "none" }}
         />
       )}

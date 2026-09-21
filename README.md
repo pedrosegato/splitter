@@ -23,12 +23,12 @@ Download the latest release from
 [GitHub Releases](https://github.com/pedrosegato/splitter/releases/latest)
 and pick the asset for your OS:
 
-| OS | Asset |
-|----|-------|
-| macOS Apple Silicon | `Splitter_x.y.z_aarch64.dmg` |
-| macOS Intel | `Splitter_x.y.z_x64.dmg` |
-| Windows | `Splitter_x.y.z_x64-setup.exe` or `Splitter_x.y.z_x64_en-US.msi` |
-| Linux (any) | `splitter_x.y.z_amd64.AppImage` or `splitter_x.y.z_amd64.deb` |
+| OS                  | Asset                                                            |
+| ------------------- | ---------------------------------------------------------------- |
+| macOS Apple Silicon | `Splitter_x.y.z_aarch64.dmg`                                     |
+| macOS Intel         | `Splitter_x.y.z_x64.dmg`                                         |
+| Windows             | `Splitter_x.y.z_x64-setup.exe` or `Splitter_x.y.z_x64_en-US.msi` |
+| Linux (any)         | `splitter_x.y.z_amd64.AppImage` or `splitter_x.y.z_amd64.deb`    |
 
 ### Unsigned-build caveat
 
@@ -52,11 +52,11 @@ These warnings disappear once Apple and Windows code-signing are provisioned
 To capture what the system plays (not just a microphone), you need a virtual
 audio loopback driver:
 
-| OS | What to install |
-|----|-----------------|
-| macOS | [BlackHole 2ch](https://existential.audio/blackhole/) (`brew install --cask blackhole-2ch`) |
-| Windows | [VB-Cable](https://vb-audio.com/Cable/) (free download, run installer as Administrator) |
-| Linux | Nothing — PulseAudio/PipeWire `.monitor` sources are available automatically |
+| OS      | What to install                                                                             |
+| ------- | ------------------------------------------------------------------------------------------- |
+| macOS   | [BlackHole 2ch](https://existential.audio/blackhole/) (`brew install --cask blackhole-2ch`) |
+| Windows | [VB-Cable](https://vb-audio.com/Cable/) (free download, run installer as Administrator)     |
+| Linux   | Nothing — PulseAudio/PipeWire `.monitor` sources are available automatically                |
 
 ### Quick usage
 
@@ -125,11 +125,13 @@ The workspace links against libopus (all platforms) plus, on Linux, the Tauri
 GUI/audio stack. Install them before building:
 
 **macOS**
+
 ```sh
 brew install opus pkg-config
 ```
 
 **Linux (Debian/Ubuntu)**
+
 ```sh
 sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
   libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
@@ -137,6 +139,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
 ```
 
 **Windows** (via [vcpkg](https://vcpkg.io))
+
 ```sh
 vcpkg install opus:x64-windows
 ```

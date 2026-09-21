@@ -1,9 +1,10 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { usePendingPeers } from "@/hooks/usePeers";
-import { useAcceptPending, useRejectPending } from "@/hooks/useConnection";
 import { Check, X } from "lucide-react";
 import { motion } from "motion/react";
+
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useAcceptPending, useRejectPending } from "@/hooks/useConnection";
+import { usePendingPeers } from "@/hooks/usePeers";
 import { variants } from "@/lib/motion";
 
 export function IncomingRequestDialog() {
@@ -19,10 +20,10 @@ export function IncomingRequestDialog() {
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
-        className="w-[320px] max-w-[320px] bg-surface border-line gap-0 p-0"
+        className="bg-surface border-line w-[320px] max-w-[320px] gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg">
-          <DialogTitle className="text-[11px] text-ink-3 font-medium">
+        <DialogHeader className="bg-elev-1 border-line rounded-t-lg border-b px-[15px] py-3">
+          <DialogTitle className="text-ink-3 text-[11px] font-medium">
             Pedido de conexão
           </DialogTitle>
         </DialogHeader>
@@ -35,10 +36,10 @@ export function IncomingRequestDialog() {
             className="px-[15px] py-[16px]"
           >
             <motion.div variants={variants.listItem} className="flex items-center gap-[10px]">
-              <span className="w-[8px] h-[8px] rounded-full bg-gold shrink-0" />
+              <span className="bg-gold h-[8px] w-[8px] shrink-0 rounded-full" />
               <div className="min-w-0">
-                <p className="truncate text-[13px] text-ink font-semibold">{peer.peer_name}</p>
-                <p className="text-[10px] text-ink-3 tabular-nums">{peer.addr}</p>
+                <p className="text-ink truncate text-[13px] font-semibold">{peer.peer_name}</p>
+                <p className="text-ink-3 text-[10px] tabular-nums">{peer.addr}</p>
               </div>
             </motion.div>
 
@@ -57,7 +58,7 @@ export function IncomingRequestDialog() {
                 size="sm"
                 disabled={busy}
                 onClick={() => accept.mutate({ index: 0 })}
-                className="text-[12px] text-[#1c1c1f] bg-gold font-semibold hover:brightness-110"
+                className="bg-gold text-[12px] font-semibold text-[#1c1c1f] hover:brightness-110"
               >
                 <Check size={14} />
                 Aceitar

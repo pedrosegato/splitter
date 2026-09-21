@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+
 import type { SourceKind, StreamAction } from "@/bindings";
 import { commands, unwrap } from "@/lib/api";
 
@@ -64,13 +65,8 @@ export const useRequestStream = () => {
 export const useCloseStream = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      sessionId,
-      streamId,
-    }: {
-      sessionId: string;
-      streamId: number;
-    }) => unwrap(commands.closeStream(sessionId, streamId)),
+    mutationFn: ({ sessionId, streamId }: { sessionId: string; streamId: number }) =>
+      unwrap(commands.closeStream(sessionId, streamId)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
     },

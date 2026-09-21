@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMotionValue, type MotionValue } from "motion/react";
-import { usePortRegistry } from "./usePortRegistry";
+import { type MotionValue, useMotionValue } from "motion/react";
+
 import type { PortRef } from "./resolveConnection";
+import { usePortRegistry } from "./usePortRegistry";
 
 export type DragState = {
   active: boolean;

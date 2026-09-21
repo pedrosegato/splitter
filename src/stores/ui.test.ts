@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { useUiStore, pushStatsHistory, type StreamHistory } from "./ui";
+import { beforeEach, describe, expect, it } from "vitest";
+
 import type { StreamStat } from "@/bindings";
+
+import { pushStatsHistory, type StreamHistory, useUiStore } from "./ui";
 
 beforeEach(() => {
   useUiStore.setState({
@@ -44,7 +46,14 @@ describe("useUiStore", () => {
 
   it("pushStats updates stats and statsHistory", () => {
     const tick: StreamStat[] = [
-      { session_id: "s1", stream_id: 1, rtt_ms: 10, loss_pct: 0.5, kbps_sent: 100, kbps_received: 50 },
+      {
+        session_id: "s1",
+        stream_id: 1,
+        rtt_ms: 10,
+        loss_pct: 0.5,
+        kbps_sent: 100,
+        kbps_received: 50,
+      },
     ];
     useUiStore.getState().pushStats(tick);
     expect(useUiStore.getState().stats).toEqual(tick);
@@ -55,7 +64,13 @@ describe("useUiStore", () => {
 });
 
 describe("pushStatsHistory", () => {
-  const makeStat = (stream_id: number, rtt_ms: number, loss_pct: number, kbps_sent: number, kbps_received: number): StreamStat => ({
+  const makeStat = (
+    stream_id: number,
+    rtt_ms: number,
+    loss_pct: number,
+    kbps_sent: number,
+    kbps_received: number,
+  ): StreamStat => ({
     session_id: "s1",
     stream_id,
     rtt_ms,

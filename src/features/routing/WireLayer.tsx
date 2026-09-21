@@ -1,17 +1,19 @@
-import { useLayoutEffect, useState, useCallback, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   AnimatePresence,
   motion,
-  useTransform,
   useMotionValue,
   useReducedMotion,
+  useTransform,
 } from "motion/react";
+
 import type { StreamSnapshot } from "@/bindings";
-import { usePortRegistry } from "./usePortRegistry";
-import { cable, sagFor, streamColor, type Pt } from "./useWireGeometry";
 import { useThemeStore } from "@/stores/theme";
-import { Wire } from "./Wire";
+
 import type { DragState } from "./useDragConnect";
+import { usePortRegistry } from "./usePortRegistry";
+import { cable, type Pt, sagFor, streamColor } from "./useWireGeometry";
+import { Wire } from "./Wire";
 
 type WireLayerProps = {
   boardRef: React.RefObject<HTMLDivElement | null>;
@@ -132,7 +134,7 @@ export function WireLayer({ boardRef, streams, selectedId, onSelect, drag }: Wir
   const hasSelection = selectedId !== null;
 
   return (
-    <svg className="absolute inset-0 w-full h-full pointer-events-none z-[1]">
+    <svg className="pointer-events-none absolute inset-0 z-[1] h-full w-full">
       {showLiveDrag && (
         <motion.path
           d={liveDragPath}

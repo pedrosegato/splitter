@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 # One release workflow per tag — cancel any in-flight run for the same ref.
@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build-tauri:
     permissions:
-      contents: write  # tauri-action needs write to create/update the GitHub Release
+      contents: write # tauri-action needs write to create/update the GitHub Release
 
     strategy:
       fail-fast: false
@@ -32,13 +32,13 @@ jobs:
 
           # Linux (ubuntu-22.04 for glibc compatibility with older distros)
           - os: ubuntu-22.04
-            args: ''
-            rust-target: ''
+            args: ""
+            rust-target: ""
 
           # Windows
           - os: windows-latest
-            args: ''
-            rust-target: ''
+            args: ""
+            rust-target: ""
 
     runs-on: ${{ matrix.os }}
 
@@ -48,8 +48,8 @@ jobs:
       - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install JS deps
         run: npm ci
@@ -124,8 +124,8 @@ jobs:
           # The action creates/updates the GitHub Release identified by this tag,
           # so each matrix job uploads its bundles to the same release object.
           tagName: ${{ github.ref_name }}
-          releaseName: 'Splitter ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download and install.'
+          releaseName: "Splitter ${{ github.ref_name }}"
+          releaseBody: "See the assets to download and install."
           releaseDraft: true
           prerelease: false
 

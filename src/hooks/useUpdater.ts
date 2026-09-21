@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 type UpdateState =
@@ -40,7 +40,11 @@ export function useUpdater() {
       setState({ status: "available", version: update.version, onInstall });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.toLowerCase().includes("dev") || message.toLowerCase().includes("no such host") || message.toLowerCase().includes("failed to fetch")) {
+      if (
+        message.toLowerCase().includes("dev") ||
+        message.toLowerCase().includes("no such host") ||
+        message.toLowerCase().includes("failed to fetch")
+      ) {
         setState({ status: "idle" });
         toast.info("Verificação de atualização indisponível em modo de desenvolvimento");
       } else {

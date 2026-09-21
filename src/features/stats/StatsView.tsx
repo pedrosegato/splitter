@@ -1,17 +1,19 @@
 import { useMemo } from "react";
-import { motion } from "motion/react";
 import { ArrowRight } from "lucide-react";
-import type { StreamStat, StreamSnapshot } from "@/bindings";
-import { cn } from "@/lib/utils";
-import { useUiStore } from "@/stores/ui";
-import type { StreamHistory } from "@/stores/ui";
-import { useSnapshot } from "@/hooks/useSnapshot";
-import { useActiveSession } from "@/hooks/useActiveSession";
-import { streamColor } from "@/features/routing/useWireGeometry";
-import { deviceLabel } from "@/lib/deviceName";
+import { motion } from "motion/react";
+
+import type { StreamSnapshot, StreamStat } from "@/bindings";
 import { Sparkline } from "@/components/Sparkline";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { streamColor } from "@/features/routing/useWireGeometry";
+import { useActiveSession } from "@/hooks/useActiveSession";
+import { useSnapshot } from "@/hooks/useSnapshot";
+import { deviceLabel } from "@/lib/deviceName";
 import { variants } from "@/lib/motion";
+import { cn } from "@/lib/utils";
+import type { StreamHistory } from "@/stores/ui";
+import { useUiStore } from "@/stores/ui";
+
 import { aggregate } from "./aggregate";
 
 function MetricCard({
@@ -28,20 +30,17 @@ function MetricCard({
   return (
     <motion.div
       variants={variants.listItem}
-      className="rounded-xl border border-line bg-surface px-4 py-3.5"
+      className="border-line bg-surface rounded-xl border px-4 py-3.5"
     >
       <div className="flex items-baseline gap-1">
         <span
-          className={cn(
-            "text-2xl tabular-nums leading-none",
-            accent ? "text-gold" : "text-ink",
-          )}
+          className={cn("text-2xl leading-none tabular-nums", accent ? "text-gold" : "text-ink")}
         >
           {value}
         </span>
-        {unit && <span className="text-xs text-ink-3">{unit}</span>}
+        {unit && <span className="text-ink-3 text-xs">{unit}</span>}
       </div>
-      <div className="text-[11px] text-ink-3 mt-2">{label}</div>
+      <div className="text-ink-3 mt-2 text-[11px]">{label}</div>
     </motion.div>
   );
 }
@@ -88,19 +87,19 @@ function StreamRow({
   return (
     <motion.div
       variants={variants.listItem}
-      className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface"
+      className="hover:bg-surface flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors"
     >
       <span
-        className="size-2.5 flex-none rounded-full ring-2 ring-inset ring-black/10"
+        className="size-2.5 flex-none rounded-full ring-2 ring-black/10 ring-inset"
         style={{ background: color }}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 truncate text-xs">
-          <span className="min-w-0 truncate text-ink-2">{source}</span>
+          <span className="text-ink-2 min-w-0 truncate">{source}</span>
           {sink && (
             <>
-              <ArrowRight className="size-3.5 flex-none text-gold" strokeWidth={2.5} />
-              <span className="min-w-0 truncate text-ink">{sink}</span>
+              <ArrowRight className="text-gold size-3.5 flex-none" strokeWidth={2.5} />
+              <span className="text-ink min-w-0 truncate">{sink}</span>
             </>
           )}
         </div>
@@ -144,10 +143,7 @@ export function StatsView() {
     [sessions],
   );
 
-  const streamById = useMemo(
-    () => new Map(allStreams.map((s) => [s.id, s])),
-    [allStreams],
-  );
+  const streamById = useMemo(() => new Map(allStreams.map((s) => [s.id, s])), [allStreams]);
 
   const { avgRtt, avgLoss, totalKbps } = aggregate(stats);
 
@@ -166,7 +162,7 @@ export function StatsView() {
         <MetricCard value={String(Math.round(totalKbps))} unit="kbps" label="banda total" />
       </motion.div>
 
-      <p className="mb-2 px-3 text-[11px] text-ink-3">Por stream</p>
+      <p className="text-ink-3 mb-2 px-3 text-[11px]">Por stream</p>
 
       {stats.length === 0 ? (
         <Empty>
@@ -179,7 +175,7 @@ export function StatsView() {
           variants={variants.listStagger}
           initial="hidden"
           animate="show"
-          className="rounded-xl border border-line bg-board/40 p-1"
+          className="border-line bg-board/40 rounded-xl border p-1"
         >
           {stats.map((stat) => (
             <StreamRow

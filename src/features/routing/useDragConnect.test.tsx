@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook, act, render } from "@testing-library/react";
 import { useEffect, useRef } from "react";
-import { PortRegistryProvider, usePortRegistry } from "./usePortRegistry";
-import { useDragConnect } from "./useDragConnect";
+import { act, render, renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
 import type { PortRef } from "./resolveConnection";
+import { useDragConnect } from "./useDragConnect";
+import { PortRegistryProvider, usePortRegistry } from "./usePortRegistry";
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <PortRegistryProvider>{children}</PortRegistryProvider>;
@@ -12,24 +13,23 @@ function wrapper({ children }: { children: React.ReactNode }) {
 describe("useDragConnect", () => {
   it("starts inactive", () => {
     const boardRef = { current: document.createElement("div") };
-    const { result } = renderHook(
-      () => useDragConnect({ boardRef, onConnect: vi.fn() }),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useDragConnect({ boardRef, onConnect: vi.fn() }), {
+      wrapper,
+    });
     expect(result.current.drag.active).toBe(false);
   });
 
   it("activates on startDrag and tracks the origin port", () => {
     const boardRef = { current: document.createElement("div") };
-    const { result } = renderHook(
-      () => useDragConnect({ boardRef, onConnect: vi.fn() }),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useDragConnect({ boardRef, onConnect: vi.fn() }), {
+      wrapper,
+    });
     act(() => {
-      result.current.startDrag(
-        { peerId: "A", deviceId: "mic", kind: "src" },
-        { clientX: 10, clientY: 10, pointerId: 1 } as unknown as React.PointerEvent,
-      );
+      result.current.startDrag({ peerId: "A", deviceId: "mic", kind: "src" }, {
+        clientX: 10,
+        clientY: 10,
+        pointerId: 1,
+      } as unknown as React.PointerEvent);
     });
     expect(result.current.drag.active).toBe(true);
     expect(result.current.drag.from?.peerId).toBe("A");
@@ -84,10 +84,11 @@ describe("useDragConnect finish", () => {
     document.elementFromPoint = () => api.originEl!;
 
     act(() => {
-      api.startDrag!(
-        { peerId: "A", deviceId: "mic", kind: "src" },
-        { clientX: 5, clientY: 5, pointerId: 1 } as unknown as React.PointerEvent,
-      );
+      api.startDrag!({ peerId: "A", deviceId: "mic", kind: "src" }, {
+        clientX: 5,
+        clientY: 5,
+        pointerId: 1,
+      } as unknown as React.PointerEvent);
     });
     act(() => {
       window.dispatchEvent(new PointerEvent("pointerup", { clientX: 5, clientY: 5 }));
@@ -102,10 +103,11 @@ describe("useDragConnect finish", () => {
     document.elementFromPoint = () => api.targetEl!;
 
     act(() => {
-      api.startDrag!(
-        { peerId: "A", deviceId: "mic", kind: "src" },
-        { clientX: 5, clientY: 5, pointerId: 1 } as unknown as React.PointerEvent,
-      );
+      api.startDrag!({ peerId: "A", deviceId: "mic", kind: "src" }, {
+        clientX: 5,
+        clientY: 5,
+        pointerId: 1,
+      } as unknown as React.PointerEvent);
     });
     act(() => {
       window.dispatchEvent(new PointerEvent("pointerup", { clientX: 60, clientY: 60 }));

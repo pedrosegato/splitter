@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+
 import { Badge } from "@/components/ui/badge";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -18,19 +12,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSettingsForm } from "./useSettingsForm";
-import { useThemeStore, applyTheme } from "@/stores/theme";
-import { useUpdater } from "@/hooks/useUpdater";
-import { useIdentity } from "@/hooks/useIdentity";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useSetDeviceName } from "@/hooks/useDeviceName";
+import { useIdentity } from "@/hooks/useIdentity";
 import { useResetSettings } from "@/hooks/useSettings";
+import { useUpdater } from "@/hooks/useUpdater";
+import { applyTheme, useThemeStore } from "@/stores/theme";
+
+import { useSettingsForm } from "./useSettingsForm";
 
 function AppVersion() {
   const [v, setV] = useState("");
   useEffect(() => {
-    import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setV).catch(() => setV("?"));
+    import("@tauri-apps/api/app")
+      .then((m) => m.getVersion())
+      .then(setV)
+      .catch(() => setV("?"));
   }, []);
-  return <span className="text-[11px] text-ink-2">{v || "…"}</span>;
+  return <span className="text-ink-2 text-[11px]">{v || "…"}</span>;
 }
 
 type Props = {
@@ -40,18 +40,13 @@ type Props = {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[11px] text-ink-3 font-medium mb-[8px] mt-[14px] first:mt-0">
-      {children}
-    </p>
+    <p className="text-ink-3 mt-[14px] mb-[8px] text-[11px] font-medium first:mt-0">{children}</p>
   );
 }
 
 function Row({ children }: { children: React.ReactNode }) {
   return (
-    <Field
-      orientation="horizontal"
-      className="gap-4 py-[7px] px-[11px] hover:bg-elev-2"
-    >
+    <Field orientation="horizontal" className="hover:bg-elev-2 gap-4 px-[11px] py-[7px]">
       {children}
     </Field>
   );
@@ -59,13 +54,16 @@ function Row({ children }: { children: React.ReactNode }) {
 
 function SettingLabel({ htmlFor, children }: { htmlFor?: string; children: React.ReactNode }) {
   return (
-    <FieldLabel htmlFor={htmlFor} className="text-[12.5px] text-ink cursor-default">
+    <FieldLabel htmlFor={htmlFor} className="text-ink cursor-default text-[12.5px]">
       {children}
     </FieldLabel>
   );
 }
 
-function useDebouncedSetter(set: (key: string, value: string | number | boolean) => void, delay = 300) {
+function useDebouncedSetter(
+  set: (key: string, value: string | number | boolean) => void,
+  delay = 300,
+) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   return useCallback(
     (key: string, value: string | number | boolean) => {
@@ -76,7 +74,8 @@ function useDebouncedSetter(set: (key: string, value: string | number | boolean)
   );
 }
 
-const inputClass = "h-[28px] text-[12px] bg-board border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold";
+const inputClass =
+  "h-[28px] text-[12px] bg-board border-line-2 text-ink focus-visible:ring-gold focus-visible:border-gold";
 
 function SettingSelect({
   id,
@@ -94,7 +93,7 @@ function SettingSelect({
       <SelectTrigger
         id={id}
         size="sm"
-        className="w-[110px] h-[28px] text-[12px] bg-board border-line-2 text-ink focus-visible:ring-gold"
+        className="bg-board border-line-2 text-ink focus-visible:ring-gold h-[28px] w-[110px] text-[12px]"
       >
         <SelectValue />
       </SelectTrigger>
@@ -150,7 +149,10 @@ function NumberInput({
 
 type JitterModeString = "auto" | "min" | "fixed";
 
-function parseJitterMode(mode: { fixed: number } | "auto" | "min"): { base: JitterModeString; fixedMs: number } {
+function parseJitterMode(mode: { fixed: number } | "auto" | "min"): {
+  base: JitterModeString;
+  fixedMs: number;
+} {
   if (mode === "auto") return { base: "auto", fixedMs: 40 };
   if (mode === "min") return { base: "min", fixedMs: 40 };
   return { base: "fixed", fixedMs: mode.fixed };
@@ -196,7 +198,9 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
     }
   }, [isSaved]);
 
-  const jitter = settings ? parseJitterMode(settings.jitter_mode) : { base: "auto" as JitterModeString, fixedMs: 40 };
+  const jitter = settings
+    ? parseJitterMode(settings.jitter_mode)
+    : { base: "auto" as JitterModeString, fixedMs: 40 };
 
   if (isLoading || !settings) return null;
 
@@ -205,20 +209,18 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
-        className="w-[420px] max-w-[420px] bg-surface border-line gap-0 p-0"
+        className="bg-surface border-line w-[420px] max-w-[420px] gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg flex-row items-center justify-between">
-          <DialogTitle className="text-[11px] text-ink-3 font-medium">
-            Configurações
-          </DialogTitle>
+        <DialogHeader className="bg-elev-1 border-line flex-row items-center justify-between rounded-t-lg border-b px-[15px] py-3">
+          <DialogTitle className="text-ink-3 text-[11px] font-medium">Configurações</DialogTitle>
           {savedVisible && (
-            <Badge variant="secondary" className="text-[9.5px] text-gold tracking-wide">
+            <Badge variant="secondary" className="text-gold text-[9.5px] tracking-wide">
               salvo
             </Badge>
           )}
         </DialogHeader>
 
-        <div className="px-[11px] py-[11px] overflow-y-auto max-h-[520px]">
+        <div className="max-h-[520px] overflow-y-auto px-[11px] py-[11px]">
           <SectionLabel>Dispositivo</SectionLabel>
 
           <FieldGroup className="gap-0">
@@ -330,7 +332,9 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
             )}
 
             <Row>
-              <SettingLabel htmlFor="jitter-max-depth">Profundidade máxima jitter (ms)</SettingLabel>
+              <SettingLabel htmlFor="jitter-max-depth">
+                Profundidade máxima jitter (ms)
+              </SettingLabel>
               <NumberInput
                 id="jitter-max-depth"
                 settingKey="jitter_max_depth_ms"
@@ -396,17 +400,17 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                   }
                 }}
                 size="sm"
-                className="border border-line-2 overflow-hidden"
+                className="border-line-2 overflow-hidden border"
               >
                 <ToggleGroupItem
                   value="dark"
-                  className="px-[10px] text-[11px] bg-board text-ink-2 hover:bg-board hover:text-ink data-[state=on]:bg-gold data-[state=on]:text-[#1c1c1f] data-[state=on]:font-semibold"
+                  className="bg-board text-ink-2 hover:bg-board hover:text-ink data-[state=on]:bg-gold px-[10px] text-[11px] data-[state=on]:font-semibold data-[state=on]:text-[#1c1c1f]"
                 >
                   Escuro
                 </ToggleGroupItem>
                 <ToggleGroupItem
                   value="light"
-                  className="px-[10px] text-[11px] border-l border-line-2 bg-board text-ink-2 hover:bg-board hover:text-ink data-[state=on]:bg-gold data-[state=on]:text-[#1c1c1f] data-[state=on]:font-semibold"
+                  className="border-line-2 bg-board text-ink-2 hover:bg-board hover:text-ink data-[state=on]:bg-gold border-l px-[10px] text-[11px] data-[state=on]:font-semibold data-[state=on]:text-[#1c1c1f]"
                 >
                   Claro
                 </ToggleGroupItem>
@@ -426,13 +430,13 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               <SettingLabel>Atualizações</SettingLabel>
               {updateState.status === "available" ? (
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="text-[10px] text-gold">
+                  <Badge variant="secondary" className="text-gold text-[10px]">
                     v{updateState.version}
                   </Badge>
                   <Button
                     size="sm"
                     onClick={updateState.onInstall}
-                    className="text-[11px] bg-gold text-[#1c1c1f] hover:bg-gold/90"
+                    className="bg-gold hover:bg-gold/90 text-[11px] text-[#1c1c1f]"
                   >
                     instalar
                   </Button>
@@ -442,26 +446,28 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                   variant="secondary"
                   size="sm"
                   onClick={checkForUpdates}
-                  disabled={updateState.status === "checking" || updateState.status === "installing"}
+                  disabled={
+                    updateState.status === "checking" || updateState.status === "installing"
+                  }
                   className="text-[11px]"
                 >
                   {updateState.status === "checking"
                     ? "verificando…"
                     : updateState.status === "installing"
-                    ? "instalando…"
-                    : "buscar atualizações"}
+                      ? "instalando…"
+                      : "buscar atualizações"}
                 </Button>
               )}
             </Row>
           </FieldGroup>
         </div>
 
-        <div className="flex items-center justify-between px-[13px] py-[9px] border-t border-line">
+        <div className="border-line flex items-center justify-between border-t px-[13px] py-[9px]">
           <Button
             variant="outline"
             size="sm"
             onClick={handleReset}
-            className="text-[11px] text-ink-3 hover:text-gold hover:border-gold"
+            className="text-ink-3 hover:text-gold hover:border-gold text-[11px]"
           >
             Restaurar padrões
           </Button>

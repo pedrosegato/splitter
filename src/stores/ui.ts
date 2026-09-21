@@ -1,4 +1,5 @@
 import { create } from "zustand";
+
 import type { StreamStat } from "@/bindings";
 
 const HISTORY_CAP = 60;
@@ -51,6 +52,5 @@ export const useUiStore = create<UiState>((set) => ({
       stats: tick,
       statsHistory: pushStatsHistory(state.statsHistory, tick),
     })),
-  rememberNames: (names) =>
-    set((state) => ({ knownNames: { ...state.knownNames, ...names } })),
+  rememberNames: (names) => set((state) => ({ knownNames: { ...state.knownNames, ...names } })),
 }));

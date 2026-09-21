@@ -1,4 +1,5 @@
 import { motion, useReducedMotion } from "motion/react";
+
 import { durations } from "@/lib/motion";
 
 type SparklineProps = {

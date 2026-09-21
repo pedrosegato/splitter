@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { cable, catenaryDroop, sagFor, streamColor } from "./useWireGeometry";
 
 describe("catenaryDroop", () => {

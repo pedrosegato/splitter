@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { springs, durations, variants } from "./motion";
+import { describe, expect, it } from "vitest";
+
+import { durations, springs, variants } from "./motion";
 
 describe("motion tokens", () => {
   it("exposes spring presets as spring transitions", () => {

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { motionValue, type MotionValue } from "motion/react";
+import { type MotionValue, motionValue } from "motion/react";
 
 const animateGate = motionValue(1);
 let subscriberCount = 0;

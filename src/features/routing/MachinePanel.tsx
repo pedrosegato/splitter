@@ -1,15 +1,16 @@
-import { cn } from "@/lib/utils";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
 import { Port } from "./Port";
-import { resolveConnection, type PortRef } from "./resolveConnection";
+import { type PortRef, resolveConnection } from "./resolveConnection";
 
 export const panelCardClass =
   "relative z-[2] w-[262px] rounded-xl border border-line bg-surface shadow-sm";
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[10.5px] text-ink-3 font-medium px-[11px] pt-[3px] pb-[7px]">
+    <div className="text-ink-3 px-[11px] pt-[3px] pb-[7px] text-[10.5px] font-medium">
       {children}
     </div>
   );
@@ -64,23 +65,19 @@ function DevRow({
     dragFrom.peerId === thisRef.peerId &&
     dragFrom.deviceId === thisRef.deviceId &&
     dragFrom.kind === thisRef.kind;
-  const highlighted =
-    !!dragActive && !!dragFrom && resolveConnection(dragFrom, thisRef) !== null;
+  const highlighted = !!dragActive && !!dragFrom && resolveConnection(dragFrom, thisRef) !== null;
   const dimmed = !!dragActive && !!dragFrom && !isOrigin && !highlighted;
 
   return (
     <div
       className={cn(
-        "relative flex items-center gap-2.5 px-[11px] py-[5px] cursor-default",
+        "relative flex cursor-default items-center gap-2.5 px-[11px] py-[5px]",
         isLeft ? "justify-end pr-[22px] text-right" : "pl-[22px]",
       )}
     >
-      <span className="text-[12px] text-ink-2">{dev.name}</span>
+      <span className="text-ink-2 text-[12px]">{dev.name}</span>
       <span
-        className={cn(
-          "absolute top-1/2 -translate-y-1/2",
-          isLeft ? "right-[-7px]" : "left-[-7px]",
-        )}
+        className={cn("absolute top-1/2 -translate-y-1/2", isLeft ? "right-[-7px]" : "left-[-7px]")}
       >
         <Port
           peerId={peerId}
@@ -113,19 +110,17 @@ export function MachinePanel({
   onConnectClick,
   onDisconnect,
 }: MachinePanelProps) {
-  const isLeft = side === "left";
-
   if (side === "right" && !connected) {
     return (
       <Card className={cn(panelCardClass, "gap-0 py-0")}>
-        <div className="py-[44px] px-5 text-center flex flex-col items-center gap-[5px]">
-          <div className="w-[38px] h-[38px] rounded-[2px] border border-dashed border-line-2 text-ink-3 flex items-center justify-center text-[18px] mb-2">
+        <div className="flex flex-col items-center gap-[5px] px-5 py-[44px] text-center">
+          <div className="border-line-2 text-ink-3 mb-2 flex h-[38px] w-[38px] items-center justify-center rounded-[2px] border border-dashed text-[18px]">
             +
           </div>
           <Button
             size="sm"
             onClick={onConnectClick}
-            className="mt-[13px] text-[11.5px] text-line bg-gold font-semibold hover:brightness-110"
+            className="text-line bg-gold mt-[13px] text-[11.5px] font-semibold hover:brightness-110"
           >
             Conectar máquina
           </Button>
@@ -136,18 +131,18 @@ export function MachinePanel({
 
   return (
     <Card className={cn(panelCardClass, "gap-0 py-0")}>
-      <div className="flex items-center gap-[9px] px-[11px] py-[9px] bg-elev-1 border-b border-line rounded-t-xl">
+      <div className="bg-elev-1 border-line flex items-center gap-[9px] rounded-t-xl border-b px-[11px] py-[9px]">
         <span
           className={cn(
-            "w-[7px] h-[7px] rounded-full shrink-0",
+            "h-[7px] w-[7px] shrink-0 rounded-full",
             connected ? "bg-green" : "bg-[#555]",
           )}
         />
-        <span className="flex-1 min-w-0 truncate font-semibold text-[12.5px] tracking-[0.2px]">
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold tracking-[0.2px]">
           {name}
         </span>
         {!isSelf && (
-          <div className="ml-auto flex items-center gap-2 shrink-0">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <Button
               variant="outline"
               size="icon-xs"
@@ -179,7 +174,7 @@ export function MachinePanel({
         ))}
       </div>
 
-      <div className="h-px bg-line mx-[11px]" />
+      <div className="bg-line mx-[11px] h-px" />
 
       <div className="py-[7px] pb-[9px]">
         <SectionHeading>Fontes</SectionHeading>

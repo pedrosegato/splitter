@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+
 import { events } from "@/lib/api";
 import { useUiStore } from "@/stores/ui";
 

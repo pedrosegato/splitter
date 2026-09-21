@@ -1,5 +1,5 @@
-import { useSettings, useSetSetting, useSetAutostart } from "@/hooks/useSettings";
 import type { JitterMode } from "@/bindings";
+import { useSetAutostart, useSetSetting, useSettings } from "@/hooks/useSettings";
 
 function toBackendString(value: string | number | boolean): string {
   if (typeof value === "boolean") return value ? "true" : "false";

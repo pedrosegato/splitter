@@ -1,17 +1,17 @@
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/useSnapshot");
 vi.mock("@/hooks/useDevices");
 vi.mock("@/hooks/useStreams");
 vi.mock("@/hooks/useIdentity");
 
-import { useSnapshot } from "@/hooks/useSnapshot";
 import { useDevices, usePeerDevices } from "@/hooks/useDevices";
-import { useOpenStream, useRequestStream } from "@/hooks/useStreams";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useSnapshot } from "@/hooks/useSnapshot";
+import { useOpenStream, useRequestStream } from "@/hooks/useStreams";
 
 const mockedUseSnapshot = useSnapshot as ReturnType<typeof vi.fn>;
 const mockedUseDevices = useDevices as ReturnType<typeof vi.fn>;
@@ -23,7 +23,13 @@ const mockedUseIdentity = useIdentity as ReturnType<typeof vi.fn>;
 const SESSION = { id: "sess-1", remote_peer_id: "peer-b", state: "active", streams: [] };
 const DEVICES = [
   { id: "mic-1", name: "Mic", kind: "Input", default_sample_rate: 44100, channels: 2 },
-  { id: "sys-1", name: "SystemAudio", kind: "SystemAudio", default_sample_rate: 48000, channels: 2 },
+  {
+    id: "sys-1",
+    name: "SystemAudio",
+    kind: "SystemAudio",
+    default_sample_rate: 48000,
+    channels: 2,
+  },
 ];
 
 function makeWrapper() {
@@ -33,8 +39,8 @@ function makeWrapper() {
   );
 }
 
-import { useWiring } from "./useWiring";
 import type { PortRef } from "./resolveConnection";
+import { useWiring } from "./useWiring";
 
 describe("useWiring", () => {
   let mutateSpy: ReturnType<typeof vi.fn>;
@@ -79,9 +85,7 @@ describe("useWiring", () => {
     });
 
     await waitFor(() => expect(mutateSpy).toHaveBeenCalledOnce());
-    expect(mutateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceIsSystem: false }),
-    );
+    expect(mutateSpy).toHaveBeenCalledWith(expect.objectContaining({ sourceIsSystem: false }));
   });
 
   it("order-agnostic: dragging sink first then src still resolves the connection", async () => {

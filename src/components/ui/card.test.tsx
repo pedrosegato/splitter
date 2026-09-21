@@ -1,12 +1,15 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
-import { Card, CardHeader, CardTitle, CardContent } from "./card";
+import { describe, expect, it } from "vitest";
+
+import { Card, CardContent, CardHeader, CardTitle } from "./card";
 
 describe("Card", () => {
   it("composes header and content", () => {
     render(
       <Card>
-        <CardHeader><CardTitle>Latência</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Latência</CardTitle>
+        </CardHeader>
         <CardContent>12 ms</CardContent>
       </Card>,
     );

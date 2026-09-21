@@ -1,16 +1,13 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+
+import type { PermStatus } from "@/bindings";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePermissions, useRequestPermission } from "@/hooks/usePermissions";
 import { variants } from "@/lib/motion";
-import type { PermStatus } from "@/bindings";
+
 import { useOnboarding } from "./useOnboarding";
 
 type Step = "welcome" | "permissions" | "firewall" | "ready";
@@ -19,19 +16,19 @@ const STEPS: Step[] = ["welcome", "permissions", "firewall", "ready"];
 function StepIndicator({ current }: { current: Step }) {
   const idx = STEPS.indexOf(current);
   return (
-    <div className="flex gap-1.5 justify-center">
+    <div className="flex justify-center gap-1.5">
       {STEPS.map((s, i) =>
         i === idx ? (
           <motion.span
             key={s}
             layoutId="wizard-dot"
-            className="inline-block h-[3px] w-5 rounded-full bg-gold"
+            className="bg-gold inline-block h-[3px] w-5 rounded-full"
           />
         ) : (
           <span
             key={s}
             className={`inline-block h-[3px] rounded-full transition-all ${
-              i < idx ? "w-3 bg-gold/40" : "w-3 bg-surface-2"
+              i < idx ? "bg-gold/40 w-3" : "bg-surface-2 w-3"
             }`}
           />
         ),
@@ -65,9 +62,9 @@ function PermissionRow({
   };
 
   return (
-    <div className="flex items-center justify-between py-[7px] px-[11px] bg-elev-2">
+    <div className="bg-elev-2 flex items-center justify-between px-[11px] py-[7px]">
       <div className="flex flex-col gap-0.5">
-        <span className="text-[12.5px] text-ink">{label}</span>
+        <span className="text-ink text-[12.5px]">{label}</span>
         <Badge
           variant="secondary"
           className={`text-[10px] ${
@@ -98,12 +95,12 @@ function PermissionRow({
 function WelcomeStep() {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-[13px] text-ink leading-relaxed">
+      <p className="text-ink text-[13px] leading-relaxed">
         Splitter compartilha áudio entre PCs na sua rede local.
       </p>
-      <p className="text-[12px] text-ink-2 leading-relaxed">
-        Em poucos passos você configura as permissões necessárias e o Splitter
-        estará pronto para uso.
+      <p className="text-ink-2 text-[12px] leading-relaxed">
+        Em poucos passos você configura as permissões necessárias e o Splitter estará pronto para
+        uso.
       </p>
     </div>
   );
@@ -119,30 +116,26 @@ function PermissionsStep({ onSkip }: { onSkip: () => void }) {
   if (allNA) {
     return (
       <div className="flex flex-col gap-3">
-        <p className="text-[12px] text-ink-2">
-          Nenhuma permissão necessária nesta plataforma.
-        </p>
+        <p className="text-ink-2 text-[12px]">Nenhuma permissão necessária nesta plataforma.</p>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-[12px] text-ink-2 mb-1">
-        Permissões necessárias para capturar áudio.
-      </p>
+      <p className="text-ink-2 mb-1 text-[12px]">Permissões necessárias para capturar áudio.</p>
       {mic !== "not_applicable" && (
         <PermissionRow label="Microfone" status={mic} kind="microphone" />
       )}
       {screen !== "not_applicable" && (
         <PermissionRow label="Áudio do sistema" status={screen} kind="screen" />
       )}
-      <div className="flex justify-end mt-1">
+      <div className="mt-1 flex justify-end">
         <Button
           variant="ghost"
           size="sm"
           onClick={onSkip}
-          className="text-[11px] text-ink-3 hover:text-ink-2"
+          className="text-ink-3 hover:text-ink-2 text-[11px]"
         >
           Pular
         </Button>
@@ -154,9 +147,9 @@ function PermissionsStep({ onSkip }: { onSkip: () => void }) {
 function FirewallStep() {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-[12px] text-ink-2 leading-relaxed">
-        A rede local precisa permitir as portas de sinalização (TCP) e áudio
-        (UDP). Em redes domésticas geralmente funciona sem ajustes.
+      <p className="text-ink-2 text-[12px] leading-relaxed">
+        A rede local precisa permitir as portas de sinalização (TCP) e áudio (UDP). Em redes
+        domésticas geralmente funciona sem ajustes.
       </p>
     </div>
   );
@@ -164,11 +157,11 @@ function FirewallStep() {
 
 function ReadyStep({ onComplete }: { onComplete: () => void }) {
   return (
-    <div className="flex flex-col gap-4 items-center text-center">
-      <p className="text-[13px] text-ink">Splitter está pronto para uso.</p>
+    <div className="flex flex-col items-center gap-4 text-center">
+      <p className="text-ink text-[13px]">Splitter está pronto para uso.</p>
       <Button
         onClick={onComplete}
-        className="text-[11px] bg-gold text-[#1c1c1f] hover:bg-gold/90 px-5 h-8"
+        className="bg-gold hover:bg-gold/90 h-8 px-5 text-[11px] text-[#1c1c1f]"
       >
         Concluir
       </Button>
@@ -215,15 +208,15 @@ export function OnboardingWizard() {
         onInteractOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
         aria-describedby={undefined}
-        className="w-[400px] max-w-[400px] bg-surface border-line gap-0 p-0"
+        className="bg-surface border-line w-[400px] max-w-[400px] gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg">
-          <DialogTitle className="text-[11px] text-ink-3 font-medium">
+        <DialogHeader className="bg-elev-1 border-line rounded-t-lg border-b px-[15px] py-3">
+          <DialogTitle className="text-ink-3 text-[11px] font-medium">
             {stepTitles[step]}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="px-[15px] py-[14px] min-h-[140px] overflow-hidden">
+        <div className="min-h-[140px] overflow-hidden px-[15px] py-[14px]">
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div
               key={step}
@@ -241,17 +234,12 @@ export function OnboardingWizard() {
           </AnimatePresence>
         </div>
 
-        <div className="px-[13px] py-[9px] border-t border-line flex items-center justify-between gap-2">
+        <div className="border-line flex items-center justify-between gap-2 border-t px-[13px] py-[9px]">
           <StepIndicator current={step} />
 
           <div className="flex gap-2">
             {idx > 0 && step !== "ready" && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={back}
-                className="text-[11px]"
-              >
+              <Button variant="secondary" size="sm" onClick={back} className="text-[11px]">
                 Voltar
               </Button>
             )}

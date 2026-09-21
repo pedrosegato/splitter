@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion } from "motion/react";
 import { ArrowRight } from "lucide-react";
+import { motion } from "motion/react";
+
 import type { StreamSnapshot } from "@/bindings";
-import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
-import { useUiStore } from "@/stores/ui";
-import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
 import { Toggle } from "@/components/ui/toggle";
-import { streamColor } from "./useWireGeometry";
+import { useCloseStream, useStreamControl } from "@/hooks/useStreams";
 import { deviceLabel } from "@/lib/deviceName";
 import { variants } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { useUiStore } from "@/stores/ui";
+
+import { streamColor } from "./useWireGeometry";
 
 type Props = {
   sessionId: string;
@@ -105,30 +107,23 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
       onClick={() => selectStream(stream.id)}
       onKeyDown={(e) => e.key === "Enter" && selectStream(stream.id)}
       className={cn(
-        "relative flex w-[232px] flex-none flex-col justify-center border-r border-line px-3 py-2.5 cursor-default transition-colors",
+        "border-line relative flex w-[232px] flex-none cursor-default flex-col justify-center border-r px-3 py-2.5 transition-colors",
         selected ? "bg-elev-2" : "bg-elev-0 hover:bg-elev-2",
       )}
-      style={
-        selected
-          ? { boxShadow: "inset 3px 0 0 var(--color-gold)" }
-          : undefined
-      }
+      style={selected ? { boxShadow: "inset 3px 0 0 var(--color-gold)" } : undefined}
     >
-      <div className="flex items-center gap-2 mb-2">
-        <span
-          className="w-2 h-[18px] rounded-[1px] flex-none"
-          style={{ background: color }}
-        />
-        <span className="flex flex-1 min-w-0 items-center gap-1 text-[11px] font-medium text-ink">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="h-[18px] w-2 flex-none rounded-[1px]" style={{ background: color }} />
+        <span className="text-ink flex min-w-0 flex-1 items-center gap-1 text-[11px] font-medium">
           <span className="min-w-0 truncate">{deviceLabel(stream.source_device)}</span>
-          <ArrowRight className="size-3 flex-none text-ink-3" strokeWidth={2.5} />
+          <ArrowRight className="text-ink-3 size-3 flex-none" strokeWidth={2.5} />
           <span className="min-w-0 truncate">{deviceLabel(stream.sink_device)}</span>
         </span>
         <Button
           variant="ghost"
           size="icon-xs"
           onClick={handleClose}
-          className="flex-none text-[10px] text-ink-3 hover:bg-transparent hover:text-gold leading-none"
+          className="text-ink-3 hover:text-gold flex-none text-[10px] leading-none hover:bg-transparent"
           aria-label="fechar stream"
         >
           ✕
@@ -140,20 +135,17 @@ export function ChannelStrip({ sessionId, stream, selected }: Props) {
           pressed={muted}
           onClick={handleMute}
           className={cn(
-            "flex-none size-6 min-w-6 p-0 border text-[10px] font-medium",
+            "size-6 min-w-6 flex-none border p-0 text-[10px] font-medium",
             muted
-              ? "bg-gold border-gold text-[#161618] hover:bg-gold"
-              : "bg-transparent border-line-2 text-ink-2 hover:bg-transparent hover:border-gold hover:text-gold",
+              ? "bg-gold border-gold hover:bg-gold text-[#161618]"
+              : "border-line-2 text-ink-2 hover:border-gold hover:text-gold bg-transparent hover:bg-transparent",
           )}
           aria-label={muted ? "desmutar" : "mutar"}
         >
           M
         </Toggle>
 
-        <div
-          className="flex-1"
-          style={{ "--primary": color } as React.CSSProperties}
-        >
+        <div className="flex-1" style={{ "--primary": color } as React.CSSProperties}>
           <Slider
             value={[displayVolume]}
             min={0}

@@ -1,9 +1,11 @@
-import { render, fireEvent, within, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { SettingsDialog } from "./SettingsDialog";
-import { useThemeStore, applyTheme } from "@/stores/theme";
+import { act, fireEvent, render, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import type { Settings } from "@/bindings";
+import { applyTheme, useThemeStore } from "@/stores/theme";
+
+import { SettingsDialog } from "./SettingsDialog";
 
 const mockSet = vi.fn();
 const mockSetAutostart = vi.fn();
@@ -92,9 +94,7 @@ describe("SettingsDialog", () => {
       wrapper: makeWrapper(),
     });
 
-    const switchEl = document.body.querySelector(
-      '[id="auto-accept-trusted"]',
-    ) as HTMLButtonElement;
+    const switchEl = document.body.querySelector('[id="auto-accept-trusted"]') as HTMLButtonElement;
     expect(switchEl).toBeTruthy();
 
     fireEvent.click(switchEl);
@@ -145,9 +145,7 @@ describe("SettingsDialog", () => {
       wrapper: makeWrapper(),
     });
 
-    const switchEl = document.body.querySelector(
-      '[id="auto-start-system"]',
-    ) as HTMLButtonElement;
+    const switchEl = document.body.querySelector('[id="auto-start-system"]') as HTMLButtonElement;
     expect(switchEl).toBeTruthy();
 
     fireEvent.click(switchEl);
@@ -161,9 +159,7 @@ describe("SettingsDialog", () => {
       wrapper: makeWrapper(),
     });
 
-    const switchEl = document.body.querySelector(
-      '[id="metrics-enabled"]',
-    ) as HTMLButtonElement;
+    const switchEl = document.body.querySelector('[id="metrics-enabled"]') as HTMLButtonElement;
     expect(switchEl).toBeTruthy();
 
     fireEvent.click(switchEl);
@@ -176,9 +172,7 @@ describe("SettingsDialog", () => {
       wrapper: makeWrapper(),
     });
 
-    const input = within(document.body).getByLabelText(
-      "Nome do dispositivo",
-    ) as HTMLInputElement;
+    const input = within(document.body).getByLabelText("Nome do dispositivo") as HTMLInputElement;
     expect(input).toBeTruthy();
 
     fireEvent.change(input, { target: { value: "Estúdio do Pedro" } });
@@ -192,9 +186,7 @@ describe("SettingsDialog", () => {
       wrapper: makeWrapper(),
     });
 
-    expect(
-      within(document.body).getByText("Restaurar padrões"),
-    ).toBeTruthy();
+    expect(within(document.body).getByText("Restaurar padrões")).toBeTruthy();
   });
 
   describe("number input debounce", () => {
@@ -208,9 +200,7 @@ describe("SettingsDialog", () => {
         wrapper: makeWrapper(),
       });
 
-      const input = document.body.querySelector(
-        '[id="signaling-port"]',
-      ) as HTMLInputElement;
+      const input = document.body.querySelector('[id="signaling-port"]') as HTMLInputElement;
       expect(input).toBeTruthy();
 
       fireEvent.change(input, { target: { value: "7400" } });

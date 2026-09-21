@@ -1,10 +1,10 @@
-import { render, act } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
-import { usePortRegistry, PortRegistryProvider } from "./usePortRegistry";
+import { act, render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
 import { Port } from "./Port";
+import { PortRegistryProvider, usePortRegistry } from "./usePortRegistry";
 
 function RegistryProbe({
-  portId,
   onRegistry,
 }: {
   portId: string;
@@ -82,11 +82,9 @@ describe("Port + PortRegistryProvider", () => {
   it("throws when usePortRegistry is used outside provider", () => {
     const originalError = console.error;
     console.error = () => {};
-    expect(() =>
-      render(
-        <RegistryProbe portId="x" onRegistry={() => {}} />,
-      ),
-    ).toThrow("PortRegistry missing");
+    expect(() => render(<RegistryProbe portId="x" onRegistry={() => {}} />)).toThrow(
+      "PortRegistry missing",
+    );
     console.error = originalError;
   });
 
@@ -130,9 +128,7 @@ describe("Port + PortRegistryProvider", () => {
     );
 
     act(() => {
-      getByRole("button").dispatchEvent(
-        new PointerEvent("pointerdown", { bubbles: true }),
-      );
+      getByRole("button").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     });
 
     expect(capturedRef).toEqual({ peerId: "p9", deviceId: "d9", kind: "sink" });

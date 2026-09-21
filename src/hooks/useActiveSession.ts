@@ -1,7 +1,9 @@
 import { useMemo } from "react";
-import type { SessionSnapshot, StreamSnapshot, DeviceDescriptor } from "@/bindings";
-import { useSnapshot } from "./useSnapshot";
+
+import type { DeviceDescriptor, SessionSnapshot, StreamSnapshot } from "@/bindings";
+
 import { usePeerDevices } from "./useDevices";
+import { useSnapshot } from "./useSnapshot";
 
 type ActiveSession = {
   session: SessionSnapshot | null;

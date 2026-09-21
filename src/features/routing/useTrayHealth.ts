@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
+
+import type { SessionSnapshot } from "@/bindings";
 import { commands } from "@/lib/api";
 import { useUiStore } from "@/stores/ui";
-import type { SessionSnapshot } from "@/bindings";
 
 type TrayState = "idle" | "active" | "degraded" | "error";
 

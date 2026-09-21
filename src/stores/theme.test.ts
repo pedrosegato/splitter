@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { useThemeStore, applyTheme } from "./theme";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import { applyTheme, useThemeStore } from "./theme";
 
 beforeEach(() => {
   useThemeStore.setState({ theme: "dark" });

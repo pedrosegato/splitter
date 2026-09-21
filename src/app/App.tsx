@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { AudioLines, Minus, Settings, Square, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+
 import { queryClient } from "@/app/queryClient";
-import { mountEventBridge } from "@/lib/events";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IncomingRequestDialog } from "@/features/connect/IncomingRequestDialog";
+import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
+import { RoutingBoard } from "@/features/routing/RoutingBoard";
+import { SettingsDialog } from "@/features/settings/SettingsDialog";
+import { StatsView } from "@/features/stats/StatsView";
+import { mountEventBridge } from "@/lib/events";
 import { variants } from "@/lib/motion";
 import { useUiStore } from "@/stores/ui";
-import { RoutingBoard } from "@/features/routing/RoutingBoard";
-import { StatsView } from "@/features/stats/StatsView";
-import { SettingsDialog } from "@/features/settings/SettingsDialog";
-import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
-import { IncomingRequestDialog } from "@/features/connect/IncomingRequestDialog";
-import { AudioLines, Settings, Minus, Square, X } from "lucide-react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Toaster } from "@/components/ui/sonner";
 
-const isMac =
-  typeof navigator !== "undefined" && /Macintosh|Mac OS X/i.test(navigator.userAgent);
+const isMac = typeof navigator !== "undefined" && /Macintosh|Mac OS X/i.test(navigator.userAgent);
 
 export function App() {
   const activeTab = useUiStore((s) => s.activeTab);
@@ -27,40 +27,42 @@ export function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     mountEventBridge(queryClient).then((fn) => {
-      if (cancelled) { fn(); } else { unlisten = fn; }
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
     });
-    return () => { cancelled = true; unlisten?.(); };
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   return (
-    <div className="h-full flex flex-col font-sans">
+    <div className="flex h-full flex-col font-sans">
       <header
         data-tauri-drag-region
-        className={`h-11 flex items-center border-b border-line shrink-0 bg-elev-0 ${
-          isMac ? "pl-[82px] pr-4" : "pl-3 pr-0"
+        className={`border-line bg-elev-0 flex h-11 shrink-0 items-center border-b ${
+          isMac ? "pr-4 pl-[82px]" : "pr-0 pl-3"
         }`}
       >
         <div data-tauri-drag-region className="flex items-center gap-1.5">
           <AudioLines size={18} className="text-gold shrink-0" />
-          <span className="text-xs font-semibold tracking-wide text-ink">Splitter</span>
+          <span className="text-ink text-xs font-semibold tracking-wide">Splitter</span>
         </div>
         <div className="ml-auto flex items-center gap-3">
-          <Tabs
-            value={activeTab}
-            onValueChange={(v) => setTab(v as "routing" | "stats")}
-          >
-            <TabsList
-              className="h-8 gap-0 rounded-md p-[3px] bg-surface"
-            >
+          <Tabs value={activeTab} onValueChange={(v) => setTab(v as "routing" | "stats")}>
+            <TabsList className="bg-surface h-8 gap-0 rounded-md p-[3px]">
               <TabsTrigger
                 value="routing"
-                className="px-3 text-xs data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 data-[state=active]:shadow-none"
+                className="data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 px-3 text-xs data-[state=active]:shadow-none"
               >
                 Roteamento
               </TabsTrigger>
               <TabsTrigger
                 value="stats"
-                className="px-3 text-xs data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 data-[state=active]:shadow-none"
+                className="data-[state=active]:bg-surface-2 data-[state=active]:text-ink data-[state=inactive]:text-ink-3 px-3 text-xs data-[state=active]:shadow-none"
               >
                 Estatísticas
               </TabsTrigger>
@@ -77,13 +79,13 @@ export function App() {
           </Button>
         </div>
         {!isMac && (
-          <div className="flex items-stretch h-full ml-2">
+          <div className="ml-2 flex h-full items-stretch">
             <Button
               variant="ghost"
               size="icon-xs"
               aria-label="Minimizar"
               onClick={() => getCurrentWindow().minimize()}
-              className="w-[46px] h-full text-ink-2 hover:bg-elev-2 hover:text-ink"
+              className="text-ink-2 hover:bg-elev-2 hover:text-ink h-full w-[46px]"
             >
               <Minus size={15} />
             </Button>
@@ -92,7 +94,7 @@ export function App() {
               size="icon-xs"
               aria-label="Maximizar"
               onClick={() => getCurrentWindow().toggleMaximize()}
-              className="w-[46px] h-full text-ink-2 hover:bg-elev-2 hover:text-ink"
+              className="text-ink-2 hover:bg-elev-2 hover:text-ink h-full w-[46px]"
             >
               <Square size={12} />
             </Button>
@@ -101,14 +103,14 @@ export function App() {
               size="icon-xs"
               aria-label="Fechar"
               onClick={() => getCurrentWindow().close()}
-              className="w-[46px] h-full text-ink-2 hover:bg-[#e81123] hover:text-white"
+              className="text-ink-2 h-full w-[46px] hover:bg-[#e81123] hover:text-white"
             >
               <X size={16} />
             </Button>
           </div>
         )}
       </header>
-      <main className="flex-1 overflow-auto bg-board">
+      <main className="bg-board flex-1 overflow-auto">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={activeTab}

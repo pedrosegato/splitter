@@ -1,5 +1,6 @@
 import { render } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+
 import { Sparkline } from "./Sparkline";
 
 describe("Sparkline", () => {
@@ -48,9 +49,7 @@ describe("Sparkline", () => {
   });
 
   it("uses provided max to scale y-axis", () => {
-    const { container } = render(
-      <Sparkline values={[50]} width={80} height={24} max={100} />,
-    );
+    const { container } = render(<Sparkline values={[50]} width={80} height={24} max={100} />);
     const polyline = container.querySelector("polyline");
     const pointStr = polyline!.getAttribute("points")!;
     const [, y] = pointStr.trim().split(",").map(Number);

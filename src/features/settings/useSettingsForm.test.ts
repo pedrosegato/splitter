@@ -1,7 +1,7 @@
-import { renderHook } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockMutate = vi.fn();
 const mockAutostartMutate = vi.fn();
@@ -36,15 +36,6 @@ vi.mock("@/hooks/useSettings", () => ({
 }));
 
 import { useSettingsForm } from "./useSettingsForm";
-
-function makeWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return ({ children }: { children: ReactNode }) => (
-    QueryClientProvider({ client: queryClient, children })
-  );
-}
 
 describe("useSettingsForm", () => {
   beforeEach(() => {

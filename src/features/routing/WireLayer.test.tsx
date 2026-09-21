@@ -1,16 +1,24 @@
-import { render, act, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useRef } from "react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { motionValue } from "motion/react";
-import { WireLayer } from "./WireLayer";
-import { PortRegistryProvider, usePortRegistry } from "./usePortRegistry";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import type { StreamSnapshot } from "@/bindings";
+
+import { PortRegistryProvider, usePortRegistry } from "./usePortRegistry";
+import { WireLayer } from "./WireLayer";
 
 function makeBoardEl(width = 800): HTMLDivElement {
   const el = document.createElement("div");
   vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
-    left: 0, top: 0, right: width, bottom: 600,
-    width, height: 600, x: 0, y: 0,
+    left: 0,
+    top: 0,
+    right: width,
+    bottom: 600,
+    width,
+    height: 600,
+    x: 0,
+    y: 0,
     toJSON: () => ({}),
   } as DOMRect);
   Object.defineProperty(el, "clientWidth", { get: () => width });
@@ -20,8 +28,14 @@ function makeBoardEl(width = 800): HTMLDivElement {
 function makePortEl(x: number, y: number): HTMLElement {
   const el = document.createElement("button");
   vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
-    left: x - 6, top: y - 6, right: x + 6, bottom: y + 6,
-    width: 12, height: 12, x: x - 6, y: y - 6,
+    left: x - 6,
+    top: y - 6,
+    right: x + 6,
+    bottom: y + 6,
+    width: 12,
+    height: 12,
+    x: x - 6,
+    y: y - 6,
     toJSON: () => ({}),
   } as DOMRect);
   return el;
@@ -48,11 +62,7 @@ function makeStream(
   };
 }
 
-function RegistrySeeder({
-  entries,
-}: {
-  entries: Array<{ id: string; el: HTMLElement }>;
-}) {
+function RegistrySeeder({ entries }: { entries: Array<{ id: string; el: HTMLElement }> }) {
   const registry = usePortRegistry();
   for (const { id, el } of entries) {
     registry.register(id, el);
@@ -87,11 +97,14 @@ function Wrapper({
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.stubGlobal("ResizeObserver", class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
 describe("WireLayer", () => {
@@ -114,9 +127,7 @@ describe("WireLayer", () => {
 
     const paths = container.querySelectorAll("path");
     const visibleWires = Array.from(paths).filter(
-      (p) =>
-        p.getAttribute("stroke") !== "transparent" &&
-        p.getAttribute("stroke-width") === "2.8",
+      (p) => p.getAttribute("stroke") !== "transparent" && p.getAttribute("stroke-width") === "2.8",
     );
     expect(visibleWires).toHaveLength(1);
   });
@@ -150,8 +161,7 @@ describe("WireLayer", () => {
     const visibleWires = Array.from(paths).filter(
       (p) =>
         p.getAttribute("stroke") !== "transparent" &&
-        (p.getAttribute("stroke-width") === "2.8" ||
-          p.getAttribute("stroke-width") === "4"),
+        (p.getAttribute("stroke-width") === "2.8" || p.getAttribute("stroke-width") === "4"),
     );
     expect(visibleWires).toHaveLength(2);
   });
@@ -198,9 +208,7 @@ describe("WireLayer", () => {
     );
 
     const visibleWire = Array.from(container.querySelectorAll("path")).find(
-      (p) =>
-        p.getAttribute("stroke") !== "transparent" &&
-        p.getAttribute("stroke-width") === "2.8",
+      (p) => p.getAttribute("stroke") !== "transparent" && p.getAttribute("stroke-width") === "2.8",
     );
 
     expect(visibleWire).toBeDefined();
@@ -247,9 +255,7 @@ describe("WireLayer", () => {
         streams={[stream]}
         selectedId={null}
         onSelect={vi.fn()}
-        registryEntries={[
-          { id: "peer-a:src:dev-1", el: srcEl },
-        ]}
+        registryEntries={[{ id: "peer-a:src:dev-1", el: srcEl }]}
       />,
     );
 
@@ -274,9 +280,7 @@ describe("WireLayer", () => {
     );
 
     const flowPath = Array.from(container.querySelectorAll("path")).find(
-      (p) =>
-        p.getAttribute("stroke") === "#fff" &&
-        p.getAttribute("stroke-dasharray") === "1 10",
+      (p) => p.getAttribute("stroke") === "#fff" && p.getAttribute("stroke-dasharray") === "1 10",
     );
     expect(flowPath).toBeDefined();
   });
@@ -298,9 +302,7 @@ describe("WireLayer", () => {
     );
 
     const flowPath = Array.from(container.querySelectorAll("path")).find(
-      (p) =>
-        p.getAttribute("stroke") === "#fff" &&
-        p.getAttribute("stroke-dasharray") === "1 10",
+      (p) => p.getAttribute("stroke") === "#fff" && p.getAttribute("stroke-dasharray") === "1 10",
     );
     expect(flowPath).toBeUndefined();
   });
@@ -354,9 +356,7 @@ describe("WireLayer", () => {
     });
 
     const visibleWires = Array.from(container.querySelectorAll("path")).filter(
-      (p) =>
-        p.getAttribute("stroke") !== "transparent" &&
-        p.getAttribute("stroke-width") === "2.8",
+      (p) => p.getAttribute("stroke") !== "transparent" && p.getAttribute("stroke-width") === "2.8",
     );
     expect(visibleWires).toHaveLength(1);
   });

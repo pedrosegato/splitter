@@ -1,8 +1,15 @@
-import { render } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { StreamSnapshot, SessionSnapshot, DeviceInfo, IdentityDto, DiscoveredPeer } from "@/bindings";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type {
+  DeviceInfo,
+  DiscoveredPeer,
+  IdentityDto,
+  SessionSnapshot,
+  StreamSnapshot,
+} from "@/bindings";
 
 vi.mock("@/hooks/useIdentity");
 vi.mock("@/hooks/useDevices");
@@ -21,12 +28,12 @@ vi.mock("@/hooks/useStreams", () => ({
 }));
 vi.mock("@/features/routing/useWiring");
 
-import { useIdentity } from "@/hooks/useIdentity";
-import { useDevices, usePeerDevices } from "@/hooks/useDevices";
-import { useSnapshot } from "@/hooks/useSnapshot";
-import { usePeers, usePendingPeers } from "@/hooks/usePeers";
-import { useDisconnect } from "@/hooks/useConnection";
 import { useWiring } from "@/features/routing/useWiring";
+import { useDisconnect } from "@/hooks/useConnection";
+import { useDevices, usePeerDevices } from "@/hooks/useDevices";
+import { useIdentity } from "@/hooks/useIdentity";
+import { usePeers, usePendingPeers } from "@/hooks/usePeers";
+import { useSnapshot } from "@/hooks/useSnapshot";
 
 const mockedUseIdentity = useIdentity as ReturnType<typeof vi.fn>;
 const mockedUseDevices = useDevices as ReturnType<typeof vi.fn>;
@@ -66,7 +73,13 @@ const SESSION: SessionSnapshot = {
 };
 
 const PEERS: DiscoveredPeer[] = [
-  { peer_id: "peer-remote", peer_name: "Studio PC", host: "192.168.1.10", port: 7000, version: "0.1.0" },
+  {
+    peer_id: "peer-remote",
+    peer_name: "Studio PC",
+    host: "192.168.1.10",
+    port: 7000,
+    version: "0.1.0",
+  },
 ];
 
 function makeWrapper() {
@@ -79,11 +92,14 @@ function makeWrapper() {
 beforeEach(() => {
   vi.clearAllMocks();
 
-  vi.stubGlobal("ResizeObserver", class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 
   mockedUseIdentity.mockReturnValue({ data: IDENTITY });
   mockedUseDevices.mockReturnValue({ data: DEVICES });
@@ -175,4 +191,3 @@ describe("RoutingBoard — no session", () => {
     expect(queryByText("sem streams")).toBeNull();
   });
 });
-

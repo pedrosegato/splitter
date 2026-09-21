@@ -1,9 +1,11 @@
 import { useCallback } from "react";
-import { useDevices } from "@/hooks/useDevices";
+
 import { useActiveSession } from "@/hooks/useActiveSession";
+import { useDevices } from "@/hooks/useDevices";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useOpenStream, useRequestStream } from "@/hooks/useStreams";
-import { resolveConnection, type PortRef, type Connection } from "./resolveConnection";
+
+import { type Connection, type PortRef, resolveConnection } from "./resolveConnection";
 
 export function useWiring() {
   const { data: devices } = useDevices();

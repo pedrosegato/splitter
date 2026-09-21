@@ -1,19 +1,15 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { usePeers } from "@/hooks/usePeers";
-import { useConnectPeer, useOpenSession } from "@/hooks/useConnection";
-import type { DiscoveredPeer } from "@/bindings";
+import { useState } from "react";
 import { Cable } from "lucide-react";
 import { motion } from "motion/react";
+
+import type { DiscoveredPeer } from "@/bindings";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
+import { useConnectPeer, useOpenSession } from "@/hooks/useConnection";
+import { usePeers } from "@/hooks/usePeers";
 import { variants } from "@/lib/motion";
-import { useState } from "react";
 
 const DEFAULT_PORT = 7000;
 
@@ -22,13 +18,7 @@ type Props = {
   onOpenChange: (o: boolean) => void;
 };
 
-function DiscoveredRow({
-  peer,
-  onSuccess,
-}: {
-  peer: DiscoveredPeer;
-  onSuccess: () => void;
-}) {
+function DiscoveredRow({ peer, onSuccess }: { peer: DiscoveredPeer; onSuccess: () => void }) {
   const connectPeer = useConnectPeer();
   const openSession = useOpenSession();
   const isPending = connectPeer.isPending || openSession.isPending;
@@ -50,16 +40,16 @@ function DiscoveredRow({
       variant="ghost"
       onClick={handlePairing}
       disabled={isPending}
-      className="group w-full h-auto justify-start gap-[11px] px-[11px] py-[10px] border border-transparent hover:bg-elev-2 hover:border-line-2 text-left disabled:opacity-50 disabled:cursor-default"
+      className="group hover:bg-elev-2 hover:border-line-2 h-auto w-full justify-start gap-[11px] border border-transparent px-[11px] py-[10px] text-left disabled:cursor-default disabled:opacity-50"
     >
-      <span className="w-[7px] h-[7px] rounded-full bg-green shrink-0" />
-      <span className="flex-1 min-w-0 text-[12.5px] truncate">
+      <span className="bg-green h-[7px] w-[7px] shrink-0 rounded-full" />
+      <span className="min-w-0 flex-1 truncate text-[12.5px]">
         {peer.peer_name}
-        <small className="block text-ink-3 text-[10px] truncate">
+        <small className="text-ink-3 block truncate text-[10px]">
           {peer.host} · {peer.version}
         </small>
       </span>
-      <Cable size={15} className="shrink-0 text-ink-3 group-hover:text-gold" />
+      <Cable size={15} className="text-ink-3 group-hover:text-gold shrink-0" />
     </Button>
   );
 }
@@ -90,7 +80,7 @@ function ManualConnectRow({ onSuccess }: { onSuccess: () => void }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex items-center gap-[7px] px-[13px] py-[10px] border-t border-line"
+      className="border-line flex items-center gap-[7px] border-t px-[13px] py-[10px]"
     >
       <Input
         value={host}
@@ -130,12 +120,10 @@ export function ConnectModal({ open, onOpenChange }: Props) {
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
-        className="w-[378px] max-w-[378px] bg-surface border-line gap-0 p-0"
+        className="bg-surface border-line w-[378px] max-w-[378px] gap-0 p-0"
       >
-        <DialogHeader className="px-[15px] py-3 bg-elev-1 border-b border-line rounded-t-lg">
-          <DialogTitle className="text-[11px] text-ink-3 font-medium">
-            Máquinas na rede
-          </DialogTitle>
+        <DialogHeader className="bg-elev-1 border-line rounded-t-lg border-b px-[15px] py-3">
+          <DialogTitle className="text-ink-3 text-[11px] font-medium">Máquinas na rede</DialogTitle>
         </DialogHeader>
 
         <motion.div
@@ -152,18 +140,14 @@ export function ConnectModal({ open, onOpenChange }: Props) {
             </Empty>
           ) : (
             discovered.map((peer) => (
-              <DiscoveredRow
-                key={peer.peer_id}
-                peer={peer}
-                onSuccess={() => onOpenChange(false)}
-              />
+              <DiscoveredRow key={peer.peer_id} peer={peer} onSuccess={() => onOpenChange(false)} />
             ))
           )}
         </motion.div>
 
         <ManualConnectRow onSuccess={() => onOpenChange(false)} />
 
-        <div className="flex items-center justify-end px-[13px] py-[9px] border-t border-line">
+        <div className="border-line flex items-center justify-end border-t px-[13px] py-[9px]">
           <Button
             variant="secondary"
             size="sm"

@@ -1,7 +1,8 @@
 import { render } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
-import { PortRegistryProvider } from "./usePortRegistry";
+import { describe, expect, it } from "vitest";
+
 import { MachinePanel } from "./MachinePanel";
+import { PortRegistryProvider } from "./usePortRegistry";
 
 const sinks = [
   { id: "sink-a", name: "Fones MCHOSE V9" },
@@ -124,8 +125,7 @@ describe("MachinePanel", () => {
 
   it("marks ports as wired when portId is in wiredPortIds", () => {
     const wiredPortIds = new Set(["local:sink:sink-a"]);
-    const portColor = (id: string) =>
-      id === "local:sink:sink-a" ? "#e3251f" : undefined;
+    const portColor = (id: string) => (id === "local:sink:sink-a" ? "#e3251f" : undefined);
 
     const { getAllByRole } = wrap(
       <MachinePanel
@@ -144,9 +144,7 @@ describe("MachinePanel", () => {
     const ports = getAllByRole("button");
     expect(ports).toHaveLength(4);
 
-    const wiredPort = ports.find(
-      (p) => p.style.backgroundColor === "rgb(227, 37, 31)",
-    );
+    const wiredPort = ports.find((p) => p.style.backgroundColor === "rgb(227, 37, 31)");
     expect(wiredPort).toBeTruthy();
   });
 });

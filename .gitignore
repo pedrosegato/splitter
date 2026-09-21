@@ -45,3 +45,6 @@ src-tauri/gen/
 
 # Lint cache
 .eslintcache
+
+# Local dev helpers
+scripts/

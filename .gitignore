@@ -1,6 +1,7 @@
 # Planning/design docs — local only
 docs/
 *.plan.md
+plans/
 .claude/
 CLAUDE.md
 

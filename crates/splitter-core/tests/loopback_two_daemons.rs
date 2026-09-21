@@ -96,7 +96,6 @@ async fn two_local_daemons_full_handshake_and_session() {
 async fn connection_established_fires_on_both_accept_paths() {
     let dir = tempdir().unwrap();
 
-    // ── manual-accept path ────────────────────────────────────────────────────
     let server_identity = id("server-manual");
     let server_trust = Arc::new(RwLock::new(
         TrustStore::load_or_create(&dir.path().join("s1-trust.toml")).unwrap(),
@@ -161,7 +160,6 @@ async fn connection_established_fires_on_both_accept_paths() {
         "connection_established must carry the accepted peer's UUID"
     );
 
-    // ── auto-accept-trusted path ──────────────────────────────────────────────
     let at_server_identity = id("server-auto");
     let at_server_peer_id = at_server_identity.peer_id;
     let at_server_trust = Arc::new(RwLock::new(

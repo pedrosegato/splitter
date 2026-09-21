@@ -251,7 +251,6 @@ async fn graceful_shutdown(
 ) {
     let session_snap = sessions.snapshot().await;
 
-    // 1. Notify peers: close streams then close sessions.
     if let Some(srv) = server {
         for sess in &session_snap {
             let tx = find_conn_tx(&srv.connections, outgoing, sess.remote_peer_id).await;
@@ -269,7 +268,6 @@ async fn graceful_shutdown(
         }
     }
 
-    // 2. Close all local StreamRuntime pump tasks via the public registry API.
     let summaries = stream_registry.list().await;
     for summary in summaries {
         let _ = stream_registry
@@ -277,10 +275,8 @@ async fn graceful_shutdown(
             .await;
     }
 
-    // 3. Drain window: give in-flight TCP/UDP packets time to leave the kernel buffers.
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    // 4. Close sessions in the SessionManager.
     for sess in &session_snap {
         let _ = sessions.close(&sess.id).await;
     }

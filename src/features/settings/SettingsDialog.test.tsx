@@ -175,10 +175,10 @@ describe("SettingsDialog", () => {
     const input = within(document.body).getByLabelText("Nome do dispositivo") as HTMLInputElement;
     expect(input).toBeTruthy();
 
-    fireEvent.change(input, { target: { value: "Estúdio do Pedro" } });
+    fireEvent.change(input, { target: { value: "Studio A" } });
     fireEvent.blur(input);
 
-    expect(mockSetDeviceNameMutate).toHaveBeenCalledWith("Estúdio do Pedro");
+    expect(mockSetDeviceNameMutate).toHaveBeenCalledWith("Studio A");
   });
 
   it("renders a restore-defaults button", () => {

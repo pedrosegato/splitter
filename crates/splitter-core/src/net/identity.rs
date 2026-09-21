@@ -118,10 +118,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("identity.toml");
         let mut id = PeerIdentity::load_or_create(&path).expect("create");
-        id.peer_name = "Estúdio do Pedro".into();
+        id.peer_name = "Studio A".into();
         id.save_atomic(&path).expect("save");
         let reloaded = PeerIdentity::load_or_create(&path).expect("reload");
-        assert_eq!(reloaded.peer_name, "Estúdio do Pedro");
+        assert_eq!(reloaded.peer_name, "Studio A");
         assert_eq!(reloaded.peer_id, id.peer_id);
     }
 }

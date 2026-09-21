@@ -201,9 +201,7 @@ impl ControlPlaneObserver for TauriControlPlane {
         if should_reconnect(had_active_session, locally_torn_down) {
             spawn_reconnect(peer_id, observer(&self.core));
         }
-        // A concurrent reconnect may have re-inserted a live handle under the
-        // same peer_id; only evict the entry that belongs to this dead
-        // connection (its tx is closed, the reconnected handle's is open).
+
         {
             let mut conns = self.core.server.connections.write().await;
             if conns

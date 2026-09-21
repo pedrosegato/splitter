@@ -238,9 +238,6 @@ pub(crate) async fn teardown_session(
 
     core.sessions.remove(&sid).await;
 
-    // shutdown() aborts the connection task so the socket dies now, even if some
-    // other task still holds a tx clone. The abort emits no Disconnected event,
-    // so the acceptor sees the broadcast close and exits without reconnecting.
     if let Some(handle) = core.server.connections.write().await.remove(&remote) {
         handle.shutdown();
     }
@@ -379,8 +376,7 @@ mod tests {
 
         let remote = uuid::Uuid::new_v4();
         let handle = spawn_peer_connection(client, None).unwrap();
-        // A lingering tx clone (as CLI's stream-open acceptor holds) must not
-        // keep the socket alive: shutdown() aborts the task regardless.
+
         let _lingering_tx = handle.tx.clone();
         core.outgoing.write().await.insert(remote, handle);
 

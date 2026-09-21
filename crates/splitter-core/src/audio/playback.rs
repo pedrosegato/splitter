@@ -153,7 +153,7 @@ fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
 // 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices); must divide evenly into FRAME_SAMPLES at 48k.
 const RESAMPLE_CHUNK: usize = 441;
 
-// SAFETY.md #1 forbids callback-time allocation, so scratch is pre-sized to the largest
+// The realtime audio callback must never allocate, so scratch is pre-sized to the largest
 // buffer the driver can hand us. Drivers that report Unknown give no bound; 4096 matches
 // the max already assumed for WASAPI shared mode and acts as a clamped safety net.
 const FALLBACK_MAX_CALLBACK_FRAMES: usize = 4096;

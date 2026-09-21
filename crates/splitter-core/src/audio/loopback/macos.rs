@@ -175,7 +175,7 @@ impl MacosLoopbackHandle {
             .with_excluding_windows(&[])
             .build();
 
-        // Low-latency tuning per SCK BENCHMARKS.md: minimal video overhead (2x2 @ 1fps)
+        // Low-latency tuning: minimal video overhead (2x2 @ 1fps)
         // since SCK always co-delivers video frames; queue_depth=3 cuts buffer-induced lag.
         let one_fps = CMTime::new(1, 1);
         let config = SCStreamConfiguration::new()
@@ -189,7 +189,7 @@ impl MacosLoopbackHandle {
             .with_queue_depth(3);
 
         // WHY: SCK delivers audio on a single serialized thread; pre-reserving avoids
-        // per-callback allocation (SAFETY.md #1). 8192 stereo frames covers the largest
+        // per-callback allocation. 8192 stereo frames covers the largest
         // SCK audio buffer observed (see deinterleave large-input tests).
         let handler = AudioHandler {
             producer: Arc::new(Mutex::new(producer)),

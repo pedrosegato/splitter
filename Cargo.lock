@@ -4717,7 +4717,7 @@ dependencies = [
 
 [[package]]
 name = "splitter-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -4739,7 +4739,7 @@ dependencies = [
 
 [[package]]
 name = "splitter-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "audiopus",
@@ -4783,7 +4783,7 @@ dependencies = [
 
 [[package]]
 name = "splitter-integration-tests"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "assert_cmd",
  "bytes",
@@ -4796,7 +4796,7 @@ dependencies = [
 
 [[package]]
 name = "splitter-tauri"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "parking_lot",

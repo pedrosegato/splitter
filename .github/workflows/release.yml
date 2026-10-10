@@ -11,6 +11,12 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Build the bundled Opus statically everywhere, so installers never depend on a system
+  # libopus (Homebrew's on macOS). Its CMakeLists predates the minimum CMake 4 accepts.
+  OPUS_NO_PKG_CONFIG: "1"
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
 jobs:
   build-tauri:
     permissions:
@@ -60,11 +66,6 @@ jobs:
           # Add the cross-compile target for macOS matrix entries; empty string is fine for native.
           targets: ${{ matrix.rust-target }}
 
-      # ── macOS: opus (required by cpal/opus encoder) ─────────────────────────
-      - name: Install macOS deps
-        if: runner.os == 'macOS'
-        run: brew install opus pkg-config
-
       # ── Linux: WebKit + system tray + audio ─────────────────────────────────
       - name: Install Linux deps
         if: runner.os == 'Linux'
@@ -77,16 +78,7 @@ jobs:
             patchelf \
             libasound2-dev \
             libudev-dev \
-            libopus-dev \
             pkg-config
-
-      # ── Windows: opus via vcpkg ──────────────────────────────────────────────
-      - name: Install Windows deps (opus via vcpkg)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          vcpkg install opus:x64-windows
-          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
 
       # ── Build & publish ──────────────────────────────────────────────────────
       - name: Build & publish (tauri-action)
@@ -94,8 +86,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # Updater artifact signing — if these secrets are absent the build
-          # still succeeds but updater artifacts won't carry a signature.
+          # Updater artifact signing. Required: with createUpdaterArtifacts the build fails
+          # without it. The key secret is the generated .key file's contents, unchanged.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 

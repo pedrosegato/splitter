@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Opus's bundled CMakeLists (built where no system libopus is found) predates CMake 4's minimum.
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
   fmt:

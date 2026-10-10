@@ -154,17 +154,13 @@ describe("SettingsDialog", () => {
     expect(mockSet).not.toHaveBeenCalledWith("auto_start_with_system", expect.anything());
   });
 
-  it("metrics_enabled switch calls set with true when toggled", () => {
+  it("does not offer the metrics switch, which only the CLI daemon serves", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />, {
       wrapper: makeWrapper(),
     });
 
-    const switchEl = document.body.querySelector('[id="metrics-enabled"]') as HTMLButtonElement;
-    expect(switchEl).toBeTruthy();
-
-    fireEvent.click(switchEl);
-
-    expect(mockSet).toHaveBeenCalledWith("metrics_enabled", true);
+    expect(document.body.querySelector('[id="metrics-enabled"]')).toBeNull();
+    expect(within(document.body).queryByText(/Métricas/i)).toBeNull();
   });
 
   it("renders the device name field and saves the typed name on blur", () => {

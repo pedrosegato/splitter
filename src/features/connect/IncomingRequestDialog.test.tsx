@@ -6,10 +6,18 @@ import { IncomingRequestDialog } from "./IncomingRequestDialog";
 
 const mockAccept = vi.fn();
 const mockReject = vi.fn();
+let mockPairingCode: string | null = "123 456";
 
 vi.mock("@/hooks/usePeers", () => ({
   usePendingPeers: () => ({
-    data: [{ peer_id: "pending-1", peer_name: "Notebook João", addr: "192.168.0.44:7373" }],
+    data: [
+      {
+        peer_id: "pending-1",
+        peer_name: "Notebook João",
+        addr: "192.168.0.44:7373",
+        pairing_code: mockPairingCode,
+      },
+    ],
   }),
 }));
 
@@ -30,6 +38,22 @@ function makeWrapper() {
 describe("IncomingRequestDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPairingCode = "123 456";
+  });
+
+  it("shows the pairing code to compare with the other machine", () => {
+    render(<IncomingRequestDialog />, { wrapper: makeWrapper() });
+
+    expect(within(document.body).getByText("123 456")).toBeTruthy();
+    expect(within(document.body).getByText(/mesmo código/i)).toBeTruthy();
+  });
+
+  it("shows no code for a peer that is already paired", () => {
+    mockPairingCode = null;
+    render(<IncomingRequestDialog />, { wrapper: makeWrapper() });
+
+    expect(within(document.body).queryByText(/mesmo código/i)).toBeNull();
+    expect(within(document.body).getByText(/já pareado/i)).toBeTruthy();
   });
 
   it("auto-shows the incoming peer and accepts on Aceitar", () => {
@@ -37,13 +61,13 @@ describe("IncomingRequestDialog", () => {
 
     expect(within(document.body).getByText("Notebook João")).toBeTruthy();
     fireEvent.click(within(document.body).getByRole("button", { name: /Aceitar/i }));
-    expect(mockAccept).toHaveBeenCalledWith({ index: 0 });
+    expect(mockAccept).toHaveBeenCalledWith({ peerId: "pending-1" });
   });
 
   it("rejects on Recusar", () => {
     render(<IncomingRequestDialog />, { wrapper: makeWrapper() });
 
     fireEvent.click(within(document.body).getByRole("button", { name: /Recusar/i }));
-    expect(mockReject).toHaveBeenCalledWith({ index: 0 });
+    expect(mockReject).toHaveBeenCalledWith({ peerId: "pending-1" });
   });
 });

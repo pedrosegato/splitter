@@ -1,6 +1,9 @@
 use crate::error::NetError;
+use crate::net::crypto::{self, KeyExchange, Transcript};
 use crate::net::identity::PeerIdentity;
-use crate::net::signaling::connection::{spawn_peer_connection, PeerConnectionHandle, PeerEvent};
+use crate::net::signaling::connection::{
+    spawn_peer_connection, PeerConnectionHandle, PeerEvent, Role,
+};
 use crate::net::signaling::message::{SignalingMessage, PROTOCOL_VERSION};
 use crate::net::signaling::server::local_capabilities;
 use crate::net::trust::{TrustStore, TrustedPeer};
@@ -10,6 +13,9 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+/// How long the other machine's operator has to compare the code and accept.
+pub const PAIRING_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug)]
 pub struct ConnectOutcome {
@@ -25,6 +31,7 @@ pub async fn connect_to_peer(
     trust: Arc<RwLock<TrustStore>>,
     remote_peer_id_hint: Option<Uuid>,
     handshake_timeout: Duration,
+    on_pairing_code: impl FnOnce(Uuid, &str) + Send,
 ) -> Result<ConnectOutcome, NetError> {
     let stream = tokio::time::timeout(handshake_timeout, TcpStream::connect(addr))
         .await
@@ -33,90 +40,183 @@ pub async fn connect_to_peer(
             millis: handshake_timeout.as_millis() as u64,
         })?
         .map_err(NetError::UdpIo)?;
-    let handle = spawn_peer_connection(stream, None)?;
+    let handle = spawn_peer_connection(stream)?;
     let mut events = handle.events.subscribe();
 
-    let resolved_token = trust
-        .read()
-        .await
-        .token_for(remote_peer_id_hint)
-        .unwrap_or_default();
-
+    let my_id = identity.peer_id.to_string();
+    let client_nonce = crypto::new_nonce();
+    let exchange = KeyExchange::new();
+    let client_key = exchange.public_key().to_string();
+    let mut exchange = Some(exchange);
     let hello = SignalingMessage::Hello {
         protocol_version: PROTOCOL_VERSION,
-        peer_id: identity.peer_id.to_string(),
+        peer_id: my_id.clone(),
         peer_name: identity.peer_name.clone(),
         app_version: env!("CARGO_PKG_VERSION").into(),
         capabilities: local_capabilities(),
-        auth_token: resolved_token,
+        client_nonce: client_nonce.clone(),
+        client_key: client_key.clone(),
     };
     handle
         .tx
         .send(hello)
         .await
-        .map_err(|_| NetError::SignalingProtocol {
-            reason: "peer connection closed before hello".into(),
-        })?;
+        .map_err(|_| protocol_error("peer connection closed before hello"))?;
 
-    let ack = tokio::time::timeout(handshake_timeout, async {
-        loop {
-            match events.recv().await {
-                Ok(PeerEvent::Message(SignalingMessage::HelloAck {
-                    accepted,
-                    reason,
-                    auth_token,
-                    peer_id,
-                })) => {
-                    return Ok((accepted, reason, auth_token, peer_id));
-                }
-                Ok(PeerEvent::Disconnected { reason }) => {
-                    return Err(NetError::SignalingProtocol { reason });
-                }
-                Ok(_) => continue,
-                Err(e) => {
-                    return Err(NetError::SignalingProtocol {
-                        reason: format!("event channel: {e}"),
-                    });
-                }
+    let mut on_pairing_code = Some(on_pairing_code);
+    let mut wait = handshake_timeout;
+    let mut deadline = tokio::time::Instant::now() + wait;
+    let mut verified: Option<Verified> = None;
+    let (accepted, reason) = loop {
+        let event = tokio::time::timeout_at(deadline, events.recv())
+            .await
+            .map_err(|_| NetError::Timeout {
+                what: "hello_ack".into(),
+                millis: wait.as_millis() as u64,
+            })?;
+        let (server_peer_id, server_nonce, server_key, server_proof) = match event {
+            Ok(PeerEvent::Message(SignalingMessage::Challenge {
+                server_peer_id,
+                server_nonce,
+                server_key,
+                server_proof,
+            })) => (server_peer_id, server_nonce, server_key, Some(server_proof)),
+            Ok(PeerEvent::Message(SignalingMessage::PairingOffer {
+                server_peer_id,
+                server_nonce,
+                server_key,
+            })) => (server_peer_id, server_nonce, server_key, None),
+            Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, reason })) => {
+                break (accepted, reason)
             }
+            Ok(PeerEvent::Disconnected { reason }) => {
+                return Err(NetError::SignalingProtocol { reason });
+            }
+            Ok(_) => continue,
+            Err(e) => return Err(protocol_error(&format!("event channel: {e}"))),
+        };
+
+        let server_id = Uuid::parse_str(&server_peer_id)
+            .map_err(|_| protocol_error("handshake with an invalid peer id"))?;
+        if let Some(hint) = remote_peer_id_hint.filter(|hint| *hint != server_id) {
+            return Err(protocol_error(&format!(
+                "expected peer {hint}, but {server_id} answered"
+            )));
         }
-    })
-    .await
-    .map_err(|_| NetError::Timeout {
-        what: "hello_ack".into(),
-        millis: handshake_timeout.as_millis() as u64,
-    })??;
+        let transcript = Transcript {
+            client_peer_id: &my_id,
+            server_peer_id: &server_peer_id,
+            client_nonce: &client_nonce,
+            server_nonce: &server_nonce,
+            client_key: &client_key,
+            server_key: &server_key,
+        };
+        let stored_token = trust.read().await.token_for(Some(server_id));
+        let known_token = match (server_proof, stored_token) {
+            (Some(proof), Some(token)) => {
+                if !crypto::proofs_match(&crypto::server_proof(&token, &transcript), &proof) {
+                    return Err(protocol_error(&format!(
+                        "peer claiming to be {server_id} failed to prove its identity"
+                    )));
+                }
+                Some(token)
+            }
+            (Some(_), None) => {
+                return Err(protocol_error(&format!(
+                    "peer {server_id} remembers a pairing this machine no longer has; \
+                     remove it on the other machine to pair again"
+                )));
+            }
+            // Re-pairing silently would let anyone answering at a known peer's address
+            // replace the stored token.
+            (None, Some(_)) => {
+                return Err(protocol_error(&format!(
+                    "peer {server_id} no longer recognizes this machine; \
+                     remove it here to pair again"
+                )));
+            }
+            (None, None) => None,
+        };
+        let shared = exchange
+            .take()
+            .and_then(|exchange| exchange.agree(&server_key))
+            .ok_or_else(|| protocol_error("invalid key exchange"))?;
+        let token = match known_token {
+            Some(token) => {
+                verified = Some(Verified::Known(server_id));
+                token
+            }
+            None => {
+                let token = crypto::pairing_token(&shared, &transcript);
+                if let Some(show) = on_pairing_code.take() {
+                    show(server_id, &crypto::pairing_code(&shared, &transcript));
+                }
+                wait = PAIRING_TIMEOUT;
+                deadline = tokio::time::Instant::now() + wait;
+                verified = Some(Verified::Pairing {
+                    server_id,
+                    token: token.clone(),
+                });
+                token
+            }
+        };
+        handle.install_session(
+            crypto::session_keys(&shared, &token, &transcript),
+            Role::Dialer,
+        );
+        handle.start_encrypting();
+        handle
+            .tx
+            .send(SignalingMessage::ChallengeResponse {
+                client_proof: crypto::client_proof(&token, &transcript),
+            })
+            .await
+            .map_err(|_| protocol_error("peer closed during the handshake"))?;
+    };
 
-    let (accepted, reason, received_token, ack_peer_id_str) = ack;
-
-    let resolved_peer_id: Option<Uuid> = remote_peer_id_hint.or_else(|| {
-        ack_peer_id_str
-            .as_deref()
-            .and_then(|s| Uuid::parse_str(s).ok())
-    });
-
+    let remote_peer_id = verified
+        .as_ref()
+        .map(Verified::server_id)
+        .or(remote_peer_id_hint);
     if accepted {
-        if let (Some(token), Some(peer_id)) = (received_token, resolved_peer_id) {
-            let mut t = trust.write().await;
-            let peer_name = t
-                .peer_for(&peer_id)
-                .map(|p| p.peer_name.clone())
-                .filter(|n| !n.is_empty())
-                .unwrap_or_default();
-            let _ = t.add(TrustedPeer {
-                peer_id,
-                peer_name,
-                auth_token: token,
-            });
+        match verified {
+            None => return Err(protocol_error("peer accepted us without a key exchange")),
+            Some(Verified::Pairing { server_id, token }) => {
+                trust.write().await.add(TrustedPeer {
+                    peer_id: server_id,
+                    peer_name: String::new(),
+                    auth_token: token,
+                })?;
+            }
+            Some(Verified::Known(_)) => {}
         }
     }
 
     Ok(ConnectOutcome {
-        remote_peer_id: resolved_peer_id,
+        remote_peer_id,
         handle,
         accepted,
         reason,
     })
+}
+
+enum Verified {
+    Known(Uuid),
+    Pairing { server_id: Uuid, token: String },
+}
+
+impl Verified {
+    fn server_id(&self) -> Uuid {
+        match self {
+            Verified::Known(id) | Verified::Pairing { server_id: id, .. } => *id,
+        }
+    }
+}
+
+fn protocol_error(reason: &str) -> NetError {
+    NetError::SignalingProtocol {
+        reason: reason.into(),
+    }
 }
 
 #[cfg(test)]
@@ -135,10 +235,54 @@ mod tests {
         }
     }
 
+    async fn assert_encrypted_both_ways(
+        dialer: &PeerConnectionHandle,
+        server: &crate::net::signaling::SignalingServerHandle,
+        dialer_id: Uuid,
+    ) {
+        let conns = server.connections.read().await;
+        let acceptor = conns.get(&dialer_id).expect("server keeps the connection");
+        let renamed = |name: &str| SignalingMessage::PeerRenamed {
+            peer_id: "p".into(),
+            peer_name: name.into(),
+        };
+        let mut at_acceptor = acceptor.events.subscribe();
+        let mut at_dialer = dialer.events.subscribe();
+        dialer.tx.send(renamed("from-dialer")).await.unwrap();
+        acceptor.tx.send(renamed("from-acceptor")).await.unwrap();
+        for (events, expected) in [
+            (&mut at_acceptor, "from-dialer"),
+            (&mut at_dialer, "from-acceptor"),
+        ] {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if let Ok(PeerEvent::Message(SignalingMessage::PeerRenamed {
+                        peer_name, ..
+                    })) = events.recv().await
+                    {
+                        if peer_name == expected {
+                            return;
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("message must cross the encrypted connection");
+        }
+        assert_eq!(dialer.encryption_state(), (true, true));
+        assert_eq!(acceptor.encryption_state(), (true, true));
+        assert_eq!(
+            dialer.session_keys().unwrap().client_to_server,
+            acceptor.session_keys().unwrap().client_to_server,
+            "both ends must derive the same session"
+        );
+    }
+
     #[tokio::test]
-    async fn first_connect_queues_pending_and_ack_after_accept() {
+    async fn first_connect_shows_the_same_code_on_both_sides_and_is_acked_after_accept() {
         let dir = tempdir().unwrap();
         let server_identity = make_identity("server");
+        let server_peer_id = server_identity.peer_id;
         let server_trust = Arc::new(RwLock::new(
             TrustStore::load_or_create(&dir.path().join("server-trust.toml")).unwrap(),
         ));
@@ -155,10 +299,12 @@ mod tests {
         .unwrap();
 
         let client_identity = make_identity("client");
+        let client_peer_id = client_identity.peer_id;
         let client_trust = Arc::new(RwLock::new(
             TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
         ));
 
+        let (code_tx, code_rx) = std::sync::mpsc::channel();
         let dial = tokio::spawn({
             let client_trust = client_trust.clone();
             let bind_addr = server.bind_addr;
@@ -169,6 +315,7 @@ mod tests {
                     client_trust,
                     None,
                     Duration::from_secs(5),
+                    move |server_id, code| code_tx.send((server_id, code.to_string())).unwrap(),
                 )
                 .await
             }
@@ -186,28 +333,34 @@ mod tests {
                     }
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
+                let request = server_pending.list().await[0].clone();
                 accept_pending(
                     &server_pending,
                     &server_trust,
                     &server_conns,
                     &conn_est_tx,
-                    0,
+                    request.peer_id,
                 )
                 .await
+                .map(|()| request.pairing_code)
             }
         });
 
         let (dial_result, accept_result) = tokio::join!(dial, accepted_handle);
         let outcome = dial_result.unwrap().unwrap();
-        accept_result.unwrap().unwrap();
+        let server_code = accept_result.unwrap().unwrap();
         assert!(
             outcome.accepted,
             "client should receive HelloAck.accepted=true"
         );
+        let (shown_for, client_code) = code_rx.try_recv().expect("dialer was shown a code");
+        assert_eq!(shown_for, server_peer_id);
+        assert_eq!(server_code, Some(client_code));
+        assert_encrypted_both_ways(&outcome.handle, &server, client_peer_id).await;
     }
 
     #[tokio::test]
-    async fn accept_pending_token_in_hello_ack_is_persisted_in_dialer_trust_store() {
+    async fn the_derived_pairing_token_is_persisted_on_both_sides() {
         let dir = tempdir().unwrap();
         let server_identity = make_identity("server");
         let server_peer_id = server_identity.peer_id;
@@ -245,6 +398,7 @@ mod tests {
                     client_trust,
                     Some(server_peer_id),
                     Duration::from_secs(5),
+                    |_, _| {},
                 )
                 .await
             }
@@ -262,14 +416,26 @@ mod tests {
                     }
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                accept_pending(&pending, &trust, &conns, &tx, 0).await
+                accept_pending(
+                    &pending,
+                    &trust,
+                    &conns,
+                    &tx,
+                    pending.list().await[0].peer_id,
+                )
+                .await
             }
         });
 
         let (dial_res, accept_res) = tokio::join!(dial, acceptor);
         let outcome = dial_res.unwrap().unwrap();
-        let (_, stored_token) = accept_res.unwrap().unwrap();
+        accept_res.unwrap().unwrap();
         assert!(outcome.accepted);
+        let stored_token = server_trust
+            .read()
+            .await
+            .token_for(Some(client_identity.peer_id))
+            .expect("server stores the pairing on accept");
 
         let t = client_trust.read().await;
         assert!(
@@ -338,10 +504,12 @@ mod tests {
             client_trust,
             Some(server_peer_id),
             Duration::from_secs(5),
+            |_, _| panic!("an existing pairing has no code to show"),
         )
         .await
         .unwrap();
         assert!(outcome.accepted);
+        assert_encrypted_both_ways(&outcome.handle, &server, client_identity.peer_id).await;
     }
 
     #[tokio::test]
@@ -378,6 +546,7 @@ mod tests {
                     client_trust,
                     None,
                     Duration::from_secs(5),
+                    |_, _| {},
                 )
                 .await
             }
@@ -395,7 +564,14 @@ mod tests {
                     }
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                accept_pending(&pending, &trust, &conns, &tx, 0).await
+                accept_pending(
+                    &pending,
+                    &trust,
+                    &conns,
+                    &tx,
+                    pending.list().await[0].peer_id,
+                )
+                .await
             }
         });
 
@@ -464,6 +640,7 @@ mod tests {
             client_trust.clone(),
             Some(server_peer_id),
             Duration::from_secs(5),
+            |_, _| {},
         )
         .await
         .unwrap();
@@ -480,8 +657,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dial_with_no_hint_accepted_persists_token_via_hello_ack_peer_id() {
-        use crate::net::signaling::server::accept_pending_as;
+    async fn dial_without_a_hint_learns_the_server_id_from_the_handshake() {
         let dir = tempdir().unwrap();
         let server_identity = make_identity("server");
         let server_peer_id = server_identity.peer_id;
@@ -501,6 +677,7 @@ mod tests {
         .unwrap();
 
         let client_identity = make_identity("client");
+        let client_peer_id = client_identity.peer_id;
         let client_trust = Arc::new(RwLock::new(
             TrustStore::load_or_create(&dir.path().join("client-trust.toml")).unwrap(),
         ));
@@ -515,6 +692,7 @@ mod tests {
                     client_trust,
                     None,
                     Duration::from_secs(5),
+                    |_, _| {},
                 )
                 .await
             }
@@ -532,19 +710,31 @@ mod tests {
                     }
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                accept_pending_as(&pending, &trust, &conns, &tx, 0, Some(server_peer_id)).await
+                accept_pending(
+                    &pending,
+                    &trust,
+                    &conns,
+                    &tx,
+                    pending.list().await[0].peer_id,
+                )
+                .await
             }
         });
 
         let (dial_res, accept_res) = tokio::join!(dial, acceptor);
         let outcome = dial_res.unwrap().unwrap();
-        let (_, stored_token) = accept_res.unwrap().unwrap();
+        accept_res.unwrap().unwrap();
         assert!(outcome.accepted, "connection must be accepted");
         assert_eq!(
             outcome.remote_peer_id,
             Some(server_peer_id),
-            "ConnectOutcome must reflect the server peer_id learned from HelloAck"
+            "ConnectOutcome must reflect the server peer_id learned from the handshake"
         );
+        let stored_token = server_trust
+            .read()
+            .await
+            .token_for(Some(client_peer_id))
+            .unwrap();
 
         let t = client_trust.read().await;
         assert!(
@@ -554,6 +744,148 @@ mod tests {
         assert!(
             t.verify(&server_peer_id, &stored_token),
             "stored token must match the server token"
+        );
+    }
+
+    async fn impostor(reply: SignalingMessage) -> (SocketAddr, tokio::task::JoinHandle<bool>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let handle = spawn_peer_connection(stream).unwrap();
+            let mut events = handle.events.subscribe();
+            loop {
+                if let Ok(PeerEvent::Message(SignalingMessage::Hello { .. })) = events.recv().await
+                {
+                    break;
+                }
+            }
+            handle.tx.send(reply).await.unwrap();
+            let answered = tokio::time::timeout(Duration::from_millis(500), async {
+                loop {
+                    match events.recv().await {
+                        Ok(PeerEvent::Message(SignalingMessage::ChallengeResponse { .. })) => {
+                            return true
+                        }
+                        Ok(_) => continue,
+                        Err(_) => return false,
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false);
+            drop(handle);
+            answered
+        });
+        (addr, task)
+    }
+
+    async fn trust_with(
+        server_peer_id: Uuid,
+        token: &str,
+    ) -> (Arc<RwLock<TrustStore>>, tempfile::TempDir) {
+        let dir = tempdir().unwrap();
+        let trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("trust.toml")).unwrap(),
+        ));
+        trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id: server_peer_id,
+                peer_name: "server".into(),
+                auth_token: token.into(),
+            })
+            .unwrap();
+        (trust, dir)
+    }
+
+    #[tokio::test]
+    async fn client_aborts_when_the_server_cannot_prove_the_pairing_token() {
+        let server_peer_id = Uuid::new_v4();
+        let (trust, _dir) = trust_with(server_peer_id, &"t".repeat(43)).await;
+        let (addr, saw_response) = impostor(SignalingMessage::Challenge {
+            server_peer_id: server_peer_id.to_string(),
+            server_nonce: "sn".into(),
+            server_key: KeyExchange::new().public_key().into(),
+            server_proof: "forged".into(),
+        })
+        .await;
+
+        let err = connect_to_peer(
+            addr,
+            &make_identity("client"),
+            trust,
+            Some(server_peer_id),
+            Duration::from_secs(2),
+            |_, _| {},
+        )
+        .await
+        .expect_err("an impostor must not be accepted");
+
+        assert!(err.to_string().contains("failed to prove"), "{err}");
+        assert!(
+            !saw_response.await.unwrap(),
+            "the client must not answer a challenge it could not verify"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_refuses_an_ack_without_a_key_exchange() {
+        let (addr, _task) = impostor(SignalingMessage::HelloAck {
+            accepted: true,
+            reason: None,
+        })
+        .await;
+        let dir = tempdir().unwrap();
+        let trust = Arc::new(RwLock::new(
+            TrustStore::load_or_create(&dir.path().join("trust.toml")).unwrap(),
+        ));
+
+        let err = connect_to_peer(
+            addr,
+            &make_identity("client"),
+            trust,
+            None,
+            Duration::from_secs(2),
+            |_, _| {},
+        )
+        .await
+        .expect_err("an ack must follow a key exchange");
+
+        assert!(err.to_string().contains("without a key exchange"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn client_refuses_to_re_pair_with_a_peer_it_already_trusts() {
+        let server_peer_id = Uuid::new_v4();
+        let original = "o".repeat(43);
+        let (trust, _dir) = trust_with(server_peer_id, &original).await;
+        let (addr, saw_response) = impostor(SignalingMessage::PairingOffer {
+            server_peer_id: server_peer_id.to_string(),
+            server_nonce: "sn".into(),
+            server_key: KeyExchange::new().public_key().into(),
+        })
+        .await;
+        let shown = std::sync::atomic::AtomicBool::new(false);
+
+        let err = connect_to_peer(
+            addr,
+            &make_identity("client"),
+            trust.clone(),
+            None,
+            Duration::from_secs(2),
+            |_, _| shown.store(true, std::sync::atomic::Ordering::Relaxed),
+        )
+        .await
+        .expect_err("a known peer must prove the existing pairing");
+
+        assert!(err.to_string().contains("no longer recognizes"), "{err}");
+        assert!(!shown.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(!saw_response.await.unwrap());
+        assert!(
+            trust.read().await.verify(&server_peer_id, &original),
+            "the stored pairing must survive"
         );
     }
 }

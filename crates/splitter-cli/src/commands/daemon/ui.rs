@@ -10,7 +10,10 @@ pub(crate) fn print_help() {
     println!("{BAR}");
     println!("  {:<44}  list discovered peers", "peers");
     println!("  {:<44}  list peers waiting for accept", "pending");
-    println!("  {:<44}  accept a pending peer (TOFU)", "accept <idx>");
+    println!(
+        "  {:<44}  accept a pending peer once its code matches",
+        "accept <idx>"
+    );
     println!(
         "  {:<44}  open signaling link (name, peer_id, or host:port)",
         "connect <peer_id|name|host:port>"
@@ -94,14 +97,21 @@ pub(crate) async fn print_pending(server: &SignalingServerHandle) {
     if list.is_empty() {
         println!("  (none)");
     } else {
-        println!("  {:<5}  {:<14}  {:<36}  ADDR", "IDX", "NAME", "PEER_ID");
-        println!("  {:<5}  {:<14}  {:<36}  ────", "───", "────", "───────");
+        println!(
+            "  {:<5}  {:<14}  {:<36}  {:<7}  ADDR",
+            "IDX", "NAME", "PEER_ID", "CODE"
+        );
+        println!(
+            "  {:<5}  {:<14}  {:<36}  {:<7}  ────",
+            "───", "────", "───────", "────"
+        );
         for (i, p) in list.iter().enumerate() {
             println!(
-                "  {:<5}  {:<14}  {:<36}  {}",
+                "  {:<5}  {:<14}  {:<36}  {:<7}  {}",
                 format!("[{i}]"),
                 p.peer_name,
                 p.peer_id,
+                p.pairing_code.as_deref().unwrap_or("paired"),
                 p.remote_addr
             );
         }

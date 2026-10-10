@@ -185,6 +185,7 @@ pub(crate) async fn run(
         discovered,
         outgoing_connections,
         local_peer_id,
+        settings: settings_handle.clone(),
     };
 
     // Spawn the shared control-plane loop for every newly established peer connection,
@@ -203,11 +204,10 @@ pub(crate) async fn run(
         let local = local_peer_id.to_string();
         let port = server.bind_addr.port();
         tokio::spawn(async move {
-            let ttl = Duration::from_secs(25);
+            use splitter_core::net::active_scan::{next_scan_interval, MIN_SCAN_INTERVAL};
+            let mut interval = MIN_SCAN_INTERVAL;
             let mut seen: HashMap<String, std::time::Instant> = HashMap::new();
-            let mut ticker = tokio::time::interval(Duration::from_secs(8));
             loop {
-                ticker.tick().await;
                 let found = splitter_core::net::active_scan::scan_once(
                     &local,
                     port,
@@ -222,14 +222,16 @@ pub(crate) async fn run(
                     .map(|u| u.to_string())
                     .collect();
                 connected.extend(outgoing.read().await.keys().map(|u| u.to_string()));
-                splitter_core::net::active_scan::reconcile_scan(
+                let changed = splitter_core::net::active_scan::reconcile_scan(
                     &mut *discovered.write().await,
                     &mut seen,
                     found,
                     &connected,
                     std::time::Instant::now(),
-                    ttl,
+                    interval * 3,
                 );
+                interval = next_scan_interval(interval, changed);
+                tokio::time::sleep(interval).await;
             }
         });
     }
@@ -284,19 +286,8 @@ async fn graceful_shutdown(
 
 #[cfg(test)]
 mod tests {
-    use super::context::pick_default_output_device_id;
     use super::*;
     use splitter_core::settings::LogLevel;
-
-    #[test]
-    fn pick_default_output_device_id_returns_output_kind_or_none() {
-        if let Some(id) = pick_default_output_device_id() {
-            assert!(
-                id.starts_with("Output:"),
-                "expected Output: prefix, got {id}"
-            );
-        }
-    }
 
     #[test]
     fn boot_settings_load_or_default_returns_info_level() {

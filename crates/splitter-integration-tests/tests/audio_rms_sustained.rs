@@ -7,7 +7,8 @@
 
 use splitter_core::audio::ring::AudioRing;
 use splitter_core::net::stream_runtime::{
-    spawn_sink_pump_inner, spawn_source_pump_inner, StreamControlSignal, StreamStats,
+    spawn_sink_pump_inner, spawn_source_pump_inner, SinkConfig, SourceConfig, StreamControlSignal,
+    StreamStats,
 };
 use splitter_core::FRAME_STEREO_SAMPLES;
 use splitter_integration_tests::SineSource;
@@ -75,7 +76,7 @@ async fn sustained_rms_over_1000_frames() {
         send_socket,
         src_rx,
         src_stats.clone(),
-        64_000,
+        SourceConfig::default(),
     ));
     let sink_handle = tokio::spawn(spawn_sink_pump_inner(
         session_id,
@@ -84,6 +85,7 @@ async fn sustained_rms_over_1000_frames() {
         play_prod,
         sink_rx,
         sink_stats.clone(),
+        SinkConfig::default(),
     ));
 
     // Feed FRAME_COUNT sine frames into the capture ring.

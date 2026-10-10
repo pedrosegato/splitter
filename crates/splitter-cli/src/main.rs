@@ -276,7 +276,7 @@ enum Cmd {
         REPL quick reference (run `splitter-cli --help` for the full list):\n\
           peers                     list mDNS-discovered peers\n\
           connect <name|id>         open a TCP signaling link to a peer\n\
-          accept <n>                trust a pending HELLO from peer at index <n>\n\
+          accept <n>                trust pending peer <n> once its pairing code matches\n\
           open <name|id>            open a Session with a connected peer\n\
           sessions                  list active sessions and streams\n\
           stream open --from in:0 --to <peer>:out:0 --session <UUID>\n\

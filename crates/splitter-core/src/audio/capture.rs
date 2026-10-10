@@ -1,3 +1,4 @@
+use crate::audio::max_callback_frames;
 use crate::audio::resampler::Resampler;
 use crate::audio::ring::RingProducer;
 use crate::error::AudioError;
@@ -6,9 +7,18 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
+#[derive(Debug, Clone)]
+enum CaptureSource {
+    Device(String),
+    Loopback,
+    Fixed,
+}
+
 pub struct CaptureHandle {
     _stream: cpal::Stream,
     frame_notify: Arc<Notify>,
+    producer: Arc<Mutex<RingProducer>>,
+    source: CaptureSource,
 }
 
 impl std::fmt::Debug for CaptureHandle {
@@ -27,119 +37,11 @@ impl CaptureHandle {
     }
 
     pub fn start_by_id(device_id: &str, producer: RingProducer) -> Result<Self, AudioError> {
-        let device = resolve_input_device(device_id)?;
-        Self::from_device(device, producer, Arc::new(Notify::new()))
+        Self::open(CaptureSource::Device(device_id.to_string()), producer)
     }
 
     pub fn start_loopback(producer: RingProducer) -> Result<Self, AudioError> {
-        #[cfg(target_os = "windows")]
-        {
-            Self::start_loopback_wasapi(producer)
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let host = cpal::default_host();
-            let device = host
-                .input_devices()
-                .map_err(|e| AudioError::BuildStream {
-                    source: Box::new(e),
-                })?
-                .find(|d| d.name().map(|n| n.ends_with(".monitor")).unwrap_or(false))
-                .ok_or_else(|| AudioError::DeviceNotFound("PulseAudio .monitor source".into()))?;
-            Self::from_device(device, producer, Arc::new(Notify::new()))
-        }
-        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-        {
-            let _ = producer;
-            Err(AudioError::LoopbackUnsupported)
-        }
-    }
-
-    // WHY: WASAPI loopback capture requires using the *output* device as the capture
-    // source, but build_input_stream must be called with a SampleFormat that the WASAPI
-    // driver will actually accept.  The previous approach called default_input_config()
-    // and fell back to default_output_config(), which works on F32 shared-mode
-    // outputs but silently breaks on systems whose output is configured for
-    // I32 or I24 — cpal would then try to build a stream with the wrong format and
-    // return a BuildStream error.
-    //
-    // This dedicated path:
-    //   1. Gets the default WASAPI output device.
-    //   2. Iterates supported_output_configs() to find a format that build_input_stream
-    //      can accept (F32 preferred, then I16/U16 for compatibility).
-    //   3. Falls back to F32 if no supported range is found, letting the driver perform
-    //      automatic format conversion (shared-mode WASAPI always supports F32).
-    #[cfg(target_os = "windows")]
-    fn start_loopback_wasapi(producer: RingProducer) -> Result<Self, AudioError> {
-        use cpal::traits::DeviceTrait;
-
-        let host =
-            cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| AudioError::BuildStream {
-                source: Box::new(e),
-            })?;
-        let device = host
-            .default_output_device()
-            .ok_or(AudioError::NoDefaultDevice)?;
-
-        // Preferred formats in order: F32 (lossless), I16 (common), U16.
-        let preferred = [
-            cpal::SampleFormat::F32,
-            cpal::SampleFormat::I16,
-            cpal::SampleFormat::U16,
-        ];
-
-        let supported_cfg = device
-            .supported_output_configs()
-            .map_err(|e| AudioError::BuildStream {
-                source: Box::new(e),
-            })?
-            .filter_map(|r| {
-                let fmt = r.sample_format();
-                if preferred.contains(&fmt) {
-                    Some(r.with_max_sample_rate())
-                } else {
-                    None
-                }
-            })
-            .min_by_key(|c| {
-                // Lower index = higher preference.
-                preferred
-                    .iter()
-                    .position(|&f| f == c.sample_format())
-                    .unwrap_or(usize::MAX)
-            });
-
-        // Fall back to F32 at 48 kHz stereo — WASAPI shared-mode always supports this
-        // via its built-in resampler/converter.
-        let config = supported_cfg.unwrap_or_else(|| {
-            cpal::SupportedStreamConfigRange::new(
-                2,
-                cpal::SampleRate(48_000),
-                cpal::SampleRate(48_000),
-                cpal::SupportedBufferSize::Range {
-                    min: 128,
-                    max: 4096,
-                },
-                cpal::SampleFormat::F32,
-            )
-            .with_max_sample_rate()
-        });
-
-        Self::from_device_with_config(device, config, producer, Arc::new(Notify::new()))
-    }
-
-    #[cfg(target_os = "windows")]
-    fn from_device_with_config(
-        device: cpal::Device,
-        supported: cpal::SupportedStreamConfig,
-        producer: RingProducer,
-        frame_notify: Arc<Notify>,
-    ) -> Result<Self, AudioError> {
-        let stream = build_capture_stream(device, supported, producer, frame_notify.clone())?;
-        Ok(Self {
-            _stream: stream,
-            frame_notify,
-        })
+        Self::open(CaptureSource::Loopback, producer)
     }
 
     pub fn from_device(
@@ -147,25 +49,165 @@ impl CaptureHandle {
         producer: RingProducer,
         frame_notify: Arc<Notify>,
     ) -> Result<Self, AudioError> {
-        let supported = device.default_input_config().or_else(|_| {
-            device
-                .default_output_config()
-                .map_err(|e| AudioError::BuildStream {
-                    source: Box::new(e),
-                })
-        })?;
-        let stream = build_capture_stream(device, supported, producer, frame_notify.clone())?;
+        let producer = Arc::new(Mutex::new(producer));
+        let supported = default_capture_config(&device)?;
+        let stream =
+            build_capture_stream(device, supported, producer.clone(), frame_notify.clone())?;
         Ok(Self {
             _stream: stream,
             frame_notify,
+            producer,
+            source: CaptureSource::Fixed,
         })
     }
+
+    /// Rebuilds the OS stream on the same ring; one whose device was unplugged never recovers.
+    pub fn reopen(&mut self) -> Result<(), AudioError> {
+        self._stream = open_capture_stream(&self.source, &self.producer, &self.frame_notify)?;
+        Ok(())
+    }
+
+    fn open(source: CaptureSource, producer: RingProducer) -> Result<Self, AudioError> {
+        let producer = Arc::new(Mutex::new(producer));
+        let frame_notify = Arc::new(Notify::new());
+        let stream = open_capture_stream(&source, &producer, &frame_notify)?;
+        Ok(Self {
+            _stream: stream,
+            frame_notify,
+            producer,
+            source,
+        })
+    }
+}
+
+fn open_capture_stream(
+    source: &CaptureSource,
+    producer: &Arc<Mutex<RingProducer>>,
+    frame_notify: &Arc<Notify>,
+) -> Result<cpal::Stream, AudioError> {
+    let (device, supported) = match source {
+        CaptureSource::Device(id) => {
+            let device = resolve_input_device(id)?;
+            let supported = default_capture_config(&device)?;
+            (device, supported)
+        }
+        CaptureSource::Loopback => loopback_device_and_config()?,
+        CaptureSource::Fixed => {
+            return Err(AudioError::DeviceNotFound(
+                "capture device was passed in directly and cannot be re-resolved".into(),
+            ))
+        }
+    };
+    build_capture_stream(device, supported, producer.clone(), frame_notify.clone())
+}
+
+fn default_capture_config(
+    device: &cpal::Device,
+) -> Result<cpal::SupportedStreamConfig, AudioError> {
+    device.default_input_config().or_else(|_| {
+        device
+            .default_output_config()
+            .map_err(|e| AudioError::BuildStream {
+                source: Box::new(e),
+            })
+    })
+}
+
+// WHY: WASAPI loopback capture requires using the *output* device as the capture
+// source, but build_input_stream must be called with a SampleFormat that the WASAPI
+// driver will actually accept.  The previous approach called default_input_config()
+// and fell back to default_output_config(), which works on F32 shared-mode
+// outputs but silently breaks on systems whose output is configured for
+// I32 or I24 — cpal would then try to build a stream with the wrong format and
+// return a BuildStream error.
+//
+// This dedicated path:
+//   1. Gets the default WASAPI output device.
+//   2. Iterates supported_output_configs() to find a format that build_input_stream
+//      can accept (F32 preferred, then I16/U16 for compatibility).
+//   3. Falls back to F32 if no supported range is found, letting the driver perform
+//      automatic format conversion (shared-mode WASAPI always supports F32).
+#[cfg(target_os = "windows")]
+fn loopback_device_and_config() -> Result<(cpal::Device, cpal::SupportedStreamConfig), AudioError> {
+    crate::audio::anchor_audio_host();
+
+    let host = cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| AudioError::BuildStream {
+        source: Box::new(e),
+    })?;
+    let device = host
+        .default_output_device()
+        .ok_or(AudioError::NoDefaultDevice)?;
+
+    // Preferred formats in order: F32 (lossless), I16 (common), U16.
+    let preferred = [
+        cpal::SampleFormat::F32,
+        cpal::SampleFormat::I16,
+        cpal::SampleFormat::U16,
+    ];
+
+    let supported_cfg = device
+        .supported_output_configs()
+        .map_err(|e| AudioError::BuildStream {
+            source: Box::new(e),
+        })?
+        .filter_map(|r| {
+            let fmt = r.sample_format();
+            if preferred.contains(&fmt) {
+                Some(r.with_max_sample_rate())
+            } else {
+                None
+            }
+        })
+        .min_by_key(|c| {
+            // Lower index = higher preference.
+            preferred
+                .iter()
+                .position(|&f| f == c.sample_format())
+                .unwrap_or(usize::MAX)
+        });
+
+    // Fall back to F32 at 48 kHz stereo — WASAPI shared-mode always supports this
+    // via its built-in resampler/converter.
+    let config = supported_cfg.unwrap_or_else(|| {
+        cpal::SupportedStreamConfigRange::new(
+            2,
+            cpal::SampleRate(48_000),
+            cpal::SampleRate(48_000),
+            cpal::SupportedBufferSize::Range {
+                min: 128,
+                max: 4096,
+            },
+            cpal::SampleFormat::F32,
+        )
+        .with_max_sample_rate()
+    });
+
+    Ok((device, config))
+}
+
+#[cfg(target_os = "linux")]
+fn loopback_device_and_config() -> Result<(cpal::Device, cpal::SupportedStreamConfig), AudioError> {
+    let host = cpal::default_host();
+    let device = host
+        .input_devices()
+        .map_err(|e| AudioError::BuildStream {
+            source: Box::new(e),
+        })?
+        .find(|d| d.name().map(|n| n.ends_with(".monitor")).unwrap_or(false))
+        .ok_or_else(|| AudioError::DeviceNotFound("PulseAudio .monitor source".into()))?;
+    let supported = default_capture_config(&device)?;
+    Ok((device, supported))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn loopback_device_and_config() -> Result<(cpal::Device, cpal::SupportedStreamConfig), AudioError> {
+    Err(AudioError::LoopbackUnsupported)
 }
 
 fn build_capture_stream(
     device: cpal::Device,
     supported: cpal::SupportedStreamConfig,
-    producer: RingProducer,
+    producer: Arc<Mutex<RingProducer>>,
     frame_notify: Arc<Notify>,
 ) -> Result<cpal::Stream, AudioError> {
     let channels = supported.channels();
@@ -174,7 +216,6 @@ fn build_capture_stream(
     let max_frames = max_callback_frames(supported.buffer_size());
     let config: cpal::StreamConfig = supported.into();
 
-    let producer = Arc::new(Mutex::new(producer));
     let notify = frame_notify.clone();
     let err_fn = |e| tracing::error!("cpal capture stream error: {e}");
 
@@ -246,6 +287,7 @@ fn build_capture_stream(
 }
 
 fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
+    crate::audio::anchor_audio_host();
     let host = cpal::default_host();
     if let Some(rest) = device_id.strip_prefix("in:") {
         let idx: usize = rest
@@ -263,32 +305,16 @@ fn resolve_input_device(device_id: &str) -> Result<cpal::Device, AudioError> {
             .nth(idx)
             .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()));
     }
-    let target_name = device_id.splitn(3, ':').nth(2).unwrap_or(device_id);
-    host.input_devices()
-        .map_err(|e| AudioError::BuildStream {
-            source: Box::new(e),
-        })?
-        .find(|d| d.name().map(|n| n == target_name).unwrap_or(false))
+    let inputs = host.input_devices().map_err(|e| AudioError::BuildStream {
+        source: Box::new(e),
+    })?;
+    crate::audio::devices::pick_by_id(inputs, device_id)
         .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))
 }
 
 // RESAMPLE_CHUNK is per-channel; scratch holds stereo pairs (RESAMPLE_CHUNK * 2 interleaved).
 // 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices); must divide evenly into FRAME_SAMPLES at 48k.
 const RESAMPLE_CHUNK: usize = 441;
-
-// The realtime audio callback must never allocate, so scratch is pre-sized to the largest
-// buffer the driver can hand us. Drivers that report Unknown give no bound; 4096 matches
-// the max already assumed for WASAPI shared mode and acts as a clamped safety net.
-const FALLBACK_MAX_CALLBACK_FRAMES: usize = 4096;
-
-fn max_callback_frames(buffer_size: &cpal::SupportedBufferSize) -> usize {
-    match buffer_size {
-        cpal::SupportedBufferSize::Range { max, .. } => {
-            (*max as usize).max(FALLBACK_MAX_CALLBACK_FRAMES)
-        }
-        cpal::SupportedBufferSize::Unknown => FALLBACK_MAX_CALLBACK_FRAMES,
-    }
-}
 
 fn make_resampler(input_rate: u32) -> Result<Resampler, AudioError> {
     Resampler::new(input_rate, SAMPLE_RATE, RESAMPLE_CHUNK).map_err(|e| AudioError::BuildStream {
@@ -468,6 +494,7 @@ mod tests {
     #[test]
     fn from_device_with_default_input_starts() {
         use cpal::traits::HostTrait;
+        crate::audio::anchor_audio_host();
         let host = cpal::default_host();
         let Some(device) = host.default_input_device() else {
             return;
@@ -486,6 +513,7 @@ mod tests {
             Ok(_) => {}
             Err(AudioError::BuildStream { .. }) => {}
             Err(AudioError::DeviceNotFound(_)) => {}
+            Err(AudioError::NoDefaultDevice) => {}
             Err(e) => panic!("unexpected error: {e:?}"),
         }
     }

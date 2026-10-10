@@ -4,7 +4,8 @@ use splitter_core::audio::ring::AudioRing;
 use splitter_core::net::packet::Packet;
 use splitter_core::net::stream::StreamId;
 use splitter_core::net::stream_runtime::{
-    spawn_sink_pump_inner, spawn_source_pump_inner, StreamControlSignal, StreamStats,
+    spawn_sink_pump_inner, spawn_source_pump_inner, SinkConfig, SourceConfig, StreamControlSignal,
+    StreamStats,
 };
 use splitter_core::FRAME_STEREO_SAMPLES;
 use std::sync::atomic::Ordering;
@@ -40,7 +41,7 @@ async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
         send_socket,
         src_rx,
         src_stats.clone(),
-        64_000,
+        SourceConfig::default(),
     ));
     let sink_handle = tokio::spawn(spawn_sink_pump_inner(
         session_id,
@@ -49,6 +50,7 @@ async fn pcm_round_trip_source_to_sink_over_localhost_udp() {
         play_prod,
         sink_rx,
         sink_stats.clone(),
+        SinkConfig::default(),
     ));
 
     let mut cap_prod_mut = cap_prod;
@@ -99,6 +101,7 @@ async fn volume_change_attenuates_decoded_signal() {
         play_prod,
         ctrl_rx,
         stats.clone(),
+        SinkConfig::default(),
     ));
 
     let mut enc = OpusEncoder::new(64_000).unwrap();
@@ -123,7 +126,13 @@ async fn volume_change_attenuates_decoded_signal() {
         .await
         .unwrap();
     sender.send_to(&wire[..], sink_addr).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // A lone packet is held for the jitter buffer's target delay before playout.
+    for _ in 0..50 {
+        if play_cons.occupied() >= FRAME_STEREO_SAMPLES {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 
     let mut out = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let popped = play_cons.pop_slice(&mut out);
@@ -154,6 +163,7 @@ async fn out_of_order_packets_are_reordered_before_decode() {
         play_prod,
         ctrl_rx,
         stats.clone(),
+        SinkConfig::default(),
     ));
 
     let mut enc = OpusEncoder::new(64_000).unwrap();
@@ -182,27 +192,22 @@ async fn out_of_order_packets_are_reordered_before_decode() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
+    // Drain like a device would; the sink only keeps ~2 frames queued.
+    let mut energies = Vec::new();
     for _ in 0..50 {
-        if play_cons.occupied() >= FRAME_STEREO_SAMPLES * 3 {
-            break;
+        if play_cons.occupied() >= FRAME_STEREO_SAMPLES {
+            let mut chunk = vec![0.0f32; FRAME_STEREO_SAMPLES];
+            play_cons.pop_slice(&mut chunk);
+            energies.push(chunk.iter().map(|x| x * x).sum::<f32>());
+            if energies.len() == 3 {
+                break;
+            }
+            continue;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    assert!(
-        play_cons.occupied() >= FRAME_STEREO_SAMPLES * 3,
-        "expected three decoded frames, got {} samples",
-        play_cons.occupied()
-    );
-
-    let mut energy_of = || {
-        let mut chunk = vec![0.0f32; FRAME_STEREO_SAMPLES];
-        let popped = play_cons.pop_slice(&mut chunk);
-        assert_eq!(popped, FRAME_STEREO_SAMPLES);
-        chunk.iter().map(|x| x * x).sum::<f32>()
-    };
-    let e0 = energy_of();
-    let e1 = energy_of();
-    let e2 = energy_of();
+    assert_eq!(energies.len(), 3, "expected three decoded frames");
+    let (e0, e1, e2) = (energies[0], energies[1], energies[2]);
 
     assert!(
         e0 <= e1 && e1 <= e2,

@@ -27,34 +27,38 @@ pub(crate) async fn run_with_settings(
     let mut frame = vec![0.0f32; FRAME_STEREO_SAMPLES];
     let mut jitter = JitterBuffer::new(jitter_mode, jitter_max_depth_ms);
     let mut pending_fec_recover = false;
+    let mut playout = tokio::time::interval(std::time::Duration::from_millis(10));
+    playout.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
-        let n = sock.recv(&mut udp_buf).await?;
-        let bytes = Bytes::copy_from_slice(&udp_buf[..n]);
-        let pkt = match Packet::decode(bytes) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("malformed packet: {e}");
-                continue;
-            }
-        };
-        let now = std::time::Instant::now();
-        jitter.push(pkt, now);
-
-        while let Some(out) = jitter.pop_ready(now) {
-            match out {
-                JitterOutput::Lost { seq } => {
-                    pending_fec_recover = true;
-                    tracing::debug!(seq, "jitter buffer declared lost");
+        tokio::select! {
+            recv = sock.recv(&mut udp_buf) => {
+                let n = recv?;
+                let bytes = Bytes::copy_from_slice(&udp_buf[..n]);
+                match Packet::decode(bytes) {
+                    Ok(pkt) => jitter.push(pkt, std::time::Instant::now()),
+                    Err(e) => tracing::warn!("malformed packet: {e}"),
                 }
-                JitterOutput::Packet(p) => {
-                    handle_packet(
-                        &mut decoder,
-                        &mut producer,
-                        &p.payload,
-                        &mut pending_fec_recover,
-                        &mut frame,
-                    );
+            }
+            _ = playout.tick() => {
+                let now = std::time::Instant::now();
+                while producer.occupied() < 2 * FRAME_STEREO_SAMPLES {
+                    let Some(out) = jitter.pop_ready(now) else { break };
+                    match out {
+                        JitterOutput::Lost { seq } => {
+                            pending_fec_recover = true;
+                            tracing::debug!(seq, "jitter buffer declared lost");
+                        }
+                        JitterOutput::Packet(p) => {
+                            handle_packet(
+                                &mut decoder,
+                                &mut producer,
+                                &p.payload,
+                                &mut pending_fec_recover,
+                                &mut frame,
+                            );
+                        }
+                    }
                 }
             }
         }

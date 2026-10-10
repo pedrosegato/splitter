@@ -373,16 +373,6 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 ]}
               />
             </Row>
-
-            <Row>
-              <SettingLabel htmlFor="metrics-enabled">Métricas habilitadas</SettingLabel>
-              <Switch
-                id="metrics-enabled"
-                size="sm"
-                checked={settings.metrics_enabled}
-                onCheckedChange={(checked) => set("metrics_enabled", checked)}
-              />
-            </Row>
           </FieldGroup>
 
           <SectionLabel>Aparência</SectionLabel>

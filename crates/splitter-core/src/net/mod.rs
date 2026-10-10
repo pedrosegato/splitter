@@ -1,4 +1,5 @@
 pub mod active_scan;
+pub mod crypto;
 pub mod device_watcher;
 pub mod discovery;
 pub mod fec;

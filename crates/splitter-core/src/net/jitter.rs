@@ -1,7 +1,7 @@
 use crate::net::packet::Packet;
 use crate::settings::JitterMode;
 use std::collections::{BTreeMap, VecDeque};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub const PACKET_INTERVAL_MS: u32 = 20;
 pub const MAX_DEPTH_MS_HARD_CAP: u32 = 200;
@@ -11,12 +11,35 @@ pub const MAX_DEPTH_MS_HARD_CAP: u32 = 200;
 // holds ~10 packets, so 512 is far above any legitimate depth while still bounding memory.
 pub const MAX_QUEUED_PACKETS: usize = 512;
 
+const SEQ_MASK: u32 = 0x00FF_FFFF;
+const SEQ_HALF_RANGE: u32 = 0x0080_0000;
+
+// Wider gaps are a resync (sender restart, long outage), not loss to conceal slot by slot.
+const MAX_CONCEALED_GAP: u32 = 5;
+
+// A sender clocked faster than our device builds a backlog; once it stays above target +
+// slack for a second of slots, shed a frame so latency doesn't creep up all session.
+const DRIFT_SLACK_PACKETS: usize = 2;
+const DRIFT_TRIM_AFTER_SLOTS: u32 = 50;
+
+fn seq_distance(from: u32, to: u32) -> u32 {
+    to.wrapping_sub(from) & SEQ_MASK
+}
+
+fn seq_is_behind(cursor: u32, seq: u32) -> bool {
+    let d = seq_distance(seq, cursor);
+    d != 0 && d < SEQ_HALF_RANGE
+}
+
 #[derive(Debug, Clone)]
 pub enum JitterOutput {
     Packet(Packet),
     Lost { seq: u32 },
 }
 
+/// Call `pop_ready` whenever the playback device has room for a frame. Playout starts once
+/// `target_depth` packets are buffered (or the oldest waited that long); slot N is then due
+/// at start + N * 20ms, and a missing packet is only reported `Lost` once its slot is due.
 #[derive(Debug)]
 pub struct JitterBuffer {
     mode: JitterMode,
@@ -28,6 +51,11 @@ pub struct JitterBuffer {
     arrival_intervals_ms: VecDeque<u32>,
     last_arrival: Option<Instant>,
     pops_since_resize: u32,
+    primed: bool,
+    started: bool,
+    playout_origin: Option<Instant>,
+    slots_played: u32,
+    backlog_slots: u32,
 }
 
 impl JitterBuffer {
@@ -48,6 +76,11 @@ impl JitterBuffer {
             arrival_intervals_ms: VecDeque::with_capacity(256),
             last_arrival: None,
             pops_since_resize: 0,
+            primed: false,
+            started: false,
+            playout_origin: None,
+            slots_played: 0,
+            backlog_slots: 0,
         }
     }
 
@@ -78,18 +111,22 @@ impl JitterBuffer {
             self.arrival_intervals_ms.push_back(delta);
         }
         self.last_arrival = Some(arrival);
-        let seq = packet.seq;
+        let seq = packet.seq & SEQ_MASK;
+        match self.next_expected_seq {
+            None => self.next_expected_seq = Some(seq),
+            Some(cur) if seq_is_behind(cur, seq) => {
+                if self.started {
+                    // Its slot already played; queueing it would rewind playout.
+                    return;
+                }
+                self.next_expected_seq = Some(seq);
+            }
+            _ => {}
+        }
         let is_new = !self.queue.contains_key(&seq);
         self.queue.insert(seq, (packet, arrival));
         if is_new {
             self.arrival_order.push_back(seq);
-        }
-        // Initialise next_expected_seq to the smallest seq we have buffered so
-        // that out-of-order early arrivals don't skew the starting point.
-        match self.next_expected_seq {
-            None => self.next_expected_seq = Some(seq),
-            Some(cur) if seq < cur => self.next_expected_seq = Some(seq),
-            _ => {}
         }
         while self.arrival_order.len() > MAX_QUEUED_PACKETS {
             if let Some(dropped) = self.arrival_order.pop_front() {
@@ -100,10 +137,27 @@ impl JitterBuffer {
         }
     }
 
+    /// `None`: still prebuffering, the missing packet's slot isn't due yet, or the buffer
+    /// ran dry (it then refills to target depth).
     pub fn pop_ready(&mut self, now: Instant) -> Option<JitterOutput> {
-        let want = self.next_expected_seq?;
-        if self.queue.contains_key(&want) {
-            let (pkt, _) = self.queue.remove(&want)?;
+        let mut want = self.next_expected_seq?;
+        if !self.primed {
+            if !self.prebuffered(now) {
+                return None;
+            }
+            self.primed = true;
+            self.started = true;
+            self.playout_origin = Some(now);
+            self.slots_played = 0;
+            // Packets lost while we were silent are gone; resume from what we have.
+            if !self.queue.contains_key(&want) {
+                if let Some(nearest) = self.nearest_queued(want) {
+                    want = nearest;
+                    self.next_expected_seq = Some(want);
+                }
+            }
+        }
+        if let Some((pkt, _)) = self.queue.remove(&want) {
             // arrival_order is arrival-ordered, not seq-ordered: the popped seq is the
             // front only in the in-order steady state. Fast-path that; fall back to a
             // scan when a reordered arrival put `want` elsewhere.
@@ -112,23 +166,80 @@ impl JitterBuffer {
             } else {
                 self.arrival_order.retain(|&s| s != want);
             }
-            self.next_expected_seq = Some(want.wrapping_add(1));
-            self.bump_pops();
+            let mut next = want.wrapping_add(1) & SEQ_MASK;
+            if self.queue.len() > self.target_depth + DRIFT_SLACK_PACKETS {
+                self.backlog_slots += 1;
+                if self.backlog_slots >= DRIFT_TRIM_AFTER_SLOTS {
+                    self.backlog_slots = 0;
+                    if self.queue.remove(&next).is_some() {
+                        self.arrival_order.retain(|&s| s != next);
+                        next = next.wrapping_add(1) & SEQ_MASK;
+                    }
+                }
+            } else {
+                self.backlog_slots = 0;
+            }
+            self.advance_slot(next);
             return Some(JitterOutput::Packet(pkt));
         }
-        if self.queue.is_empty() {
+        if !self.slot_due(now) {
             return None;
         }
-        let oldest_seq = *self.arrival_order.front()?;
-        let oldest_arrival = self.queue.get(&oldest_seq).map(|(_, t)| *t)?;
-        let age_ms = now.duration_since(oldest_arrival).as_millis() as u32;
-        if age_ms >= self.max_depth_ms {
-            let lost = JitterOutput::Lost { seq: want };
-            self.next_expected_seq = Some(want.wrapping_add(1));
-            self.bump_pops();
-            return Some(lost);
+        let Some(nearest) = self.nearest_queued(want) else {
+            self.primed = false;
+            return None;
+        };
+        let next = if seq_distance(want, nearest) > MAX_CONCEALED_GAP {
+            nearest
+        } else {
+            want.wrapping_add(1) & SEQ_MASK
+        };
+        self.advance_slot(next);
+        Some(JitterOutput::Lost { seq: want })
+    }
+
+    fn advance_slot(&mut self, next: u32) {
+        self.next_expected_seq = Some(next);
+        self.slots_played = self.slots_played.saturating_add(1);
+        self.bump_pops();
+    }
+
+    fn slot_due(&self, now: Instant) -> bool {
+        match self.playout_origin {
+            Some(origin) => {
+                let offset = u64::from(self.slots_played) * u64::from(PACKET_INTERVAL_MS);
+                now >= origin + Duration::from_millis(offset)
+            }
+            None => true,
         }
-        None
+    }
+
+    /// After a `Lost`, the successor whose in-band FEC can rebuild the lost frame.
+    pub fn peek_next(&self) -> Option<&Packet> {
+        self.queue.get(&self.next_expected_seq?).map(|(p, _)| p)
+    }
+
+    fn prebuffered(&self, now: Instant) -> bool {
+        if self.queue.len() >= self.target_depth {
+            return true;
+        }
+        let Some(arrived) = self
+            .arrival_order
+            .front()
+            .and_then(|s| self.queue.get(s))
+            .map(|(_, t)| *t)
+        else {
+            return false;
+        };
+        now.duration_since(arrived).as_millis() as u32
+            >= self.target_depth as u32 * PACKET_INTERVAL_MS
+    }
+
+    fn nearest_queued(&self, from: u32) -> Option<u32> {
+        self.queue
+            .keys()
+            .copied()
+            .min_by_key(|&s| seq_distance(from, s))
     }
 
     fn bump_pops(&mut self) {
@@ -223,17 +334,6 @@ mod tests {
             JitterOutput::Packet(p) => assert_eq!(p.seq, 2),
             _ => panic!(),
         }
-    }
-
-    #[test]
-    fn missing_packet_waits_until_max_depth_reached() {
-        use std::time::Duration;
-        let mut jb = JitterBuffer::new(JitterMode::Min, 100);
-        let t0 = Instant::now();
-        jb.push(pkt(0), t0);
-        jb.push(pkt(2), t0);
-        let _ = jb.pop_ready(t0).unwrap();
-        assert!(jb.pop_ready(t0 + Duration::from_millis(30)).is_none());
     }
 
     #[test]
@@ -348,6 +448,166 @@ mod tests {
     }
 
     #[test]
+    fn missing_packet_is_concealed_at_its_slot_without_waiting_for_max_depth() {
+        use std::time::Duration;
+        let mut jb = JitterBuffer::new(JitterMode::Auto, 200);
+        let t0 = Instant::now();
+        jb.push(pkt(0), t0);
+        jb.push(pkt(2), t0 + Duration::from_millis(40));
+        let start = t0 + Duration::from_millis(40);
+        assert!(matches!(jb.pop_ready(start), Some(JitterOutput::Packet(p)) if p.seq == 0));
+        let slot1_due = start + Duration::from_millis(20);
+        match jb.pop_ready(slot1_due) {
+            Some(JitterOutput::Lost { seq }) => assert_eq!(seq, 1),
+            other => panic!("seq 1 must be concealed at its playout slot, got {other:?}"),
+        }
+        assert!(matches!(jb.pop_ready(slot1_due), Some(JitterOutput::Packet(p)) if p.seq == 2));
+    }
+
+    #[test]
+    fn missing_packet_waits_until_its_slot_is_due() {
+        use std::time::Duration;
+        let mut jb = JitterBuffer::new(JitterMode::Min, 200);
+        let t = Instant::now();
+        jb.push(pkt(0), t);
+        jb.push(pkt(2), t);
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 0));
+        assert!(
+            jb.pop_ready(t).is_none(),
+            "slot 1 plays 20ms after slot 0; filling the ring early must not conceal it"
+        );
+        jb.push(pkt(1), t + Duration::from_millis(5));
+        assert!(matches!(
+            jb.pop_ready(t + Duration::from_millis(5)),
+            Some(JitterOutput::Packet(p)) if p.seq == 1
+        ));
+    }
+
+    #[test]
+    fn holds_packets_until_target_depth_is_buffered() {
+        let mut jb = JitterBuffer::new(JitterMode::Fixed(60), 200);
+        let t0 = Instant::now();
+        jb.push(pkt(0), t0);
+        jb.push(pkt(1), t0);
+        assert!(
+            jb.pop_ready(t0).is_none(),
+            "must prebuffer 3 packets before starting playout"
+        );
+        jb.push(pkt(2), t0);
+        assert!(matches!(jb.pop_ready(t0), Some(JitterOutput::Packet(p)) if p.seq == 0));
+    }
+
+    #[test]
+    fn lone_packet_starts_playout_after_target_delay() {
+        use std::time::Duration;
+        let mut jb = JitterBuffer::new(JitterMode::Fixed(60), 200);
+        let t0 = Instant::now();
+        jb.push(pkt(0), t0);
+        assert!(jb.pop_ready(t0 + Duration::from_millis(10)).is_none());
+        assert!(matches!(
+            jb.pop_ready(t0 + Duration::from_millis(60)),
+            Some(JitterOutput::Packet(p)) if p.seq == 0
+        ));
+    }
+
+    #[test]
+    fn late_packet_is_dropped_instead_of_rewinding_playout() {
+        use std::time::Duration;
+        let mut jb = JitterBuffer::new(JitterMode::Min, 200);
+        let t = Instant::now();
+        jb.push(pkt(0), t);
+        jb.push(pkt(2), t);
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 0));
+        let slot1_due = t + Duration::from_millis(20);
+        assert!(matches!(
+            jb.pop_ready(slot1_due),
+            Some(JitterOutput::Lost { seq: 1 })
+        ));
+        jb.push(pkt(1), slot1_due);
+        match jb.pop_ready(slot1_due) {
+            Some(JitterOutput::Packet(p)) => {
+                assert_eq!(p.seq, 2, "late seq 1 must not be replayed")
+            }
+            other => panic!("expected Packet(seq=2), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seq_wraps_at_24_bits() {
+        let mut jb = JitterBuffer::new(JitterMode::Min, 200);
+        let t = Instant::now();
+        jb.push(pkt(0xFF_FFFF), t);
+        jb.push(pkt(0), t);
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 0xFF_FFFF));
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 0));
+    }
+
+    #[test]
+    fn large_forward_gap_resyncs_instead_of_concealing_every_frame() {
+        use std::time::Duration;
+        let mut jb = JitterBuffer::new(JitterMode::Min, 200);
+        let t = Instant::now();
+        jb.push(pkt(0), t);
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 0));
+        let slot1_due = t + Duration::from_millis(20);
+        jb.push(pkt(1_000), slot1_due);
+        assert!(matches!(
+            jb.pop_ready(slot1_due),
+            Some(JitterOutput::Lost { seq: 1 })
+        ));
+        assert!(matches!(jb.pop_ready(slot1_due), Some(JitterOutput::Packet(p)) if p.seq == 1_000));
+    }
+
+    #[test]
+    fn underrun_rebuffers_before_resuming() {
+        use std::time::Duration;
+        let mut jb = JitterBuffer::new(JitterMode::Fixed(40), 200);
+        let t = Instant::now();
+        jb.push(pkt(0), t);
+        jb.push(pkt(1), t);
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 0));
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 1));
+        let slot2_due = t + Duration::from_millis(40);
+        assert!(jb.pop_ready(slot2_due).is_none());
+        jb.push(pkt(2), slot2_due);
+        assert!(
+            jb.pop_ready(slot2_due).is_none(),
+            "after an underrun the buffer must refill to target depth"
+        );
+        jb.push(pkt(3), slot2_due);
+        assert!(matches!(jb.pop_ready(slot2_due), Some(JitterOutput::Packet(p)) if p.seq == 2));
+    }
+
+    #[test]
+    fn sustained_backlog_from_clock_drift_is_trimmed() {
+        let mut jb = JitterBuffer::new(JitterMode::Min, 200);
+        let t = Instant::now();
+        let mut next_push = 0u32;
+        for _ in 0..6 {
+            jb.push(pkt(next_push), t);
+            next_push += 1;
+        }
+        let mut played = Vec::new();
+        for _ in 0..120 {
+            jb.push(pkt(next_push), t);
+            next_push += 1;
+            match jb.pop_ready(t) {
+                Some(JitterOutput::Packet(p)) => played.push(p.seq),
+                other => panic!("expected a packet, got {other:?}"),
+            }
+        }
+        let skips = played.windows(2).filter(|w| w[1] != w[0] + 1).count();
+        assert!(
+            skips >= 1,
+            "a sustained backlog must be trimmed: {played:?}"
+        );
+        assert!(
+            skips <= 3,
+            "trimming must be gradual, not a flush: {skips} skips in 120 slots"
+        );
+    }
+
+    #[test]
     fn push_beyond_cap_drops_oldest() {
         let mut jb = JitterBuffer::new(JitterMode::Min, 100);
         let t = Instant::now();
@@ -370,11 +630,8 @@ mod tests {
         for seq in 0..(MAX_QUEUED_PACKETS as u32) {
             jb.push(pkt(seq), t);
         }
-        for expected in 0..(MAX_QUEUED_PACKETS as u32) {
-            match jb.pop_ready(t).unwrap() {
-                JitterOutput::Packet(p) => assert_eq!(p.seq, expected),
-                _ => panic!("expected Packet(seq={expected}) — nothing should drop at/under cap"),
-            }
-        }
+        assert_eq!(jb.queue.len(), MAX_QUEUED_PACKETS);
+        assert!((0..MAX_QUEUED_PACKETS as u32).all(|s| jb.queue.contains_key(&s)));
+        assert!(matches!(jb.pop_ready(t), Some(JitterOutput::Packet(p)) if p.seq == 0));
     }
 }

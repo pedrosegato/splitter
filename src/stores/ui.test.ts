@@ -33,6 +33,13 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().activeTab).toBe("routing");
   });
 
+  it("setPairing holds the dialed peer's code until cleared", () => {
+    useUiStore.getState().setPairing({ peer_id: "peer-1", code: "123 456" });
+    expect(useUiStore.getState().pairing).toEqual({ peer_id: "peer-1", code: "123 456" });
+    useUiStore.getState().setPairing(null);
+    expect(useUiStore.getState().pairing).toBeNull();
+  });
+
   it("selectStream sets selectedStreamId", () => {
     useUiStore.getState().selectStream(7);
     expect(useUiStore.getState().selectedStreamId).toBe(7);

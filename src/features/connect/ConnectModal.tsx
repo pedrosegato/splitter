@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { useConnectPeer, useOpenSession } from "@/hooks/useConnection";
 import { usePeers } from "@/hooks/usePeers";
 import { variants } from "@/lib/motion";
+import { useUiStore } from "@/stores/ui";
 
 const DEFAULT_PORT = 7000;
 
@@ -111,6 +112,22 @@ function ManualConnectRow({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+function PairingCodeNotice() {
+  const pairing = useUiStore((s) => s.pairing);
+  if (!pairing) return null;
+  return (
+    <div className="border-line border-b px-[15px] py-3 text-center">
+      <p className="text-ink-3 text-[10px]">código de pareamento</p>
+      <p className="text-gold text-[22px] font-semibold tracking-[0.12em] tabular-nums">
+        {pairing.code}
+      </p>
+      <p className="text-ink-3 text-[10px]">
+        confirme que a outra máquina mostra o mesmo código antes de aceitar
+      </p>
+    </div>
+  );
+}
+
 export function ConnectModal({ open, onOpenChange }: Props) {
   const peers = usePeers();
   const discovered = peers.data ?? [];
@@ -125,6 +142,8 @@ export function ConnectModal({ open, onOpenChange }: Props) {
         <DialogHeader className="bg-elev-1 border-line rounded-t-lg border-b px-[15px] py-3">
           <DialogTitle className="text-ink-3 text-[11px] font-medium">Máquinas na rede</DialogTitle>
         </DialogHeader>
+
+        <PairingCodeNotice />
 
         <motion.div
           variants={variants.listStagger}

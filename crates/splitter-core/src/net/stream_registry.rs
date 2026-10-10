@@ -58,22 +58,26 @@ impl StreamRegistry {
         stream_id: StreamId,
         signal: StreamControlSignal,
     ) -> Result<(), NetError> {
-        let guard = self.inner.read().await;
-        let rt = guard
+        // Don't await under the lock: a full control channel would stall register/close.
+        let control_tx = self
+            .inner
+            .read()
+            .await
             .get(&(*session_id, stream_id))
+            .map(|rt| rt.control_tx.clone())
             .ok_or(NetError::UnknownStream {
                 session: session_id.get(),
                 stream: stream_id.get(),
             })?;
-        rt.control_tx
+        control_tx
             .send(signal)
             .await
             .map_err(|_| NetError::ChannelClosed)
     }
 
     pub async fn close(&self, session_id: &SessionId, stream_id: StreamId) -> Result<(), NetError> {
-        let mut guard = self.inner.write().await;
-        if let Some(rt) = guard.remove(&(*session_id, stream_id)) {
+        let removed = self.inner.write().await.remove(&(*session_id, stream_id));
+        if let Some(rt) = removed {
             let _ = rt.control_tx.send(StreamControlSignal::Close).await;
             rt.join.abort();
             Ok(())
@@ -119,6 +123,7 @@ impl StreamRegistry {
             prev.insert(key, snap.clone());
             out.push((key.0, key.1, snap));
         }
+        prev.retain(|key, _| guard.contains_key(key));
         out
     }
 }
@@ -230,6 +235,51 @@ mod registry_tests {
             after[0].2.bitrate_kbps_sent,
             ((16_000u64 - 8_000) * 8 / 1_000) as u32,
             "the delta must be measured from this baseline's previous snapshot, unaffected by current_stats"
+        );
+    }
+
+    #[tokio::test]
+    async fn blocked_control_send_does_not_hold_the_registry_lock() {
+        let reg = StreamRegistry::new();
+        let sid = SessionId::new();
+        let (tx, _rx_never_drained) = mpsc::channel::<StreamControlSignal>(1);
+        tx.try_send(StreamControlSignal::Pause).unwrap();
+        let mut rt = fake_runtime(sid, StreamId(0));
+        rt.control_tx = tx;
+        reg.register(rt).await.unwrap();
+
+        let reg_blocked = reg.clone();
+        let blocked = tokio::spawn(async move {
+            reg_blocked
+                .send_control(&sid, StreamId(0), StreamControlSignal::Resume)
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            reg.register(fake_runtime(SessionId::new(), StreamId(1))),
+        )
+        .await
+        .expect("register must not wait behind a stream whose control channel is full")
+        .unwrap();
+        blocked.abort();
+    }
+
+    #[tokio::test]
+    async fn baseline_forgets_streams_that_closed() {
+        let reg = StreamRegistry::new();
+        let sid = SessionId::new();
+        reg.register(fake_runtime(sid, StreamId(0))).await.unwrap();
+        let mut baseline = StatsBaseline::default();
+        reg.snapshot_stats(1_000, &mut baseline).await;
+        assert_eq!(baseline.len(), 1);
+
+        reg.close(&sid, StreamId(0)).await.unwrap();
+        reg.snapshot_stats(1_000, &mut baseline).await;
+        assert!(
+            baseline.is_empty(),
+            "closed streams must not linger in the baseline"
         );
     }
 

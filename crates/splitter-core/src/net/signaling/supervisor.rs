@@ -26,12 +26,7 @@ pub fn spawn_connection_supervisor(
                     host.on_peer_connected(peer_id).await;
                     let endpoints = {
                         let guard = connections.read().await;
-                        guard.get(&peer_id).map(|c| ConnEndpoints {
-                            tx: c.tx.clone(),
-                            remote_addr: c.remote_addr,
-                            events: c.events.clone(),
-                            connection_id: c.connection_id,
-                        })
+                        guard.get(&peer_id).map(ConnEndpoints::from)
                     };
                     if let Some(endpoints) = endpoints {
                         if let Some(prev) = loops.remove(&peer_id) {
@@ -85,6 +80,8 @@ mod tests {
             connection_id: Uuid::new_v4(),
             abort: tokio::spawn(async {}).abort_handle(),
             abort_on_drop: AtomicBool::new(false),
+            crypto: Default::default(),
+            session: Default::default(),
         }
     }
 

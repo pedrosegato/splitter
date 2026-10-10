@@ -1,31 +1,56 @@
 use crate::error::NetError;
+use crate::net::crypto::{self, KeyExchange, Transcript};
 use crate::net::identity::PeerIdentity;
 use crate::net::manager::SessionManager;
-use crate::net::signaling::connection::{spawn_peer_connection, PeerConnectionHandle, PeerEvent};
+use crate::net::signaling::connection::{
+    spawn_peer_connection, PeerConnectionHandle, PeerEvent, Role,
+};
 use crate::net::signaling::message::{Capabilities, SignalingMessage, PROTOCOL_VERSION};
 use crate::net::trust::{TrustStore, TrustedPeer};
 use crate::settings::SettingsHandle;
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine;
-use rand::RngCore;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, Notify, RwLock, Semaphore};
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+// Bounds what unauthenticated LAN hosts can hold open while waiting for the user.
+pub const MAX_PENDING_PEERS: usize = 16;
+const MAX_CONCURRENT_HANDSHAKES: usize = 64;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Clone)]
 pub struct PendingPeer {
     pub peer_id: Uuid,
     pub peer_name: String,
     pub remote_addr: SocketAddr,
-    pub proposed_token: String,
+    /// Lets a reconnect replace the request without the old connection's teardown evicting it.
+    pub connection_id: Uuid,
+    /// Shown on both machines for a first-time pairing; `None` when the peer proved an
+    /// existing pairing and only needs to be let in.
+    pub pairing_code: Option<String>,
+    /// Stored in the trust store on accept.
+    pub token: String,
+}
+
+impl std::fmt::Debug for PendingPeer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingPeer")
+            .field("peer_id", &self.peer_id)
+            .field("peer_name", &self.peer_name)
+            .field("remote_addr", &self.remote_addr)
+            .field("connection_id", &self.connection_id)
+            .field("pairing_code", &self.pairing_code)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct PendingPeers {
     inner: Mutex<Vec<PendingPeer>>,
+    changed: Notify,
 }
 
 impl PendingPeers {
@@ -33,23 +58,52 @@ impl PendingPeers {
         self.inner.lock().await.clone()
     }
 
-    pub async fn take(&self, idx: usize) -> Option<PendingPeer> {
+    /// Resolves after the next change; changes made while nobody waits are coalesced.
+    pub async fn changed(&self) {
+        self.changed.notified().await;
+    }
+
+    /// By peer, not list position, so an accept can't land on whoever shifted into a slot.
+    pub async fn take(&self, peer_id: &Uuid) -> Option<PendingPeer> {
         let mut guard = self.inner.lock().await;
-        if idx >= guard.len() {
-            return None;
-        }
+        let idx = guard.iter().position(|p| &p.peer_id == peer_id)?;
+        self.changed.notify_one();
         Some(guard.remove(idx))
     }
 
-    pub async fn push(&self, p: PendingPeer) {
-        self.inner.lock().await.push(p);
+    /// Returns false when the queue is full.
+    pub async fn upsert(&self, p: PendingPeer) -> bool {
+        let mut guard = self.inner.lock().await;
+        if let Some(existing) = guard.iter_mut().find(|e| e.peer_id == p.peer_id) {
+            *existing = p;
+        } else if guard.len() >= MAX_PENDING_PEERS {
+            return false;
+        } else {
+            guard.push(p);
+        }
+        self.changed.notify_one();
+        true
+    }
+
+    /// Drops the request only if it still belongs to `connection_id`.
+    pub async fn remove_connection(&self, peer_id: &Uuid, connection_id: Uuid) -> bool {
+        self.remove_where(|p| &p.peer_id == peer_id && p.connection_id == connection_id)
+            .await
     }
 
     pub async fn remove_peer(&self, peer_id: &Uuid) -> bool {
+        self.remove_where(|p| &p.peer_id == peer_id).await
+    }
+
+    async fn remove_where(&self, matches: impl Fn(&PendingPeer) -> bool) -> bool {
         let mut guard = self.inner.lock().await;
         let before = guard.len();
-        guard.retain(|p| &p.peer_id != peer_id);
-        guard.len() != before
+        guard.retain(|p| !matches(p));
+        let removed = guard.len() != before;
+        if removed {
+            self.changed.notify_one();
+        }
+        removed
     }
 }
 
@@ -64,6 +118,39 @@ pub struct SignalingServerHandle {
 }
 
 pub struct SignalingServer;
+
+/// Skips heartbeats: the dialer's connection task can send one before its Hello.
+async fn next_handshake_message(
+    events: &mut broadcast::Receiver<PeerEvent>,
+) -> Option<SignalingMessage> {
+    tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
+        loop {
+            match events.recv().await {
+                Ok(PeerEvent::Message(SignalingMessage::Heartbeat { .. }))
+                | Ok(PeerEvent::Connected { .. })
+                | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Ok(PeerEvent::Message(m)) => return Some(m),
+                Ok(PeerEvent::Disconnected { .. }) | Err(broadcast::error::RecvError::Closed) => {
+                    return None
+                }
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn reject(handle: PeerConnectionHandle, reason: &str) {
+    handle.disarm();
+    let _ = handle
+        .tx
+        .send(SignalingMessage::HelloAck {
+            accepted: false,
+            reason: Some(reason.into()),
+        })
+        .await;
+}
 
 impl SignalingServer {
     pub async fn start(
@@ -86,6 +173,7 @@ impl SignalingServer {
         let id_clone = identity.clone();
         let _sessions = sessions;
         let conn_est_tx_task = conn_est_tx.clone();
+        let handshakes = Arc::new(Semaphore::new(MAX_CONCURRENT_HANDSHAKES));
 
         tokio::spawn(async move {
             loop {
@@ -93,10 +181,18 @@ impl SignalingServer {
                     Ok(v) => v,
                     Err(e) => {
                         tracing::error!("signaling accept: {e}");
+                        // Persistent failures (fd exhaustion) return instantly.
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         continue;
                     }
                 };
-                let handle = match spawn_peer_connection(stream, None) {
+                let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+                    tracing::warn!(
+                        "too many concurrent handshakes; dropping connection from {addr}"
+                    );
+                    continue;
+                };
+                let handle = match spawn_peer_connection(stream) {
                     Ok(h) => h,
                     Err(e) => {
                         tracing::warn!(error = %e, "dropping accepted connection: peer_addr unavailable");
@@ -111,17 +207,10 @@ impl SignalingServer {
                 let id_inner = id_clone.clone();
                 let conn_est_tx_inner = conn_est_tx_task.clone();
                 tokio::spawn(async move {
-                    let first = match tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        events.recv(),
-                    )
-                    .await
-                    {
-                        Ok(Ok(PeerEvent::Message(m))) => m,
-                        _ => {
-                            tracing::warn!("no HELLO from {addr} within 5s");
-                            return;
-                        }
+                    let _permit = permit;
+                    let Some(first) = next_handshake_message(&mut events).await else {
+                        tracing::warn!("no HELLO from {addr} within {HANDSHAKE_TIMEOUT:?}");
+                        return;
                     };
                     if let SignalingMessage::Probe {} = first {
                         handle.disarm();
@@ -139,98 +228,117 @@ impl SignalingServer {
                         protocol_version,
                         peer_id,
                         peer_name,
-                        auth_token,
+                        client_nonce,
+                        client_key,
                         ..
                     } = first
                     else {
-                        handle.disarm();
-                        let _ = handle
-                            .tx
-                            .send(SignalingMessage::HelloAck {
-                                accepted: false,
-                                reason: Some("first message must be hello".into()),
-                                auth_token: None,
-                                peer_id: None,
-                            })
-                            .await;
+                        reject(handle, "first message must be hello").await;
                         return;
                     };
                     if protocol_version != PROTOCOL_VERSION {
-                        handle.disarm();
-                        let _ = handle
-                            .tx
-                            .send(SignalingMessage::HelloAck {
-                                accepted: false,
-                                reason: Some(format!(
-                                    "protocol_version mismatch: got {protocol_version}, expected {PROTOCOL_VERSION}"
-                                )),
-                                auth_token: None,
-                                peer_id: None,
-                            })
-                            .await;
+                        reject(
+                            handle,
+                            &format!(
+                                "protocol_version mismatch: got {protocol_version}, expected {PROTOCOL_VERSION}"
+                            ),
+                        )
+                        .await;
                         return;
                     }
                     let Ok(peer_uuid) = Uuid::parse_str(&peer_id) else {
-                        handle.disarm();
-                        let _ = handle
-                            .tx
-                            .send(SignalingMessage::HelloAck {
-                                accepted: false,
-                                reason: Some("invalid peer_id uuid".into()),
-                                auth_token: None,
-                                peer_id: None,
-                            })
-                            .await;
+                        reject(handle, "invalid peer_id uuid").await;
                         return;
                     };
 
-                    let (known, token_valid) = {
-                        let t = t_inner.read().await;
-                        (t.contains(&peer_uuid), t.verify(&peer_uuid, &auth_token))
+                    let exchange = KeyExchange::new();
+                    let server_key = exchange.public_key().to_string();
+                    let server_nonce = crypto::new_nonce();
+                    let server_peer_id = id_inner.peer_id.to_string();
+                    let transcript = Transcript {
+                        client_peer_id: &peer_id,
+                        server_peer_id: &server_peer_id,
+                        client_nonce: &client_nonce,
+                        server_nonce: &server_nonce,
+                        client_key: &client_key,
+                        server_key: &server_key,
                     };
-                    if known {
-                        if !token_valid {
-                            handle.disarm();
-                            let _ = handle
-                                .tx
-                                .send(SignalingMessage::HelloAck {
-                                    accepted: false,
-                                    reason: Some("auth_token mismatch".into()),
-                                    auth_token: None,
-                                    peer_id: None,
-                                })
-                                .await;
-                            return;
+                    let Some(shared) = exchange.agree(&client_key) else {
+                        reject(handle, "invalid key exchange").await;
+                        return;
+                    };
+                    let stored_token = t_inner.read().await.token_for(Some(peer_uuid));
+                    let (token, pairing_code, offer) = match stored_token {
+                        Some(token) => {
+                            let server_proof = crypto::server_proof(&token, &transcript);
+                            let challenge = SignalingMessage::Challenge {
+                                server_peer_id: server_peer_id.clone(),
+                                server_nonce: server_nonce.clone(),
+                                server_key: server_key.clone(),
+                                server_proof,
+                            };
+                            (token, None, challenge)
                         }
-                        let auto_accept = s_inner.read().await.auto_accept_trusted;
-                        if auto_accept {
-                            let _ = handle
-                                .tx
-                                .send(SignalingMessage::HelloAck {
-                                    accepted: true,
-                                    reason: None,
-                                    auth_token: Some(auth_token.clone()),
-                                    peer_id: Some(id_inner.peer_id.to_string()),
-                                })
-                                .await;
-                            c_inner.write().await.insert(peer_uuid, handle);
-                            let _ = conn_est_tx_inner.send(peer_uuid);
-                            return;
-                        }
-                        // auto_accept_trusted is false — fall through to pending queue
+                        None => (
+                            crypto::pairing_token(&shared, &transcript),
+                            Some(crypto::pairing_code(&shared, &transcript)),
+                            SignalingMessage::PairingOffer {
+                                server_peer_id: server_peer_id.clone(),
+                                server_nonce: server_nonce.clone(),
+                                server_key: server_key.clone(),
+                            },
+                        ),
+                    };
+                    let expected = crypto::client_proof(&token, &transcript);
+                    handle.install_session(
+                        crypto::session_keys(&shared, &token, &transcript),
+                        Role::Acceptor,
+                    );
+                    let _ = handle.tx.send(offer).await;
+                    let proven = matches!(
+                        next_handshake_message(&mut events).await,
+                        Some(SignalingMessage::ChallengeResponse { client_proof })
+                            if crypto::proofs_match(&expected, &client_proof)
+                    );
+                    if !proven {
+                        tracing::warn!(peer = %peer_uuid, %addr, "handshake proof failed");
+                        reject(handle, "authentication failed").await;
+                        return;
+                    }
+                    handle.start_encrypting();
+
+                    if pairing_code.is_none() && s_inner.read().await.auto_accept_trusted {
+                        let _ = handle
+                            .tx
+                            .send(SignalingMessage::HelloAck {
+                                accepted: true,
+                                reason: None,
+                            })
+                            .await;
+                        c_inner.write().await.insert(peer_uuid, handle);
+                        let _ = conn_est_tx_inner.send(peer_uuid);
+                        return;
                     }
 
-                    p_inner
-                        .push(PendingPeer {
+                    let connection_id = handle.connection_id;
+                    let queued = p_inner
+                        .upsert(PendingPeer {
                             peer_id: peer_uuid,
                             peer_name: peer_name.clone(),
                             remote_addr: addr,
-                            proposed_token: auth_token.clone(),
+                            connection_id,
+                            pairing_code,
+                            token,
                         })
                         .await;
+                    if !queued {
+                        reject(handle, "too many pending pairing requests").await;
+                        return;
+                    }
                     let mut pre_accept_events = handle.events.subscribe();
                     let pending_for_watch = p_inner.clone();
                     let conns_for_watch = c_inner.clone();
+                    // Replaces (and aborts) an older connection from the same pending peer.
                     c_inner.write().await.insert(peer_uuid, handle);
                     tokio::spawn(async move {
                         loop {
@@ -239,9 +347,18 @@ impl SignalingServer {
                                 | Err(broadcast::error::RecvError::Closed) => {
                                     // Once accepted, `accept_pending_as` has taken the peer out
                                     // of pending and the acceptor owns cleanup; only evict while
-                                    // still pending.
-                                    if pending_for_watch.remove_peer(&peer_uuid).await {
-                                        conns_for_watch.write().await.remove(&peer_uuid);
+                                    // this connection's request is still pending.
+                                    if pending_for_watch
+                                        .remove_connection(&peer_uuid, connection_id)
+                                        .await
+                                    {
+                                        let mut conns = conns_for_watch.write().await;
+                                        if conns
+                                            .get(&peer_uuid)
+                                            .is_some_and(|h| h.connection_id == connection_id)
+                                        {
+                                            conns.remove(&peer_uuid);
+                                        }
                                     }
                                     break;
                                 }
@@ -263,62 +380,68 @@ impl SignalingServer {
     }
 }
 
-pub fn generate_auth_token() -> String {
-    let mut buf = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
-    B64.encode(buf)
-}
-
 pub async fn accept_pending(
     pending: &PendingPeers,
     trust: &Arc<RwLock<TrustStore>>,
     connections: &Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
     conn_established_tx: &broadcast::Sender<Uuid>,
-    idx: usize,
-) -> Result<(Uuid, String), NetError> {
-    accept_pending_as(pending, trust, connections, conn_established_tx, idx, None).await
-}
-
-pub async fn accept_pending_as(
-    pending: &PendingPeers,
-    trust: &Arc<RwLock<TrustStore>>,
-    connections: &Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
-    conn_established_tx: &broadcast::Sender<Uuid>,
-    idx: usize,
-    server_peer_id: Option<Uuid>,
-) -> Result<(Uuid, String), NetError> {
+    peer_id: Uuid,
+) -> Result<(), NetError> {
     let p = pending
-        .take(idx)
+        .take(&peer_id)
         .await
         .ok_or_else(|| NetError::SignalingProtocol {
-            reason: format!("no pending peer at index {idx}"),
+            reason: format!("no pending request from peer {peer_id}"),
         })?;
-    let token = generate_auth_token();
-    {
-        let mut t = trust.write().await;
-        t.add(TrustedPeer {
-            peer_id: p.peer_id,
-            peer_name: p.peer_name.clone(),
-            auth_token: token.clone(),
-        })?;
-    }
-    let conns = connections.read().await;
-    if let Some(handle) = conns.get(&p.peer_id) {
-        handle
-            .tx
-            .send(SignalingMessage::HelloAck {
-                accepted: true,
-                reason: None,
-                auth_token: Some(token.clone()),
-                peer_id: server_peer_id.map(|id| id.to_string()),
-            })
-            .await
-            .map_err(|_| NetError::SignalingProtocol {
-                reason: "peer disconnected before ack".into(),
-            })?;
-    }
+    let disconnected = || NetError::SignalingProtocol {
+        reason: "peer disconnected before ack".into(),
+    };
+    let tx = connections
+        .read()
+        .await
+        .get(&p.peer_id)
+        .filter(|h| h.connection_id == p.connection_id)
+        .map(|h| h.tx.clone())
+        .ok_or_else(disconnected)?;
+    trust.write().await.add(TrustedPeer {
+        peer_id: p.peer_id,
+        peer_name: p.peer_name.clone(),
+        auth_token: p.token.clone(),
+    })?;
+    tx.send(SignalingMessage::HelloAck {
+        accepted: true,
+        reason: None,
+    })
+    .await
+    .map_err(|_| disconnected())?;
     let _ = conn_established_tx.send(p.peer_id);
-    Ok((p.peer_id, token))
+    Ok(())
+}
+
+/// Tells the dialer right away instead of leaving it waiting out the pairing timeout.
+pub async fn reject_pending(
+    pending: &PendingPeers,
+    connections: &Arc<RwLock<HashMap<Uuid, PeerConnectionHandle>>>,
+    peer_id: Uuid,
+) -> bool {
+    let Some(p) = pending.take(&peer_id).await else {
+        return false;
+    };
+    let handle = {
+        let mut conns = connections.write().await;
+        if conns
+            .get(&peer_id)
+            .is_some_and(|h| h.connection_id == p.connection_id)
+        {
+            conns.remove(&peer_id)
+        } else {
+            None
+        }
+    };
+    if let Some(handle) = handle {
+        reject(handle, "pairing rejected").await;
+    }
+    true
 }
 
 pub fn local_capabilities() -> Capabilities {
@@ -334,6 +457,7 @@ mod tests {
     use crate::net::signaling::message::PROTOCOL_VERSION;
     use crate::net::trust::MIN_AUTH_TOKEN_LEN;
     use crate::settings::Settings;
+    use base64::Engine;
     use tempfile::tempdir;
     use tokio::net::TcpStream;
 
@@ -378,65 +502,234 @@ mod tests {
         (handle, identity, trust, sessions, dir)
     }
 
-    #[tokio::test]
-    async fn server_queues_unknown_peer_hello() {
-        let (server, _identity, _trust, _sessions, _dir) = setup().await;
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
-        let client_peer_id = Uuid::new_v4();
-        client
-            .tx
-            .send(SignalingMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                peer_id: client_peer_id.to_string(),
-                peer_name: "client".into(),
-                app_version: "0".into(),
-                capabilities: local_capabilities(),
-                auth_token: "proposed-tok".into(),
-            })
+    fn hello(peer_id: Uuid, client_key: &str) -> SignalingMessage {
+        SignalingMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            peer_id: peer_id.to_string(),
+            peer_name: "client".into(),
+            app_version: "0".into(),
+            capabilities: local_capabilities(),
+            client_nonce: "cn".into(),
+            client_key: client_key.into(),
+        }
+    }
+
+    struct Dialer {
+        _conn: PeerConnectionHandle,
+        events: broadcast::Receiver<PeerEvent>,
+        server_peer_id: String,
+        token: String,
+        code: Option<String>,
+    }
+
+    /// Plays the dialer: answers a Challenge with `known_token`, or a PairingOffer with
+    /// the token derived from the exchange.
+    async fn handshake(
+        server: &SignalingServerHandle,
+        peer_id: Uuid,
+        known_token: Option<&str>,
+        forge_proof: bool,
+    ) -> Dialer {
+        let (conn, mut events) = dial(server).await;
+        let exchange = KeyExchange::new();
+        let client_key = exchange.public_key().to_string();
+        conn.tx.send(hello(peer_id, &client_key)).await.unwrap();
+        let offer = next_msg(&mut events, |m| {
+            matches!(
+                m,
+                SignalingMessage::Challenge { .. } | SignalingMessage::PairingOffer { .. }
+            )
+        })
+        .await;
+        let (server_peer_id, server_nonce, server_key, server_proof) = match offer {
+            SignalingMessage::Challenge {
+                server_peer_id,
+                server_nonce,
+                server_key,
+                server_proof,
+            } => (server_peer_id, server_nonce, server_key, Some(server_proof)),
+            SignalingMessage::PairingOffer {
+                server_peer_id,
+                server_nonce,
+                server_key,
+            } => (server_peer_id, server_nonce, server_key, None),
+            _ => unreachable!(),
+        };
+        let my_id = peer_id.to_string();
+        let transcript = Transcript {
+            client_peer_id: &my_id,
+            server_peer_id: &server_peer_id,
+            client_nonce: "cn",
+            server_nonce: &server_nonce,
+            client_key: &client_key,
+            server_key: &server_key,
+        };
+        let shared = exchange.agree(&server_key).unwrap();
+        let (token, code) = match server_proof {
+            Some(proof) => {
+                let token = known_token.expect("Challenge sent to an unknown peer");
+                assert!(
+                    crypto::proofs_match(&crypto::server_proof(token, &transcript), &proof),
+                    "server must prove it holds the pairing token"
+                );
+                (token.to_string(), None)
+            }
+            None => (
+                crypto::pairing_token(&shared, &transcript),
+                Some(crypto::pairing_code(&shared, &transcript)),
+            ),
+        };
+        conn.install_session(
+            crypto::session_keys(&shared, &token, &transcript),
+            Role::Dialer,
+        );
+        conn.start_encrypting();
+        let client_proof = if forge_proof {
+            "forged".into()
+        } else {
+            crypto::client_proof(&token, &transcript)
+        };
+        conn.tx
+            .send(SignalingMessage::ChallengeResponse { client_proof })
             .await
             .unwrap();
+        Dialer {
+            _conn: conn,
+            events,
+            server_peer_id,
+            token,
+            code,
+        }
+    }
 
-        let mut ok = false;
+    async fn pair(server: &SignalingServerHandle, peer_id: Uuid) -> Dialer {
+        handshake(server, peer_id, None, false).await
+    }
+
+    async fn hello_ack(events: &mut broadcast::Receiver<PeerEvent>) -> (bool, Option<String>) {
+        let SignalingMessage::HelloAck { accepted, reason } = next_msg(events, is_hello_ack).await
+        else {
+            unreachable!()
+        };
+        (accepted, reason)
+    }
+
+    async fn dial(
+        server: &SignalingServerHandle,
+    ) -> (PeerConnectionHandle, broadcast::Receiver<PeerEvent>) {
+        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
+        let client = spawn_peer_connection(stream).unwrap();
+        let events = client.events.subscribe();
+        (client, events)
+    }
+
+    async fn next_msg(
+        events: &mut broadcast::Receiver<PeerEvent>,
+        wanted: impl Fn(&SignalingMessage) -> bool,
+    ) -> SignalingMessage {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(PeerEvent::Message(m)) = events.recv().await {
+                    if wanted(&m) {
+                        return m;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("expected message not received within 2s")
+    }
+
+    fn is_hello_ack(m: &SignalingMessage) -> bool {
+        matches!(m, SignalingMessage::HelloAck { .. })
+    }
+
+    async fn wait_pending(server: &SignalingServerHandle, n: usize) -> Vec<PendingPeer> {
         for _ in 0..50 {
-            if !server.pending.list().await.is_empty() {
-                ok = true;
-                break;
+            let list = server.pending.list().await;
+            if list.len() >= n {
+                return list;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        assert!(ok, "server never queued the pending peer");
-        let pending = server.pending.list().await;
-        assert_eq!(pending[0].peer_id, client_peer_id);
+        panic!("server never queued {n} pending peer(s)");
+    }
+
+    async fn trust_peer(trust: &Arc<RwLock<TrustStore>>, peer_id: Uuid) -> String {
+        let token = "t".repeat(43);
+        trust
+            .write()
+            .await
+            .add(TrustedPeer {
+                peer_id,
+                peer_name: "trusted-client".into(),
+                auth_token: token.clone(),
+            })
+            .unwrap();
+        token
+    }
+
+    #[tokio::test]
+    async fn unknown_peer_gets_a_pairing_offer_and_both_sides_see_the_same_code() {
+        let (server, identity, _trust, _sessions, _dir) = setup().await;
+        let peer_id = Uuid::new_v4();
+        let dialer = pair(&server, peer_id).await;
+
+        let pending = wait_pending(&server, 1).await;
+        assert_eq!(pending[0].peer_id, peer_id);
+        assert_eq!(dialer.server_peer_id, identity.peer_id.to_string());
+        let code = pending[0]
+            .pairing_code
+            .clone()
+            .expect("first pairing shows a code");
+        assert_eq!(Some(code), dialer.code);
+        assert_eq!(pending[0].token, dialer.token);
+    }
+
+    #[tokio::test]
+    async fn unknown_peer_with_a_wrong_pairing_proof_is_not_queued() {
+        let (server, _identity, _trust, _sessions, _dir) = setup().await;
+        let mut dialer = handshake(&server, Uuid::new_v4(), None, true).await;
+
+        let (accepted, reason) = hello_ack(&mut dialer.events).await;
+        assert!(!accepted);
+        assert!(reason.unwrap().contains("authentication failed"));
+        assert!(server.pending.list().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_low_order_client_key_is_rejected() {
+        let (server, _identity, _trust, _sessions, _dir) = setup().await;
+        let (client, mut events) = dial(&server).await;
+        let zero_key = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        client
+            .tx
+            .send(hello(Uuid::new_v4(), &zero_key))
+            .await
+            .unwrap();
+
+        let (accepted, reason) = hello_ack(&mut events).await;
+        assert!(!accepted);
+        assert!(reason.unwrap().contains("key exchange"));
     }
 
     #[tokio::test]
     async fn probe_gets_ack_without_creating_pending() {
         let (server, identity, _trust, _sessions, _dir) = setup().await;
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
-        let mut events = client.events.subscribe();
+        let (client, mut events) = dial(&server).await;
         client.tx.send(SignalingMessage::Probe {}).await.unwrap();
 
-        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                match events.recv().await {
-                    Ok(crate::net::signaling::connection::PeerEvent::Message(
-                        SignalingMessage::ProbeAck {
-                            peer_id,
-                            peer_name,
-                            app_version,
-                        },
-                    )) => return Some((peer_id, peer_name, app_version)),
-                    Ok(_) => continue,
-                    Err(_) => return None,
-                }
-            }
+        let SignalingMessage::ProbeAck {
+            peer_id,
+            peer_name,
+            app_version,
+        } = next_msg(&mut events, |m| {
+            matches!(m, SignalingMessage::ProbeAck { .. })
         })
         .await
-        .unwrap();
-
-        let (peer_id, peer_name, app_version) = ack.expect("no ProbeAck received");
+        else {
+            unreachable!()
+        };
         assert_eq!(peer_id, identity.peer_id.to_string());
         assert_eq!(peer_name, "server");
         assert_eq!(app_version, env!("CARGO_PKG_VERSION"));
@@ -452,11 +745,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn probe_is_answered_even_when_a_heartbeat_arrives_first() {
+        let (server, _identity, _trust, _sessions, _dir) = setup().await;
+        let (client, mut events) = dial(&server).await;
+        client
+            .tx
+            .send(SignalingMessage::Heartbeat {
+                timestamp_ms: 0,
+                streams_stats: Vec::new(),
+            })
+            .await
+            .unwrap();
+        client.tx.send(SignalingMessage::Probe {}).await.unwrap();
+
+        next_msg(&mut events, |m| {
+            matches!(m, SignalingMessage::ProbeAck { .. })
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn server_rejects_protocol_mismatch() {
         let (server, _identity, _trust, _sessions, _dir) = setup().await;
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
-        let mut events = client.events.subscribe();
+        let (client, mut events) = dial(&server).await;
         client
             .tx
             .send(SignalingMessage::Hello {
@@ -465,384 +776,220 @@ mod tests {
                 peer_name: "client".into(),
                 app_version: "0".into(),
                 capabilities: local_capabilities(),
-                auth_token: "tok".into(),
+                client_nonce: "cn".into(),
+                client_key: KeyExchange::new().public_key().into(),
             })
             .await
             .unwrap();
-        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck {
-                    accepted, reason, ..
-                })) = events.recv().await
-                {
-                    return (accepted, reason);
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert!(!ack.0);
-        assert!(ack.1.unwrap().contains("protocol_version"));
+        let (accepted, reason) = hello_ack(&mut events).await;
+        assert!(!accepted);
+        assert!(reason.unwrap().contains("protocol_version"));
     }
 
     #[tokio::test]
-    async fn accept_pending_promotes_and_acks() {
+    async fn accepting_a_pairing_stores_the_derived_token_and_acks() {
         let (server, _identity, trust, _sessions, _dir) = setup().await;
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
-        let mut events = client.events.subscribe();
         let peer_id = Uuid::new_v4();
-        client
-            .tx
-            .send(SignalingMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                peer_id: peer_id.to_string(),
-                peer_name: "client".into(),
-                app_version: "0".into(),
-                capabilities: local_capabilities(),
-                auth_token: "proposed".into(),
-            })
-            .await
-            .unwrap();
-        for _ in 0..50 {
-            if !server.pending.list().await.is_empty() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        let (accepted_id, token) = accept_pending(
+        let mut dialer = pair(&server, peer_id).await;
+        wait_pending(&server, 1).await;
+
+        accept_pending(
             &server.pending,
             &trust,
             &server.connections,
             &server.connection_established_tx,
-            0,
+            peer_id,
         )
         .await
         .unwrap();
-        assert_eq!(accepted_id, peer_id);
-        assert!(!token.is_empty(), "minted token must not be empty");
-        assert!(token.len() >= MIN_AUTH_TOKEN_LEN);
-        assert_ne!(
-            token, "proposed",
-            "server must mint its own token, not echo the client-proposed value"
-        );
-        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, .. })) =
-                    events.recv().await
-                {
-                    return accepted;
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert!(ack);
+        assert!(dialer.token.len() >= MIN_AUTH_TOKEN_LEN);
+        assert!(trust.read().await.verify(&peer_id, &dialer.token));
+
+        let (accepted, _) = hello_ack(&mut dialer.events).await;
+        assert!(accepted);
     }
 
     #[tokio::test]
-    async fn hello_from_trusted_peer_with_auto_accept_skips_pending_queue() {
+    async fn rejecting_a_pairing_tells_the_dialer_and_drops_the_connection() {
+        let (server, _identity, trust, _sessions, _dir) = setup().await;
+        let peer_id = Uuid::new_v4();
+        let mut dialer = pair(&server, peer_id).await;
+        wait_pending(&server, 1).await;
+
+        assert!(reject_pending(&server.pending, &server.connections, peer_id).await);
+
+        let (accepted, reason) = hello_ack(&mut dialer.events).await;
+        assert!(!accepted);
+        assert!(reason.unwrap().contains("rejected"));
+        assert!(!server.connections.read().await.contains_key(&peer_id));
+        assert!(!trust.read().await.contains(&peer_id));
+    }
+
+    #[tokio::test]
+    async fn trusted_peer_proves_the_token_and_is_auto_accepted() {
         let settings = Settings {
             auto_accept_trusted: true,
             ..Settings::default()
         };
-        let (server, _identity, trust, _sessions, _dir) = setup_with_settings(settings).await;
-
+        let (server, identity, trust, _sessions, _dir) = setup_with_settings(settings).await;
         let peer_id = Uuid::new_v4();
-        let token = generate_auth_token();
-        trust
-            .write()
-            .await
-            .add(TrustedPeer {
-                peer_id,
-                peer_name: "trusted-client".into(),
-                auth_token: token.clone(),
-            })
-            .unwrap();
+        let token = trust_peer(&trust, peer_id).await;
 
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
-        let mut events = client.events.subscribe();
+        let mut dialer = handshake(&server, peer_id, Some(&token), false).await;
 
-        client
-            .tx
-            .send(SignalingMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                peer_id: peer_id.to_string(),
-                peer_name: "trusted-client".into(),
-                app_version: "0".into(),
-                capabilities: local_capabilities(),
-                auth_token: token.clone(),
-            })
-            .await
-            .unwrap();
-
-        // Should receive HelloAck{accepted:true} directly — no manual accept step
-        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck { accepted, .. })) =
-                    events.recv().await
-                {
-                    return accepted;
-                }
-            }
-        })
-        .await
-        .expect("timed out waiting for HelloAck");
+        assert_eq!(dialer.server_peer_id, identity.peer_id.to_string());
+        let (accepted, _) = hello_ack(&mut dialer.events).await;
         assert!(
-            ack,
-            "trusted peer with auto_accept_trusted=true must be auto-accepted"
+            accepted,
+            "a peer that proves the pairing token must be accepted"
         );
-
-        // Pending queue must remain empty
-        assert!(
-            server.pending.list().await.is_empty(),
-            "trusted auto-accepted peer must not appear in pending queue"
-        );
+        assert!(server.pending.list().await.is_empty());
     }
 
     #[tokio::test]
-    async fn hello_from_trusted_peer_without_auto_accept_goes_to_pending() {
+    async fn trusted_peer_without_auto_accept_goes_to_pending_after_proving() {
         let off = Settings {
             auto_accept_trusted: false,
             ..Settings::default()
         };
         let (server, _identity, trust, _sessions, _dir) = setup_with_settings(off).await;
-
         let peer_id = Uuid::new_v4();
-        let token = generate_auth_token();
-        trust
-            .write()
-            .await
-            .add(TrustedPeer {
-                peer_id,
-                peer_name: "trusted-client".into(),
-                auth_token: token.clone(),
-            })
-            .unwrap();
+        let token = trust_peer(&trust, peer_id).await;
 
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
+        let _dialer = handshake(&server, peer_id, Some(&token), false).await;
 
-        client
-            .tx
-            .send(SignalingMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                peer_id: peer_id.to_string(),
-                peer_name: "trusted-client".into(),
-                app_version: "0".into(),
-                capabilities: local_capabilities(),
-                auth_token: token.clone(),
-            })
-            .await
-            .unwrap();
-
-        // With auto_accept_trusted=false, trusted peer should land in pending
-        let mut queued = false;
-        for _ in 0..50 {
-            if !server.pending.list().await.is_empty() {
-                queued = true;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        assert!(
-            queued,
-            "trusted peer with auto_accept_trusted=false must still appear in pending queue"
-        );
-        let pending = server.pending.list().await;
+        let pending = wait_pending(&server, 1).await;
         assert_eq!(pending[0].peer_id, peer_id);
+        assert!(
+            pending[0].pairing_code.is_none(),
+            "an existing pairing has nothing to compare"
+        );
+        assert_eq!(pending[0].token, token);
     }
 
     #[tokio::test]
-    async fn trusted_peer_bad_token_rejected_not_queued() {
-        let settings = Settings {
-            auto_accept_trusted: true,
-            ..Settings::default()
-        };
-        let (server, _identity, trust, _sessions, _dir) = setup_with_settings(settings).await;
-
+    async fn trusted_peer_with_a_wrong_proof_is_rejected_not_queued() {
+        let (server, _identity, trust, _sessions, _dir) = setup().await;
         let peer_id = Uuid::new_v4();
-        trust
-            .write()
-            .await
-            .add(TrustedPeer {
-                peer_id,
-                peer_name: "trusted-client".into(),
-                auth_token: generate_auth_token(),
-            })
-            .unwrap();
+        let token = trust_peer(&trust, peer_id).await;
 
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
-        let mut events = client.events.subscribe();
+        let mut dialer = handshake(&server, peer_id, Some(&token), true).await;
 
-        client
-            .tx
-            .send(SignalingMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                peer_id: peer_id.to_string(),
-                peer_name: "trusted-client".into(),
-                app_version: "0".into(),
-                capabilities: local_capabilities(),
-                auth_token: "wrong-tok".into(),
-            })
-            .await
-            .unwrap();
-
-        let ack = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if let Ok(PeerEvent::Message(SignalingMessage::HelloAck {
-                    accepted, reason, ..
-                })) = events.recv().await
-                {
-                    return (accepted, reason);
-                }
-            }
-        })
-        .await
-        .expect("timed out waiting for HelloAck");
-
-        assert!(!ack.0, "known peer with wrong token must be rejected");
-        assert!(
-            ack.1
-                .as_deref()
-                .unwrap_or("")
-                .contains("auth_token mismatch"),
-            "rejection reason must mention auth_token mismatch, got: {:?}",
-            ack.1
-        );
-        assert!(
-            server.pending.list().await.is_empty(),
-            "rejected peer must not appear in pending queue"
-        );
+        let (accepted, reason) = hello_ack(&mut dialer.events).await;
+        assert!(!accepted);
+        assert!(reason.unwrap().contains("authentication failed"));
+        assert!(server.pending.list().await.is_empty());
     }
 
-    async fn queue_hello_with_empty_token(
-        server: &SignalingServerHandle,
-        peer_id: Uuid,
-    ) -> PeerConnectionHandle {
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
-        client
-            .tx
-            .send(SignalingMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                peer_id: peer_id.to_string(),
-                peer_name: "client".into(),
-                app_version: "0".into(),
-                capabilities: local_capabilities(),
-                auth_token: String::new(),
-            })
-            .await
-            .unwrap();
-        for _ in 0..50 {
-            if !server.pending.list().await.is_empty() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    #[tokio::test]
+    async fn reconnect_while_pending_keeps_the_request_and_the_newest_connection() {
+        let (server, _identity, _trust, _sessions, _dir) = setup().await;
+        let peer_id = Uuid::new_v4();
+        let first = pair(&server, peer_id).await;
+        wait_pending(&server, 1).await;
+
+        let second = pair(&server, peer_id).await;
+        // Let the replaced connection's teardown and its watcher run.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let pending = server.pending.list().await;
+        assert_eq!(pending.len(), 1, "one request per peer: {pending:?}");
+        assert_eq!(pending[0].pairing_code, second.code);
+        let conns = server.connections.read().await;
+        let handle = conns
+            .get(&peer_id)
+            .expect("the retrying connection must survive the old one's teardown");
+        assert_eq!(handle.connection_id, pending[0].connection_id);
+        drop(conns);
+        drop(first);
+        drop(second);
+    }
+
+    #[tokio::test]
+    async fn pending_queue_is_capped() {
+        let (server, _identity, _trust, _sessions, _dir) = setup().await;
+        let mut dialers = Vec::new();
+        for _ in 0..MAX_PENDING_PEERS {
+            dialers.push(pair(&server, Uuid::new_v4()).await);
         }
-        client
+        wait_pending(&server, MAX_PENDING_PEERS).await;
+
+        let mut overflow = pair(&server, Uuid::new_v4()).await;
+        let (accepted, reason) = hello_ack(&mut overflow.events).await;
+        assert!(!accepted);
+        assert!(reason.unwrap().contains("too many pending"));
+        assert_eq!(server.pending.list().await.len(), MAX_PENDING_PEERS);
+    }
+
+    fn pending_peer(peer_id: Uuid, connection_id: Uuid) -> PendingPeer {
+        PendingPeer {
+            peer_id,
+            peer_name: "p".into(),
+            remote_addr: "127.0.0.1:1".parse().unwrap(),
+            connection_id,
+            pairing_code: None,
+            token: "t".repeat(43),
+        }
+    }
+
+    #[test]
+    fn pending_peer_debug_hides_the_token() {
+        let rendered = format!("{:?}", pending_peer(Uuid::new_v4(), Uuid::new_v4()));
+        assert!(!rendered.contains("ttt"), "{rendered}");
     }
 
     #[tokio::test]
-    async fn accept_mints_non_empty_high_entropy_token() {
-        let (server, _identity, trust, _sessions, _dir) = setup().await;
-        let peer_id = Uuid::new_v4();
-        let _client = queue_hello_with_empty_token(&server, peer_id).await;
-
-        let (accepted_id, token) = accept_pending(
-            &server.pending,
-            &trust,
-            &server.connections,
-            &server.connection_established_tx,
-            0,
-        )
-        .await
-        .unwrap();
-        assert_eq!(accepted_id, peer_id);
-        assert!(!token.is_empty(), "minted token must not be empty");
-        assert!(token.len() >= MIN_AUTH_TOKEN_LEN);
-    }
-
-    #[tokio::test]
-    async fn empty_proposed_token_is_not_the_stored_credential() {
-        let (server, _identity, trust, _sessions, _dir) = setup().await;
-        let peer_id = Uuid::new_v4();
-        let _client = queue_hello_with_empty_token(&server, peer_id).await;
-
-        let (_accepted_id, token) = accept_pending(
-            &server.pending,
-            &trust,
-            &server.connections,
-            &server.connection_established_tx,
-            0,
-        )
-        .await
-        .unwrap();
-
-        let t = trust.read().await;
-        assert!(
-            !t.verify(&peer_id, ""),
-            "empty client-proposed token must not become the stored credential"
-        );
-        assert!(t.verify(&peer_id, &token), "the minted token must verify");
-    }
-
-    #[tokio::test]
-    async fn pending_peers_remove_peer_removes_matching() {
+    async fn pending_requests_are_addressed_by_peer_not_position() {
         let pending = PendingPeers::default();
-        let p1 = Uuid::new_v4();
-        let p2 = Uuid::new_v4();
-        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
-        pending
-            .push(PendingPeer {
-                peer_id: p1,
-                peer_name: "a".into(),
-                remote_addr: addr,
-                proposed_token: String::new(),
-            })
-            .await;
-        pending
-            .push(PendingPeer {
-                peer_id: p2,
-                peer_name: "b".into(),
-                remote_addr: addr,
-                proposed_token: String::new(),
-            })
-            .await;
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        for peer_id in [a, b] {
+            assert!(pending.upsert(pending_peer(peer_id, Uuid::new_v4())).await);
+        }
+        assert!(pending.remove_peer(&a).await);
+        assert_eq!(pending.take(&b).await.map(|p| p.peer_id), Some(b));
+        assert!(pending.take(&a).await.is_none());
+    }
 
-        assert!(
-            pending.remove_peer(&p1).await,
-            "removing p1 must report true"
-        );
-        assert!(
-            !pending.remove_peer(&p1).await,
-            "removing an absent peer must report false"
-        );
-        let list = pending.list().await;
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].peer_id, p2, "the other peer must survive");
+    #[tokio::test]
+    async fn pending_changes_wake_a_watcher() {
+        let pending = Arc::new(PendingPeers::default());
+        let peer_id = Uuid::new_v4();
+        let changed = |pending: &Arc<PendingPeers>| {
+            let pending = pending.clone();
+            async move {
+                tokio::time::timeout(std::time::Duration::from_millis(200), pending.changed())
+                    .await
+                    .is_ok()
+            }
+        };
+
+        pending.upsert(pending_peer(peer_id, Uuid::new_v4())).await;
+        assert!(changed(&pending).await, "queued");
+        assert!(!pending.remove_peer(&Uuid::new_v4()).await);
+        assert!(!changed(&pending).await, "nothing was removed");
+        pending.take(&peer_id).await;
+        assert!(changed(&pending).await, "taken");
+    }
+
+    #[tokio::test]
+    async fn remove_connection_only_drops_the_matching_request() {
+        let pending = PendingPeers::default();
+        let peer_id = Uuid::new_v4();
+        let (old_conn, new_conn) = (Uuid::new_v4(), Uuid::new_v4());
+        for connection_id in [old_conn, new_conn] {
+            pending.upsert(pending_peer(peer_id, connection_id)).await;
+        }
+        assert!(!pending.remove_connection(&peer_id, old_conn).await);
+        assert_eq!(pending.list().await.len(), 1);
+        assert!(pending.remove_connection(&peer_id, new_conn).await);
+        assert!(pending.list().await.is_empty());
     }
 
     #[tokio::test]
     async fn pre_accept_drop_evicts_pending_and_connections() {
         let (server, _identity, _trust, _sessions, _dir) = setup().await;
-        let stream = TcpStream::connect(server.bind_addr).await.unwrap();
-        let client = spawn_peer_connection(stream, None).unwrap();
         let client_peer_id = Uuid::new_v4();
-        client
-            .tx
-            .send(SignalingMessage::Hello {
-                protocol_version: PROTOCOL_VERSION,
-                peer_id: client_peer_id.to_string(),
-                peer_name: "client".into(),
-                app_version: "0".into(),
-                capabilities: local_capabilities(),
-                auth_token: String::new(),
-            })
-            .await
-            .unwrap();
+        let client = pair(&server, client_peer_id).await;
 
         let mut queued = false;
         for _ in 0..50 {

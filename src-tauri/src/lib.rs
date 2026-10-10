@@ -4,6 +4,7 @@ pub use core::AppCore;
 mod commands;
 mod dto;
 pub mod events;
+mod stream_requests;
 mod tray;
 
 use specta_typescript::Typescript;
@@ -31,6 +32,9 @@ fn build() -> Builder<tauri::Wry> {
             commands::streams::open_session,
             commands::streams::open_stream,
             commands::streams::request_stream,
+            commands::streams::pending_stream_requests,
+            commands::streams::accept_stream_request,
+            commands::streams::reject_stream_request,
             commands::streams::close_stream,
             commands::streams::stream_control,
             commands::ops::mute_all,
@@ -47,15 +51,20 @@ fn build() -> Builder<tauri::Wry> {
             events::PeerDisconnected,
             events::SnapshotChanged,
             events::DevicesChanged,
+            events::StreamRequestsChanged,
+            events::PendingPeersChanged,
+            events::PairingCode,
         ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let log_level = splitter_core::settings::settings_path()
+        .and_then(|p| splitter_core::Settings::load_or_default(&p))
+        .map(|s| s.log_level)
+        .unwrap_or(splitter_core::LogLevel::Info);
     let _logs_guard = splitter_core::observability::logs::log_dir()
-        .and_then(|dir| {
-            splitter_core::observability::logs::init(splitter_core::LogLevel::Info, &dir)
-        })
+        .and_then(|dir| splitter_core::observability::logs::init(log_level, &dir))
         .ok();
 
     let builder = build();
@@ -102,6 +111,7 @@ pub fn run() {
                     core.spawn_unicast_scan();
                     core.spawn_stats_emitter();
                     core.spawn_acceptor_supervisor();
+                    core.spawn_pending_watcher();
                     core.spawn_device_watcher();
                     app.manage(core);
                     let manager = app.autolaunch();

@@ -36,6 +36,10 @@ impl RingProducer {
     pub fn free(&self) -> usize {
         self.inner.vacant_len()
     }
+
+    pub fn occupied(&self) -> usize {
+        self.inner.occupied_len()
+    }
 }
 
 impl RingConsumer {
@@ -83,6 +87,15 @@ mod tests {
         let mut out = vec![0.0; 5];
         let popped = rx.pop_slice(&mut out);
         assert_eq!(popped, 0);
+    }
+
+    #[test]
+    fn producer_sees_occupancy_drop_as_consumer_drains() {
+        let (mut tx, mut rx) = AudioRing::new(100);
+        tx.push_slice(&[0.0; 30]);
+        assert_eq!(tx.occupied(), 30);
+        rx.pop_slice(&mut [0.0; 10]);
+        assert_eq!(tx.occupied(), 20);
     }
 
     #[test]

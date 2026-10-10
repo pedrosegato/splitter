@@ -3,7 +3,8 @@ use crate::error::NetError;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+// v2: X25519 pairing, transcript-bound proofs, encrypted signaling and media.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -76,16 +77,29 @@ pub enum SignalingMessage {
         peer_name: String,
         app_version: String,
         capabilities: Capabilities,
-        auth_token: String,
+        client_nonce: String,
+        client_key: String,
+    },
+    /// Answer to an already paired peer; the proof shows the server holds the token.
+    Challenge {
+        server_peer_id: String,
+        server_nonce: String,
+        server_key: String,
+        server_proof: String,
+    },
+    /// Answer to an unknown peer; both sides derive the token and the pairing code.
+    PairingOffer {
+        server_peer_id: String,
+        server_nonce: String,
+        server_key: String,
+    },
+    ChallengeResponse {
+        client_proof: String,
     },
     HelloAck {
         accepted: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        auth_token: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        peer_id: Option<String>,
     },
     SessionRequest {
         session_id: String,
@@ -102,6 +116,7 @@ pub enum SignalingMessage {
         sink: Endpoint,
         codec: CodecParams,
         udp_port: u16,
+        key_salt: String,
     },
     StreamOpenAck {
         stream_id: u8,
@@ -167,7 +182,8 @@ mod tests {
                 codecs: vec!["opus".into()],
                 max_streams: 4,
             },
-            auth_token: "tok".into(),
+            client_nonce: "nonce-c".into(),
+            client_key: "key-c".into(),
         }
     }
 
@@ -180,51 +196,45 @@ mod tests {
     }
 
     #[test]
-    fn hello_ack_with_token_round_trips() {
+    fn hello_never_carries_a_pairing_token() {
+        let raw = String::from_utf8(sample_hello().encode_to_bytes().unwrap().to_vec()).unwrap();
+        assert!(!raw.contains("auth_token"), "{raw}");
+    }
+
+    #[test]
+    fn handshake_messages_round_trip() {
+        for msg in [
+            SignalingMessage::Challenge {
+                server_peer_id: "11111111-1111-1111-1111-111111111111".into(),
+                server_nonce: "nonce-s".into(),
+                server_key: "key-s".into(),
+                server_proof: "proof-s".into(),
+            },
+            SignalingMessage::PairingOffer {
+                server_peer_id: "11111111-1111-1111-1111-111111111111".into(),
+                server_nonce: "nonce-s".into(),
+                server_key: "key-s".into(),
+            },
+            SignalingMessage::ChallengeResponse {
+                client_proof: "proof-c".into(),
+            },
+        ] {
+            let back =
+                SignalingMessage::decode_from_slice(&msg.encode_to_bytes().unwrap()).unwrap();
+            assert_eq!(msg, back);
+        }
+    }
+
+    #[test]
+    fn hello_ack_omits_an_absent_reason() {
         let msg = SignalingMessage::HelloAck {
             accepted: true,
             reason: None,
-            auth_token: Some("secret-tok".into()),
-            peer_id: Some("11111111-1111-1111-1111-111111111111".into()),
-        };
-        let bytes = msg.encode_to_bytes().unwrap();
-        let back = SignalingMessage::decode_from_slice(&bytes).unwrap();
-        assert_eq!(msg, back);
-        let raw = String::from_utf8(bytes.to_vec()).unwrap();
-        assert!(raw.contains("\"auth_token\":\"secret-tok\""));
-    }
-
-    #[test]
-    fn hello_ack_without_token_omits_field() {
-        let msg = SignalingMessage::HelloAck {
-            accepted: false,
-            reason: Some("rejected".into()),
-            auth_token: None,
-            peer_id: None,
         };
         let raw = String::from_utf8(msg.encode_to_bytes().unwrap().to_vec()).unwrap();
-        assert!(
-            !raw.contains("auth_token"),
-            "auth_token must be absent when None"
-        );
+        assert_eq!(raw, r#"{"type":"hello_ack","accepted":true}"#);
         let back = SignalingMessage::decode_from_slice(raw.as_bytes()).unwrap();
         assert_eq!(msg, back);
-    }
-
-    #[test]
-    fn hello_ack_without_token_field_decodes_as_none() {
-        let legacy = br#"{"type":"hello_ack","accepted":true}"#;
-        let msg = SignalingMessage::decode_from_slice(legacy).unwrap();
-        assert!(
-            matches!(
-                msg,
-                SignalingMessage::HelloAck {
-                    auth_token: None,
-                    ..
-                }
-            ),
-            "older HelloAck without auth_token must decode with auth_token=None"
-        );
     }
 
     #[test]
@@ -282,6 +292,7 @@ mod tests {
                 frame_ms: 20,
             },
             udp_port: 5004,
+            key_salt: "salt".into(),
         };
         let bytes = msg.encode_to_bytes().unwrap();
         let back = SignalingMessage::decode_from_slice(&bytes).unwrap();

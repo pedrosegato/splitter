@@ -19,7 +19,7 @@ Windows — %APPDATA%\Splitter\<identity>\
 REPL quick reference (run `splitter-cli --help` for the full list):
 peers                     list mDNS-discovered peers
 connect <name|id>         open a TCP signaling link to a peer
-accept <n>                trust a pending HELLO from peer at index <n>
+accept <n>                trust pending peer <n> once its pairing code matches
 open <name|id>            open a Session with a connected peer
 sessions                  list active sessions and streams
 stream open --from in:0 --to <peer>:out:0 --session <UUID>

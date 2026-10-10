@@ -1,4 +1,5 @@
-use crate::events::{DevicesChanged, PeersChanged, StatsTick, StreamStat};
+use crate::events::{DevicesChanged, PeersChanged, PendingPeersChanged, StatsTick, StreamStat};
+use crate::stream_requests::PendingStreamRequest;
 use parking_lot::RwLock as ParkingRwLock;
 use splitter_core::net::device_watcher::DeviceEvent;
 use splitter_core::net::discovery::{DiscoveredPeer, DiscoveryEvent, SERVICE_TYPE};
@@ -50,6 +51,7 @@ pub struct AppCore {
     pub local_disconnects: Arc<RwLock<HashSet<Uuid>>>,
     pub peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     pub remote_devices: Arc<RwLock<HashMap<Uuid, Vec<DeviceDescriptor>>>>,
+    pub stream_requests: Arc<RwLock<Vec<PendingStreamRequest>>>,
     pub app: OnceLock<tauri::AppHandle>,
     pub discovery: OnceLock<splitter_core::net::discovery::DiscoveryHandle>,
 }
@@ -104,6 +106,7 @@ impl AppCore {
             local_disconnects: Arc::new(RwLock::new(HashSet::new())),
             peers: Arc::new(RwLock::new(HashMap::new())),
             remote_devices: Arc::new(RwLock::new(HashMap::new())),
+            stream_requests: Arc::new(RwLock::new(Vec::new())),
             app: OnceLock::new(),
             discovery: OnceLock::new(),
         }))
@@ -111,6 +114,24 @@ impl AppCore {
 }
 
 impl AppCore {
+    pub async fn peer_display_name(&self, peer_id: Uuid) -> String {
+        let trust_name = self
+            .trust
+            .read()
+            .await
+            .peer_for(&peer_id)
+            .map(|p| p.peer_name.clone());
+        if let Some(name) = trust_name {
+            return name;
+        }
+        self.peers
+            .read()
+            .await
+            .get(&peer_id.to_string())
+            .map(|p| p.peer_name.clone())
+            .unwrap_or_else(|| peer_id.to_string()[..8].to_string())
+    }
+
     pub async fn evict_peer_connection(&self, peer_id: &Uuid) {
         self.server.connections.write().await.remove(peer_id);
         self.outgoing.write().await.remove(peer_id);
@@ -156,12 +177,11 @@ impl AppCore {
         let port = self.server.bind_addr.port();
         let local_peer_id = self.identity.read().peer_id.to_string();
         tauri::async_runtime::spawn(async move {
+            use splitter_core::net::active_scan::{next_scan_interval, MIN_SCAN_INTERVAL};
             use std::time::Instant;
-            let ttl = Duration::from_secs(25);
+            let mut interval = MIN_SCAN_INTERVAL;
             let mut seen: HashMap<String, Instant> = HashMap::new();
-            let mut ticker = tokio::time::interval(Duration::from_secs(8));
             loop {
-                ticker.tick().await;
                 let found = splitter_core::net::active_scan::scan_once(
                     &local_peer_id,
                     port,
@@ -184,13 +204,15 @@ impl AppCore {
                     found,
                     &connected,
                     Instant::now(),
-                    ttl,
+                    interval * 3,
                 );
                 if changed {
                     let snapshot: Vec<DiscoveredPeer> =
                         core.peers.read().await.values().cloned().collect();
                     core.emit(PeersChanged(snapshot));
                 }
+                interval = next_scan_interval(interval, changed);
+                tokio::time::sleep(interval).await;
             }
         });
     }
@@ -230,6 +252,12 @@ impl AppCore {
         let core = self.clone();
         tauri::async_runtime::spawn(async move {
             let watcher = splitter_core::net::device_watcher::start(Duration::from_secs(2));
+            tauri::async_runtime::spawn(
+                splitter_core::net::stream_runtime::dispatch_device_events(
+                    core.stream_registry.clone(),
+                    watcher.subscribe(),
+                ),
+            );
             let mut rx = watcher.subscribe();
             while let Ok(ev) = rx.recv().await {
                 match ev {
@@ -251,11 +279,18 @@ impl AppCore {
     }
 
     async fn send_to_all_peers(&self, msg: SignalingMessage) {
-        for handle in self.server.connections.read().await.values() {
-            let _ = handle.tx.send(msg.clone()).await;
-        }
-        for handle in self.outgoing.read().await.values() {
-            let _ = handle.tx.send(msg.clone()).await;
+        // Don't await under the lock: one full outbox would block every insert/evict.
+        let mut txs: Vec<_> = self
+            .server
+            .connections
+            .read()
+            .await
+            .values()
+            .map(|h| h.tx.clone())
+            .collect();
+        txs.extend(self.outgoing.read().await.values().map(|h| h.tx.clone()));
+        for tx in txs {
+            let _ = tx.send(msg.clone()).await;
         }
     }
 }
@@ -273,6 +308,16 @@ fn local_device_descriptors() -> Vec<DeviceDescriptor> {
 }
 
 impl AppCore {
+    pub fn spawn_pending_watcher(self: &Arc<Self>) {
+        let core = self.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                core.server.pending.changed().await;
+                core.emit(PendingPeersChanged);
+            }
+        });
+    }
+
     pub fn spawn_acceptor_supervisor(self: &Arc<Self>) {
         let host = Arc::new(crate::acceptor::TauriControlPlane { core: self.clone() });
         let established = self.server.connection_established_tx.subscribe();
@@ -359,7 +404,7 @@ mod tests {
         let (client, accepted) =
             tokio::join!(tokio::net::TcpStream::connect(laddr), listener.accept());
         accepted.unwrap();
-        spawn_peer_connection(client.unwrap(), None).unwrap()
+        spawn_peer_connection(client.unwrap()).unwrap()
     }
 
     #[tokio::test]
@@ -416,8 +461,8 @@ mod tests {
         let (client, accepted) =
             tokio::join!(tokio::net::TcpStream::connect(laddr), listener.accept());
         let (server_stream, _) = accepted.unwrap();
-        let client_handle = spawn_peer_connection(client.unwrap(), None).unwrap();
-        let server_handle = spawn_peer_connection(server_stream, None).unwrap();
+        let client_handle = spawn_peer_connection(client.unwrap()).unwrap();
+        let server_handle = spawn_peer_connection(server_stream).unwrap();
         let mut server_events = server_handle.events.subscribe();
 
         core.outgoing.write().await.insert(peer_id, client_handle);

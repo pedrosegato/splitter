@@ -35,3 +35,16 @@ pub struct SnapshotChanged;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct DevicesChanged;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct StreamRequestsChanged;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct PendingPeersChanged;
+
+/// Shown while dialing a first-time pairing; the other machine shows the same code.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct PairingCode {
+    pub peer_id: String,
+    pub code: String,
+}

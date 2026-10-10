@@ -1,5 +1,6 @@
 use crate::core::AppCore;
 use crate::dto::{IdentityDto, PendingPeerDto};
+use crate::events::PairingCode;
 use splitter_core::net::discovery::DiscoveredPeer;
 use splitter_core::net::signaling::client_ops::find_conn_tx;
 use splitter_core::net::signaling::{DeviceDescriptor, SignalingMessage, StreamAction};
@@ -40,25 +41,33 @@ pub async fn pending_peers(core: State<'_, Arc<AppCore>>) -> Result<Vec<PendingP
 
 #[tauri::command]
 #[specta::specta]
-pub async fn accept_pending(core: State<'_, Arc<AppCore>>, index: u32) -> Result<String, String> {
-    let server_peer_id = core.identity.read().peer_id;
-    let (peer_id, _token) = splitter_core::net::signaling::server::accept_pending_as(
+pub async fn accept_pending(
+    core: State<'_, Arc<AppCore>>,
+    peer_id: String,
+) -> Result<String, String> {
+    let peer = uuid::Uuid::parse_str(&peer_id).map_err(|e| e.to_string())?;
+    splitter_core::net::signaling::server::accept_pending(
         &core.server.pending,
         &core.trust,
         &core.server.connections,
         &core.server.connection_established_tx,
-        index as usize,
-        Some(server_peer_id),
+        peer,
     )
     .await
     .map_err(|e| e.to_string())?;
-    Ok(peer_id.to_string())
+    Ok(peer.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn reject_pending(core: State<'_, Arc<AppCore>>, index: u32) -> Result<(), String> {
-    core.server.pending.take(index as usize).await;
+pub async fn reject_pending(core: State<'_, Arc<AppCore>>, peer_id: String) -> Result<(), String> {
+    let peer = uuid::Uuid::parse_str(&peer_id).map_err(|e| e.to_string())?;
+    splitter_core::net::signaling::server::reject_pending(
+        &core.server.pending,
+        &core.server.connections,
+        peer,
+    )
+    .await;
     Ok(())
 }
 
@@ -84,9 +93,21 @@ pub async fn connect_peer(
         core.trust.clone(),
         hint,
         Duration::from_secs(5),
+        |peer_id, code| {
+            core.emit(PairingCode {
+                peer_id: peer_id.to_string(),
+                code: code.to_string(),
+            })
+        },
     )
     .await
     .map_err(|e| e.to_string())?;
+    if !outcome.accepted {
+        return Err(format!(
+            "conexão recusada: {}",
+            outcome.reason.as_deref().unwrap_or("sem motivo informado")
+        ));
+    }
     if let Some(pid) = outcome.remote_peer_id {
         let events = outcome.handle.events.subscribe();
         let addr = outcome.handle.remote_addr;
@@ -375,7 +396,7 @@ mod tests {
         let mut peer_end = accepted.unwrap().0;
 
         let remote = uuid::Uuid::new_v4();
-        let handle = spawn_peer_connection(client, None).unwrap();
+        let handle = spawn_peer_connection(client).unwrap();
 
         let _lingering_tx = handle.tx.clone();
         core.outgoing.write().await.insert(remote, handle);

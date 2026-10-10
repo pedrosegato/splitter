@@ -57,7 +57,17 @@ async fn two_local_daemons_full_handshake_and_session() {
         let target = a_server.bind_addr;
         let b_identity = b_identity.clone();
         let b_trust = b_trust.clone();
-        async move { connect_to_peer(target, &b_identity, b_trust, None, Duration::from_secs(5)).await }
+        async move {
+            connect_to_peer(
+                target,
+                &b_identity,
+                b_trust,
+                None,
+                Duration::from_secs(5),
+                |_, _| {},
+            )
+            .await
+        }
     });
     let acceptor = tokio::spawn({
         let pending = a_server.pending.clone();
@@ -71,7 +81,14 @@ async fn two_local_daemons_full_handshake_and_session() {
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            accept_pending(&pending, &trust, &conns, &conn_est_tx, 0).await
+            accept_pending(
+                &pending,
+                &trust,
+                &conns,
+                &conn_est_tx,
+                pending.list().await[0].peer_id,
+            )
+            .await
         }
     });
     let (dial_res, accept_res) = tokio::join!(dial, acceptor);
@@ -128,6 +145,7 @@ async fn connection_established_fires_on_both_accept_paths() {
                 client_trust,
                 None,
                 Duration::from_secs(5),
+                |_, _| {},
             )
             .await
         }
@@ -144,7 +162,14 @@ async fn connection_established_fires_on_both_accept_paths() {
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            accept_pending(&pending, &trust, &conns, &tx, 0).await
+            accept_pending(
+                &pending,
+                &trust,
+                &conns,
+                &tx,
+                pending.list().await[0].peer_id,
+            )
+            .await
         }
     });
     let (dial_res, accept_res) = tokio::join!(dial, manual_accept);
@@ -198,8 +223,7 @@ async fn connection_established_fires_on_both_accept_paths() {
                 auth_token: token.clone(),
             })
             .unwrap();
-        // Client trust store maps the server's peer_id → shared token so
-        // connect_to_peer sends the right auth_token in its Hello.
+        // And the client trusts the server with the same token, so both can prove it.
         at_client_trust
             .write()
             .await
@@ -217,6 +241,7 @@ async fn connection_established_fires_on_both_accept_paths() {
         at_client_trust,
         Some(at_server_peer_id),
         Duration::from_secs(5),
+        |_, _| {},
     )
     .await
     .unwrap();
@@ -237,8 +262,8 @@ async fn connection_established_fires_on_both_accept_paths() {
     );
 }
 
-/// After the first handshake (manual accept), the dialer's TrustStore should
-/// have been populated with the echoed auth_token.  A second `connect_to_peer`
+/// After the first handshake (manual accept), both TrustStores hold the token derived
+/// during pairing.  A second `connect_to_peer`
 /// must therefore land on the auto-accept-trusted path without any `accept_pending`
 /// call — i.e. the pending queue stays empty and the connection is accepted
 /// immediately.
@@ -282,6 +307,7 @@ async fn second_connect_skips_pending_after_first_accept() {
                 trust,
                 Some(server_peer_id),
                 Duration::from_secs(5),
+                |_, _| {},
             )
             .await
         }
@@ -298,7 +324,14 @@ async fn second_connect_skips_pending_after_first_accept() {
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            accept_pending(&pending, &trust, &conns, &tx, 0).await
+            accept_pending(
+                &pending,
+                &trust,
+                &conns,
+                &tx,
+                pending.list().await[0].peer_id,
+            )
+            .await
         }
     });
     let (first_dial_res, first_accept_res) = tokio::join!(first_dial, first_accept);
@@ -312,13 +345,14 @@ async fn second_connect_skips_pending_after_first_accept() {
         "client TrustStore must contain the server after first accept"
     );
 
-    // Second connect — dialer sends the stored token; server auto-accepts.
+    // Second connect — both sides prove the stored token; server auto-accepts.
     let second_outcome = connect_to_peer(
         server.bind_addr,
         &client_identity,
         client_trust.clone(),
         Some(server_peer_id),
         Duration::from_secs(5),
+        |_, _| {},
     )
     .await
     .unwrap();

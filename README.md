@@ -1,8 +1,9 @@
 # Splitter
 
 Lightweight LAN audio mirror — stream desktop or microphone audio between two
-machines over UDP with Opus encoding, adaptive jitter buffer, and TOFU peer
-trust. No cloud. No account. Sub-200 ms end-to-end latency on a typical LAN.
+machines over UDP with Opus encoding, adaptive jitter buffer, and encrypted,
+code-verified pairing. No cloud. No account. Sub-200 ms end-to-end latency on a
+typical LAN.
 
 ---
 
@@ -63,8 +64,9 @@ audio loopback driver:
 1. Open **Splitter** on both machines — both must be on the same LAN.
 2. Each machine advertises itself via mDNS. Peers appear in the sidebar
    automatically within a few seconds.
-3. Click a peer to open a session. On first connection the remote side sees a
-   trust prompt; accept it to persist the pairing.
+3. Click a peer to open a session. On first connection both machines show the
+   same six-digit code; the remote side accepts only if the codes match, and the
+   pairing is remembered.
 4. In the routing canvas, drag a **source port** (e.g., BlackHole 2ch on the
    sender) to a **destination port** (e.g., Default Output on the receiver) to
    start a stream.
@@ -102,9 +104,15 @@ Opus encoder ── UDP ──> Opus decoder
                          Audio output
 ```
 
-Trust is established on first connection via TOFU: the receiver sees a `pending`
-entry, the operator runs `accept <n>`, and an auth token is persisted so future
-reconnects are automatic (with `auto_accept_trusted = true` in settings).
+Pairing uses an ephemeral X25519 exchange: both sides derive the pairing token
+from it (it never crosses the network) along with a six-digit code shown on both
+screens, so a man-in-the-middle shows up as mismatched codes. The receiver sees a
+`pending` entry, the operator compares the code and accepts (`accept <n>` in the
+CLI), and the token is stored on both machines. Later connections prove the
+token with HMACs over the handshake and reconnect automatically (with
+`auto_accept_trusted = true` in settings). Every connection derives fresh keys:
+signaling, audio and receiver reports are encrypted and authenticated with
+ChaCha20-Poly1305, and the receiver drops anything that fails authentication.
 
 ---
 

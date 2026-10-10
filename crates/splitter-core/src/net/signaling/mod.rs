@@ -2,7 +2,6 @@ pub mod client;
 pub mod client_ops;
 pub mod connection;
 pub mod control_plane;
-pub mod heartbeat;
 pub mod message;
 pub mod reconnect;
 pub mod server;
@@ -14,14 +13,15 @@ pub use client_ops::{
     wait_for_stream_open_ack, ConnEndpoints, ConnectionMap,
 };
 pub use connection::{
-    spawn_peer_connection, PeerConnectionHandle, PeerEvent, REMOTE_PEER_HEARTBEAT_TIMEOUT,
+    spawn_peer_connection, PeerConnectionHandle, PeerEvent, Role, REMOTE_PEER_HEARTBEAT_TIMEOUT,
 };
 pub use control_plane::{spawn_control_plane, ControlPlaneDeps, ControlPlaneObserver};
-pub use heartbeat::build_heartbeat;
 pub use message::{
     Capabilities, Codec, CodecParams, DeviceDescriptor, Endpoint, HeartbeatStreamStats,
     SignalingMessage, SourceKind, StreamAction, PROTOCOL_VERSION,
 };
 pub use reconnect::{spawn_reconnect, ReconnectDriver};
-pub use server::{accept_pending_as, PendingPeer, SignalingServer, SignalingServerHandle};
+pub use server::{
+    accept_pending, reject_pending, PendingPeer, SignalingServer, SignalingServerHandle,
+};
 pub use supervisor::{spawn_connection_supervisor, ControlPlaneHost};

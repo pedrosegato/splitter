@@ -43,12 +43,30 @@ export function IncomingRequestDialog() {
               </div>
             </motion.div>
 
+            {peer.pairing_code ? (
+              <motion.div
+                variants={variants.listItem}
+                className="bg-elev-1 border-line mt-[14px] rounded-md border px-[12px] py-[10px] text-center"
+              >
+                <p className="text-gold text-[22px] font-semibold tracking-[0.12em] tabular-nums">
+                  {peer.pairing_code}
+                </p>
+                <p className="text-ink-3 mt-[2px] text-[10px]">
+                  aceite só se a outra máquina mostrar o mesmo código
+                </p>
+              </motion.div>
+            ) : (
+              <motion.p variants={variants.listItem} className="text-ink-3 mt-[12px] text-[10px]">
+                já pareado antes, pedindo para reconectar
+              </motion.p>
+            )}
+
             <div className="mt-[16px] flex items-center justify-end gap-2">
               <Button
                 variant="outline"
                 size="sm"
                 disabled={busy}
-                onClick={() => reject.mutate({ index: 0 })}
+                onClick={() => reject.mutate({ peerId: peer.peer_id })}
                 className="text-[12px]"
               >
                 <X size={14} />
@@ -57,7 +75,7 @@ export function IncomingRequestDialog() {
               <Button
                 size="sm"
                 disabled={busy}
-                onClick={() => accept.mutate({ index: 0 })}
+                onClick={() => accept.mutate({ peerId: peer.peer_id })}
                 className="bg-gold text-[12px] font-semibold text-[#1c1c1f] hover:brightness-110"
               >
                 <Check size={14} />

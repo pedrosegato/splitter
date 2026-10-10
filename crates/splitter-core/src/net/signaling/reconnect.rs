@@ -36,6 +36,7 @@ pub fn spawn_reconnect(peer_id: Uuid, driver: Arc<dyn ReconnectDriver>) {
                 driver.trust(),
                 Some(peer_id),
                 Duration::from_secs(5),
+                |_, _| {},
             )
             .await
             {

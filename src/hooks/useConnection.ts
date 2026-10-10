@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { commands, unwrap } from "@/lib/api";
+import { useUiStore } from "@/stores/ui";
 
 export const useConnectPeer = () => {
   const queryClient = useQueryClient();
@@ -16,13 +17,14 @@ export const useConnectPeer = () => {
     onError: (err: Error) => {
       toast.error(err.message);
     },
+    onSettled: () => useUiStore.getState().setPairing(null),
   });
 };
 
 export const useAcceptPending = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ index }: { index: number }) => unwrap(commands.acceptPending(index)),
+    mutationFn: ({ peerId }: { peerId: string }) => unwrap(commands.acceptPending(peerId)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pending"] });
       queryClient.invalidateQueries({ queryKey: ["snapshot"] });
@@ -36,7 +38,7 @@ export const useAcceptPending = () => {
 export const useRejectPending = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ index }: { index: number }) => unwrap(commands.rejectPending(index)),
+    mutationFn: ({ peerId }: { peerId: string }) => unwrap(commands.rejectPending(peerId)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pending"] });
     },

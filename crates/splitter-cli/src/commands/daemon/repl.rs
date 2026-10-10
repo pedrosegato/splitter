@@ -3,7 +3,7 @@ use super::{graceful_shutdown, ui};
 use crate::commands::stream_repl;
 use splitter_core::net::discovery::{Discovery, DiscoveryEvent};
 use splitter_core::net::signaling::client_ops::{find_conn, find_conn_tx, notify_remote_control};
-use splitter_core::net::signaling::server::{accept_pending_as, SignalingServerHandle};
+use splitter_core::net::signaling::server::{accept_pending, SignalingServerHandle};
 use splitter_core::net::signaling::{connect_to_peer, SignalingMessage, StreamAction};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -230,19 +230,31 @@ async fn cmd_accept<'a>(
     server: &SignalingServerHandle,
     parts: &mut impl Iterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
-    let idx: usize = parts.next().unwrap_or("0").parse()?;
-    let (peer_id, _token) = accept_pending_as(
+    let arg = parts.next().unwrap_or("0");
+    let target = match uuid::Uuid::parse_str(arg) {
+        Ok(id) => id,
+        Err(_) => {
+            let idx: usize = arg.parse()?;
+            server
+                .pending
+                .list()
+                .await
+                .get(idx)
+                .map(|p| p.peer_id)
+                .ok_or_else(|| anyhow::anyhow!("no pending peer #{idx}"))?
+        }
+    };
+    accept_pending(
         &server.pending,
         &ctx.trust,
         &server.connections,
         &server.connection_established_tx,
-        idx,
-        Some(ctx.local_peer_id),
+        target,
     )
     .await?;
     #[allow(clippy::print_stdout)]
     {
-        println!(">> accepted pending #{idx} -> peer {peer_id}");
+        println!(">> accepted pending peer {target}");
     }
     Ok(())
 }
@@ -279,6 +291,12 @@ async fn cmd_connect<'a>(
         ctx.trust.clone(),
         remote_uuid,
         Duration::from_secs(5),
+        |_, code| {
+            #[allow(clippy::print_stdout)]
+            {
+                println!(">> pairing code {code}: confirm the other machine shows the same code");
+            }
+        },
     )
     .await?;
 
@@ -288,15 +306,15 @@ async fn cmd_connect<'a>(
         host_port.to_string()
     };
 
-    #[allow(clippy::print_stdout)]
-    if outcome.accepted {
-        println!(">> connected to {display_name}");
-    } else {
-        tracing::warn!(
-            "connect not yet accepted (reason={:?}); waiting for remote operator to accept",
-            outcome.reason
+    if !outcome.accepted {
+        anyhow::bail!(
+            "{display_name} refused the connection: {}",
+            outcome.reason.as_deref().unwrap_or("no reason given")
         );
-        println!(">> hello sent to {display_name} — waiting for remote operator to accept");
+    }
+    #[allow(clippy::print_stdout)]
+    {
+        println!(">> connected to {display_name}");
     }
     if let Some(peer_uuid) = outcome.remote_peer_id {
         ctx.register_outgoing_connection(peer_uuid, outcome.handle)

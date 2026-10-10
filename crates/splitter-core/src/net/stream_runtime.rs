@@ -9,10 +9,11 @@ use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-pub use crate::net::stream_pump::{spawn_sink_pump_inner, spawn_source_pump_inner};
+pub use crate::net::stream_pump::{
+    spawn_sink_pump_inner, spawn_source_pump_inner, SinkConfig, SourceConfig,
+};
 pub use crate::net::stream_registry::{StatsBaseline, StreamRegistry, StreamRuntimeSummary};
 pub use crate::net::stream_stats::{StreamStats, StreamStatsSnapshot};
 
@@ -67,10 +68,34 @@ pub enum DeviceGuard {
 //     hosts, and CoreAudio's Stream::drop sends a "stop" message to the audio thread
 //     over a channel, making cross-thread drop safe per cpal's own internal design.
 //
+//   - `reopen` (hot-plug) builds a brand-new stream and drops the dead one in its place;
+//     it never calls methods on an existing stream, so the same reasoning holds.
+//
 // If a future refactor ever needs to call stream.pause()/play() from a different thread,
 // this unsafe block must be revisited and replaced with Arc<Mutex<DeviceGuard>>.
 unsafe impl Send for DeviceGuard {}
 unsafe impl Sync for DeviceGuard {}
+
+impl DeviceGuard {
+    pub fn reopen(&mut self) -> Result<(), crate::error::AudioError> {
+        match self {
+            DeviceGuard::Capture(capture) => capture.reopen(),
+            DeviceGuard::Playback(playback) => playback.reopen(),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Loopback sources are bound as `SystemAudio:n:name` but come and go as `Output:n:name`.
+fn binds_to(bound: &str, event_id: &str) -> bool {
+    if bound == event_id {
+        return true;
+    }
+    matches!(
+        (bound.strip_prefix("SystemAudio:"), event_id.strip_prefix("Output:")),
+        (Some(b), Some(e)) if b == e
+    )
+}
 
 #[derive(Debug)]
 pub struct StreamRuntime {
@@ -149,6 +174,7 @@ fn build_runtime(
     }
 }
 
+#[cfg(test)]
 pub async fn open_stream_as_sink_inproc(
     registry: Arc<StreamRegistry>,
     session_id: SessionId,
@@ -171,6 +197,7 @@ pub async fn open_stream_as_sink_inproc(
         producer,
         control_rx,
         stats.clone(),
+        SinkConfig::default(),
     ));
 
     let rt = build_runtime(
@@ -186,6 +213,7 @@ pub async fn open_stream_as_sink_inproc(
     Ok(port)
 }
 
+#[cfg(test)]
 pub async fn open_stream_as_source_inproc(
     registry: Arc<StreamRegistry>,
     session_id: SessionId,
@@ -194,12 +222,15 @@ pub async fn open_stream_as_source_inproc(
     remote: SocketAddr,
 ) -> Result<(), NetError> {
     let (_producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);
-    let notify = Arc::new(Notify::new());
+    let notify = Arc::new(tokio::sync::Notify::new());
     let socket = bind_and_connect_udp(Some(remote)).await?;
 
     let (control_tx, control_rx) = mpsc::channel::<StreamControlSignal>(8);
     let stats = Arc::new(StreamStats::default());
-    let bitrate = route.codec.bitrate;
+    let config = SourceConfig {
+        bitrate: route.codec.bitrate,
+        ..SourceConfig::default()
+    };
     let join = tokio::spawn(spawn_source_pump_inner(
         session_id,
         stream_id,
@@ -208,7 +239,7 @@ pub async fn open_stream_as_source_inproc(
         socket,
         control_rx,
         stats.clone(),
-        bitrate,
+        config,
     ));
 
     registry
@@ -237,6 +268,7 @@ pub async fn open_stream_as_source(
     route: StreamRoute,
     remote: SocketAddr,
     source_kind: SourceKind,
+    config: SourceConfig,
 ) -> Result<(), NetError> {
     let (producer, consumer) = AudioRing::new(FRAME_SAMPLES * 20);
 
@@ -258,7 +290,10 @@ pub async fn open_stream_as_source(
                             reason: format!("macos loopback start failed: {e}"),
                         }
                     })?;
-                (DeviceGuard::MacosLoopback(cap), Arc::new(Notify::new()))
+                (
+                    DeviceGuard::MacosLoopback(cap),
+                    Arc::new(tokio::sync::Notify::new()),
+                )
             }
             #[cfg(all(target_os = "macos", not(feature = "sck")))]
             {
@@ -290,7 +325,10 @@ pub async fn open_stream_as_source(
         socket,
         control_rx,
         stats.clone(),
-        route.codec.bitrate,
+        SourceConfig {
+            bitrate: route.codec.bitrate,
+            ..config
+        },
     ));
 
     registry
@@ -312,6 +350,7 @@ pub async fn open_stream_as_sink(
     stream_id: StreamId,
     _route: StreamRoute,
     output_device_id: String,
+    config: SinkConfig,
 ) -> Result<u16, NetError> {
     let socket = bind_and_connect_udp(None).await?;
     let port = socket
@@ -334,6 +373,7 @@ pub async fn open_stream_as_sink(
         producer,
         control_rx,
         stats.clone(),
+        config,
     ));
 
     registry
@@ -609,11 +649,25 @@ pub async fn dispatch_device_events(
                     DeviceEvent::Disappeared(id) => (id, StreamControlSignal::Pause),
                     DeviceEvent::Appeared(id) => (id, StreamControlSignal::Resume),
                 };
+                let bound = |rt: &StreamRuntime| {
+                    rt.bound_device_id
+                        .as_deref()
+                        .is_some_and(|b| binds_to(b, &target_id))
+                };
+                if signal == StreamControlSignal::Resume {
+                    // The OS stream died with the device; resuming alone would play silence.
+                    let mut guard = registry.inner.write().await;
+                    for ((sid, stream_id), rt) in guard.iter_mut().filter(|(_, rt)| bound(rt)) {
+                        if let Err(e) = rt.device_guard.reopen() {
+                            tracing::warn!(session = %sid, stream = %stream_id, device = %target_id, "reopen after hot-plug failed: {e}");
+                        }
+                    }
+                }
                 let targets: Vec<(SessionId, StreamId, mpsc::Sender<StreamControlSignal>)> = {
                     let guard = registry.inner.read().await;
                     guard
                         .iter()
-                        .filter(|(_, rt)| rt.bound_device_id.as_deref() == Some(target_id.as_str()))
+                        .filter(|(_, rt)| bound(rt))
                         .map(|((sid, stream_id), rt)| (*sid, *stream_id, rt.control_tx.clone()))
                         .collect()
                 };
@@ -674,6 +728,47 @@ mod hotplug_tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
+        dispatcher.abort();
+    }
+
+    #[test]
+    fn loopback_streams_follow_their_output_device() {
+        assert!(binds_to("Input:0:USB Mic", "Input:0:USB Mic"));
+        assert!(binds_to("SystemAudio:0:Speakers", "Output:0:Speakers"));
+        assert!(!binds_to("SystemAudio:0:Speakers", "Output:0:Headphones"));
+        assert!(!binds_to("Input:0:Speakers", "Output:0:Speakers"));
+    }
+
+    #[tokio::test]
+    async fn returning_device_resumes_its_stream() {
+        let registry = StreamRegistry::new();
+        let (tx, _) = broadcast::channel::<DeviceEvent>(8);
+        let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<StreamControlSignal>(4);
+        registry
+            .register(StreamRuntime {
+                session_id: SessionId::new(),
+                stream_id: StreamId(0),
+                stats: Arc::new(StreamStats::default()),
+                control_tx: ctrl_tx,
+                bound_device_id: Some("SystemAudio:0:Speakers".into()),
+                join: tokio::spawn(async {}),
+                device_guard: DeviceGuard::None,
+            })
+            .await
+            .unwrap();
+
+        let dispatcher = tokio::spawn(dispatch_device_events(registry.clone(), tx.subscribe()));
+        tx.send(DeviceEvent::Disappeared("Output:0:Speakers".into()))
+            .unwrap();
+        tx.send(DeviceEvent::Appeared("Output:0:Speakers".into()))
+            .unwrap();
+
+        for expected in [StreamControlSignal::Pause, StreamControlSignal::Resume] {
+            let got = tokio::time::timeout(std::time::Duration::from_secs(1), ctrl_rx.recv())
+                .await
+                .expect("control signal should arrive within 1s");
+            assert_eq!(got, Some(expected));
+        }
         dispatcher.abort();
     }
 

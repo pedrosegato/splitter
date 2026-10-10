@@ -4,7 +4,7 @@ use splitter_core::net::signaling::client_ops::{
 };
 use splitter_core::net::signaling::StreamAction;
 use splitter_core::net::stream_runtime::{
-    open_stream_as_source, SourceKind, StatsBaseline, StreamControlSignal,
+    open_stream_as_source, SourceConfig, SourceKind, StatsBaseline, StreamControlSignal,
 };
 use splitter_core::{PeerIdentity, SessionId, SessionManager, StreamId, StreamRegistry};
 use std::net::SocketAddr;
@@ -110,18 +110,17 @@ async fn stream_open(
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let mut ack_rx = conn.events.subscribe();
-    conn.tx
-        .send(stream_open_message(
-            session_id.get(),
-            stream_id.get(),
-            identity.peer_id,
-            remote_peer_id,
-            &from_dev,
-            &remote_device_id,
-            bitrate,
-        ))
-        .await
-        .ok();
+    let (open_msg, keys) = stream_open_message(
+        conn.require_session_keys()?,
+        session_id.get(),
+        stream_id.get(),
+        identity.peer_id,
+        remote_peer_id,
+        &from_dev,
+        &remote_device_id,
+        bitrate,
+    );
+    conn.tx.send(open_msg).await.ok();
 
     let ack_port =
         wait_for_stream_open_ack(&mut ack_rx, stream_id.get(), Duration::from_secs(5)).await?;
@@ -146,6 +145,10 @@ async fn stream_open(
         route,
         remote,
         source_kind,
+        SourceConfig {
+            keys: Some(keys),
+            ..SourceConfig::default()
+        },
     )
     .await?;
     #[allow(clippy::print_stdout)]

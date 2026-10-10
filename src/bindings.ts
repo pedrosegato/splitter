@@ -69,17 +69,17 @@ async connectPeer(host: string, port: number, peerId: string | null) : Promise<R
     else return { status: "error", error: e  as any };
 }
 },
-async acceptPending(index: number) : Promise<Result<string, string>> {
+async acceptPending(peerId: string) : Promise<Result<string, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("accept_pending", { index }) };
+    return { status: "ok", data: await TAURI_INVOKE("accept_pending", { peerId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async rejectPending(index: number) : Promise<Result<null, string>> {
+async rejectPending(peerId: string) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("reject_pending", { index }) };
+    return { status: "ok", data: await TAURI_INVOKE("reject_pending", { peerId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -136,6 +136,30 @@ async openStream(sessionId: string, sourceDeviceId: string, sourceIsSystem: bool
 async requestStream(sessionId: string, source: SourceKind, sinkDeviceId: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("request_stream", { sessionId, source, sinkDeviceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async pendingStreamRequests() : Promise<Result<PendingStreamRequestDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pending_stream_requests") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async acceptStreamRequest(requestId: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("accept_stream_request", { requestId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async rejectStreamRequest(requestId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reject_stream_request", { requestId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -203,17 +227,23 @@ async setAutostart(enabled: boolean) : Promise<Result<null, string>> {
 export const events = __makeEvents__<{
 devicesChanged: DevicesChanged,
 incomingSession: IncomingSession,
+pairingCode: PairingCode,
 peerDisconnected: PeerDisconnected,
 peersChanged: PeersChanged,
+pendingPeersChanged: PendingPeersChanged,
 snapshotChanged: SnapshotChanged,
-statsTick: StatsTick
+statsTick: StatsTick,
+streamRequestsChanged: StreamRequestsChanged
 }>({
 devicesChanged: "devices-changed",
 incomingSession: "incoming-session",
+pairingCode: "pairing-code",
 peerDisconnected: "peer-disconnected",
 peersChanged: "peers-changed",
+pendingPeersChanged: "pending-peers-changed",
 snapshotChanged: "snapshot-changed",
-statsTick: "stats-tick"
+statsTick: "stats-tick",
+streamRequestsChanged: "stream-requests-changed"
 })
 
 /** user-defined constants **/
@@ -232,9 +262,19 @@ export type IdentityDto = { peer_id: string; peer_name: string }
 export type IncomingSession = { peer_id: string; peer_name: string }
 export type JitterMode = "auto" | "min" | { fixed: number }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
+/**
+ * Shown while dialing a first-time pairing; the other machine shows the same code.
+ */
+export type PairingCode = { peer_id: string; code: string }
 export type PeerDisconnected = { peer_id: string; reason: string }
 export type PeersChanged = DiscoveredPeer[]
-export type PendingPeerDto = { peer_id: string; peer_name: string; addr: string }
+export type PendingPeerDto = { peer_id: string; peer_name: string; addr: string; 
+/**
+ * Absent when the peer is already paired and only asks to be let in.
+ */
+pairing_code: string | null }
+export type PendingPeersChanged = null
+export type PendingStreamRequestDto = { id: string; peer_id: string; peer_name: string; source_is_system: boolean; source_device_name: string }
 export type PermStatus = "granted" | "denied" | "prompt" | "not_applicable"
 export type Permissions = { microphone: PermStatus; screen: PermStatus }
 export type SessionId = string
@@ -246,6 +286,7 @@ export type SourceKind = { type: "mic"; device_id: string } | { type: "system"; 
 export type StatsTick = StreamStat[]
 export type StreamAction = { type: "pause" } | { type: "resume" } | { type: "close" } | { type: "set_volume"; volume: number } | { type: "set_muted"; muted: boolean }
 export type StreamId = number
+export type StreamRequestsChanged = null
 export type StreamSnapshot = { id: StreamId; state: StreamState; source_peer: string; sink_peer: string; udp_port: number; source_device: string; sink_device: string; volume: number; muted: boolean }
 export type StreamStat = { session_id: string; stream_id: number; rtt_ms: number; loss_pct: number; kbps_sent: number; kbps_received: number }
 export type StreamState = "negotiating" | "active" | "paused" | "error" | "closed"

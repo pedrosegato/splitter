@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IncomingRequestDialog } from "@/features/connect/IncomingRequestDialog";
+import { StreamRequestDialog } from "@/features/connect/StreamRequestDialog";
 import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
 import { RoutingBoard } from "@/features/routing/RoutingBoard";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
@@ -127,6 +128,7 @@ export function App() {
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <OnboardingWizard />
       <IncomingRequestDialog />
+      <StreamRequestDialog />
       <Toaster position="bottom-right" />
     </div>
   );

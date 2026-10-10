@@ -9,6 +9,18 @@ use tokio::net::TcpStream;
 
 const MIN_PREFIX_LEN: u8 = 22;
 
+// The sweep touches every host on the subnet; back off while the peer set is stable.
+pub const MIN_SCAN_INTERVAL: Duration = Duration::from_secs(8);
+pub const MAX_SCAN_INTERVAL: Duration = Duration::from_secs(120);
+
+pub fn next_scan_interval(current: Duration, changed: bool) -> Duration {
+    if changed {
+        MIN_SCAN_INTERVAL
+    } else {
+        (current * 2).min(MAX_SCAN_INTERVAL)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IfaceV4 {
     pub name: String,
@@ -70,7 +82,7 @@ fn interfaces_v4() -> Vec<IfaceV4> {
 pub async fn probe_host(addr: SocketAddr, timeout: Duration) -> Option<DiscoveredPeer> {
     tokio::time::timeout(timeout, async move {
         let stream = TcpStream::connect(addr).await.ok()?;
-        let handle = spawn_peer_connection(stream, None).ok()?;
+        let handle = spawn_peer_connection(stream).ok()?;
         let mut events = handle.events.subscribe();
         handle.tx.send(SignalingMessage::Probe {}).await.ok()?;
         loop {
@@ -167,6 +179,20 @@ mod tests {
             ip: Ipv4Addr::from(ip),
             netmask: Ipv4Addr::from(mask),
         }
+    }
+
+    #[test]
+    fn scan_interval_backs_off_while_nothing_changes_and_resets_on_change() {
+        let mut interval = MIN_SCAN_INTERVAL;
+        for _ in 0..10 {
+            interval = next_scan_interval(interval, false);
+        }
+        assert_eq!(interval, MAX_SCAN_INTERVAL);
+        assert_eq!(next_scan_interval(interval, true), MIN_SCAN_INTERVAL);
+        assert_eq!(
+            next_scan_interval(MIN_SCAN_INTERVAL, false),
+            MIN_SCAN_INTERVAL * 2
+        );
     }
 
     #[test]

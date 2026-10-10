@@ -1,4 +1,5 @@
 use crate::error::NetError;
+use crate::net::crypto::{self, SessionKeys, StreamKeys};
 use crate::net::manager::SessionManager;
 use crate::net::signaling::{
     Codec, CodecParams, Endpoint, PeerConnectionHandle, PeerEvent, SignalingMessage, StreamAction,
@@ -18,6 +19,29 @@ pub struct ConnEndpoints {
     pub remote_addr: SocketAddr,
     pub events: broadcast::Sender<PeerEvent>,
     pub connection_id: Uuid,
+    pub session_keys: Option<SessionKeys>,
+}
+
+impl From<&PeerConnectionHandle> for ConnEndpoints {
+    fn from(c: &PeerConnectionHandle) -> Self {
+        Self {
+            tx: c.tx.clone(),
+            remote_addr: c.remote_addr,
+            events: c.events.clone(),
+            connection_id: c.connection_id,
+            session_keys: c.session_keys(),
+        }
+    }
+}
+
+impl ConnEndpoints {
+    pub fn require_session_keys(&self) -> Result<&SessionKeys, NetError> {
+        self.session_keys
+            .as_ref()
+            .ok_or_else(|| NetError::SignalingProtocol {
+                reason: "connection has no session keys".into(),
+            })
+    }
 }
 
 pub async fn find_conn(
@@ -25,29 +49,10 @@ pub async fn find_conn(
     outgoing_conns: &ConnectionMap,
     peer_id: Uuid,
 ) -> Option<ConnEndpoints> {
-    {
-        let g = server_conns.read().await;
-        if let Some(c) = g.get(&peer_id) {
-            return Some(ConnEndpoints {
-                tx: c.tx.clone(),
-                remote_addr: c.remote_addr,
-                events: c.events.clone(),
-                connection_id: c.connection_id,
-            });
-        }
+    if let Some(c) = server_conns.read().await.get(&peer_id) {
+        return Some(c.into());
     }
-    {
-        let g = outgoing_conns.read().await;
-        if let Some(c) = g.get(&peer_id) {
-            return Some(ConnEndpoints {
-                tx: c.tx.clone(),
-                remote_addr: c.remote_addr,
-                events: c.events.clone(),
-                connection_id: c.connection_id,
-            });
-        }
-    }
-    None
+    outgoing_conns.read().await.get(&peer_id).map(Into::into)
 }
 
 pub async fn find_conn_tx(
@@ -89,8 +94,10 @@ pub fn build_stream_route(
     )
 }
 
+/// Also returns the stream's keys, derived from a fresh salt carried in the message.
 #[allow(clippy::too_many_arguments)]
 pub fn stream_open_message(
+    session_keys: &SessionKeys,
     session_id: Uuid,
     stream_id: u8,
     local: Uuid,
@@ -98,8 +105,10 @@ pub fn stream_open_message(
     source_dev: &str,
     sink_dev: &str,
     bitrate: u32,
-) -> SignalingMessage {
-    SignalingMessage::StreamOpen {
+) -> (SignalingMessage, StreamKeys) {
+    let key_salt = crypto::new_salt();
+    let keys = session_keys.stream(session_id, stream_id, &key_salt);
+    let msg = SignalingMessage::StreamOpen {
         session_id: session_id.to_string(),
         stream_id,
         source: Endpoint {
@@ -112,7 +121,9 @@ pub fn stream_open_message(
         },
         codec: opus_codec(bitrate),
         udp_port: 0,
-    }
+        key_salt,
+    };
+    (msg, keys)
 }
 
 pub async fn wait_for_stream_open_ack(
@@ -218,6 +229,8 @@ mod tests {
                 connection_id: Uuid::new_v4(),
                 abort: tokio::spawn(async {}).abort_handle(),
                 abort_on_drop: std::sync::atomic::AtomicBool::new(true),
+                crypto: Default::default(),
+                session: Default::default(),
             },
             rx,
         )
@@ -374,7 +387,9 @@ mod tests {
         let session = Uuid::new_v4();
         let local = Uuid::new_v4();
         let sink = Uuid::new_v4();
-        let msg = stream_open_message(session, 4, local, sink, "system", "default", 64_000);
+        let keys = crypto::_session_for_tests();
+        let (msg, stream_keys) =
+            stream_open_message(&keys, session, 4, local, sink, "system", "default", 64_000);
         match msg {
             SignalingMessage::StreamOpen {
                 session_id,
@@ -383,6 +398,7 @@ mod tests {
                 sink: sink_ep,
                 codec,
                 udp_port,
+                key_salt,
             } => {
                 assert_eq!(session_id, session.to_string());
                 assert_eq!(stream_id, 4);
@@ -394,8 +410,21 @@ mod tests {
                 assert_eq!(codec.bitrate, 64_000);
                 assert_eq!(codec.frame_ms, 20);
                 assert_eq!(udp_port, 0);
+                let derived = keys.stream(session, 4, &key_salt);
+                assert_eq!(stream_keys.media, derived.media);
             }
             other => panic!("expected StreamOpen, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn every_stream_open_gets_a_fresh_salt() {
+        let keys = crypto::_session_for_tests();
+        let open = || {
+            let (_, k) =
+                stream_open_message(&keys, Uuid::nil(), 1, Uuid::nil(), Uuid::nil(), "a", "b", 1);
+            k.media
+        };
+        assert_ne!(open(), open(), "reusing a stream id must not reuse its key");
     }
 }

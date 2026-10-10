@@ -1,3 +1,4 @@
+use crate::audio::max_callback_frames;
 use crate::audio::resampler::Resampler;
 use crate::audio::ring::RingConsumer;
 use crate::error::AudioError;
@@ -9,6 +10,8 @@ use tokio::sync::Notify;
 pub struct PlaybackHandle {
     _stream: cpal::Stream,
     frame_consumed: Arc<Notify>,
+    consumer: Arc<Mutex<RingConsumer>>,
+    device_id: Option<String>,
 }
 
 impl std::fmt::Debug for PlaybackHandle {
@@ -23,106 +26,132 @@ impl PlaybackHandle {
     }
 
     pub fn start(device_name: &str, consumer: RingConsumer) -> Result<Self, AudioError> {
-        let device = resolve_output_device(device_name)?;
-        Self::from_device(device, consumer)
+        Self::start_by_id(device_name, consumer)
     }
 
     pub fn start_by_id(device_id: &str, consumer: RingConsumer) -> Result<Self, AudioError> {
         let resolved = resolve_output_device(device_id)?;
-        Self::from_device(resolved, consumer)
+        let mut handle = Self::from_device(resolved, consumer)?;
+        handle.device_id = Some(device_id.to_string());
+        Ok(handle)
     }
 
     pub(crate) fn from_device(
         device: cpal::Device,
         consumer: RingConsumer,
     ) -> Result<Self, AudioError> {
-        let supported = device
-            .default_output_config()
-            .map_err(|e| AudioError::BuildStream {
-                source: Box::new(e),
-            })?;
-        let channels = supported.channels();
-        let sample_rate = supported.sample_rate().0;
-        let sample_format = supported.sample_format();
-        let max_frames = max_callback_frames(supported.buffer_size());
-
-        let config: cpal::StreamConfig = supported.into();
         let consumer = Arc::new(Mutex::new(consumer));
         let frame_consumed = Arc::new(Notify::new());
-        let err_fn = |e| tracing::error!("cpal playback stream error: {e}");
-
-        let stream = match sample_format {
-            cpal::SampleFormat::F32 => {
-                let cons = consumer.clone();
-                let notify = frame_consumed.clone();
-                let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
-                device
-                    .build_output_stream(
-                        &config,
-                        move |out: &mut [f32], _| {
-                            filler.fill_f32(out, &cons, &notify);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            cpal::SampleFormat::I16 => {
-                let cons = consumer.clone();
-                let notify = frame_consumed.clone();
-                let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
-                device
-                    .build_output_stream(
-                        &config,
-                        move |out: &mut [i16], _| {
-                            filler.fill_i16(out, &cons, &notify);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            cpal::SampleFormat::U16 => {
-                let cons = consumer.clone();
-                let notify = frame_consumed.clone();
-                let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
-                device
-                    .build_output_stream(
-                        &config,
-                        move |out: &mut [u16], _| {
-                            filler.fill_u16(out, &cons, &notify);
-                        },
-                        err_fn,
-                        None,
-                    )
-                    .map_err(|e| AudioError::BuildStream {
-                        source: Box::new(e),
-                    })?
-            }
-            other => {
-                return Err(AudioError::BuildStream {
-                    source: Box::new(std::io::Error::other(format!(
-                        "unsupported sample format: {other:?}"
-                    ))),
-                });
-            }
-        };
-
-        stream.play().map_err(|e| AudioError::PlayStream {
-            source: Box::new(e),
-        })?;
+        let stream = build_playback_stream(device, consumer.clone(), frame_consumed.clone())?;
         Ok(Self {
             _stream: stream,
             frame_consumed,
+            consumer,
+            device_id: None,
         })
+    }
+
+    /// Rebuilds the OS stream on the same ring; one whose device was unplugged never recovers.
+    pub fn reopen(&mut self) -> Result<(), AudioError> {
+        let Some(device_id) = &self.device_id else {
+            return Err(AudioError::DeviceNotFound(
+                "playback device was passed in directly and cannot be re-resolved".into(),
+            ));
+        };
+        let device = resolve_output_device(device_id)?;
+        self._stream =
+            build_playback_stream(device, self.consumer.clone(), self.frame_consumed.clone())?;
+        Ok(())
     }
 }
 
+fn build_playback_stream(
+    device: cpal::Device,
+    consumer: Arc<Mutex<RingConsumer>>,
+    frame_consumed: Arc<Notify>,
+) -> Result<cpal::Stream, AudioError> {
+    let supported = device
+        .default_output_config()
+        .map_err(|e| AudioError::BuildStream {
+            source: Box::new(e),
+        })?;
+    let channels = supported.channels();
+    let sample_rate = supported.sample_rate().0;
+    let sample_format = supported.sample_format();
+    let max_frames = max_callback_frames(supported.buffer_size());
+
+    let config: cpal::StreamConfig = supported.into();
+    let err_fn = |e| tracing::error!("cpal playback stream error: {e}");
+
+    let stream = match sample_format {
+        cpal::SampleFormat::F32 => {
+            let cons = consumer.clone();
+            let notify = frame_consumed.clone();
+            let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
+            device
+                .build_output_stream(
+                    &config,
+                    move |out: &mut [f32], _| {
+                        filler.fill_f32(out, &cons, &notify);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?
+        }
+        cpal::SampleFormat::I16 => {
+            let cons = consumer.clone();
+            let notify = frame_consumed.clone();
+            let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
+            device
+                .build_output_stream(
+                    &config,
+                    move |out: &mut [i16], _| {
+                        filler.fill_i16(out, &cons, &notify);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?
+        }
+        cpal::SampleFormat::U16 => {
+            let cons = consumer.clone();
+            let notify = frame_consumed.clone();
+            let mut filler = PlaybackFiller::new(sample_rate, channels, max_frames)?;
+            device
+                .build_output_stream(
+                    &config,
+                    move |out: &mut [u16], _| {
+                        filler.fill_u16(out, &cons, &notify);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| AudioError::BuildStream {
+                    source: Box::new(e),
+                })?
+        }
+        other => {
+            return Err(AudioError::BuildStream {
+                source: Box::new(std::io::Error::other(format!(
+                    "unsupported sample format: {other:?}"
+                ))),
+            });
+        }
+    };
+
+    stream.play().map_err(|e| AudioError::PlayStream {
+        source: Box::new(e),
+    })?;
+    Ok(stream)
+}
+
 fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
+    crate::audio::anchor_audio_host();
     let host = cpal::default_host();
     if let Some(rest) = device_id.strip_prefix("out:") {
         let idx: usize = rest
@@ -140,32 +169,16 @@ fn resolve_output_device(device_id: &str) -> Result<cpal::Device, AudioError> {
             .nth(idx)
             .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()));
     }
-    let target_name = device_id.splitn(3, ':').nth(2).unwrap_or(device_id);
-    host.output_devices()
-        .map_err(|e| AudioError::BuildStream {
-            source: Box::new(e),
-        })?
-        .find(|d| d.name().map(|n| n == target_name).unwrap_or(false))
+    let outputs = host.output_devices().map_err(|e| AudioError::BuildStream {
+        source: Box::new(e),
+    })?;
+    crate::audio::devices::pick_by_id(outputs, device_id)
         .ok_or_else(|| AudioError::DeviceNotFound(device_id.to_string()))
 }
 
 // RESAMPLE_CHUNK is per-channel; src_scratch holds stereo pairs (RESAMPLE_CHUNK * 2 interleaved).
 // 441 samples at 44100 Hz -> 480 samples at 48000 Hz (10ms slices); must divide evenly into FRAME_SAMPLES at 48k.
 const RESAMPLE_CHUNK: usize = 441;
-
-// The realtime audio callback must never allocate, so scratch is pre-sized to the largest
-// buffer the driver can hand us. Drivers that report Unknown give no bound; 4096 matches
-// the max already assumed for WASAPI shared mode and acts as a clamped safety net.
-const FALLBACK_MAX_CALLBACK_FRAMES: usize = 4096;
-
-fn max_callback_frames(buffer_size: &cpal::SupportedBufferSize) -> usize {
-    match buffer_size {
-        cpal::SupportedBufferSize::Range { max, .. } => {
-            (*max as usize).max(FALLBACK_MAX_CALLBACK_FRAMES)
-        }
-        cpal::SupportedBufferSize::Unknown => FALLBACK_MAX_CALLBACK_FRAMES,
-    }
-}
 
 /// Reads 48k stereo-interleaved (L,R,L,R,...) samples from the ring, resamples to device rate,
 /// and fans to output channels. Mono output devices downmix L+R to avg.
@@ -516,6 +529,7 @@ mod tests {
     #[test]
     fn start_by_id_with_default_output_id_starts() {
         use cpal::traits::{DeviceTrait, HostTrait};
+        crate::audio::anchor_audio_host();
         let host = cpal::default_host();
         let Some(default_out) = host.default_output_device() else {
             return;

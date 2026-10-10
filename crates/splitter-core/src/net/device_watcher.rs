@@ -36,22 +36,18 @@ pub fn diff_snapshots(prev: &HashSet<String>, curr: &HashSet<String>) -> Vec<Dev
 }
 
 pub fn enumerate_device_ids() -> HashSet<String> {
+    crate::audio::anchor_audio_host();
+    use crate::audio::devices::stable_ids;
     use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();
     let mut out = HashSet::new();
     if let Ok(inputs) = host.input_devices() {
-        for (idx, d) in inputs.enumerate() {
-            if let Ok(n) = d.name() {
-                out.insert(format!("Input:{idx}:{n}"));
-            }
-        }
+        let names = inputs.filter_map(|d| d.name().ok());
+        out.extend(stable_ids("Input", names).into_iter().map(|(id, _)| id));
     }
     if let Ok(outputs) = host.output_devices() {
-        for (idx, d) in outputs.enumerate() {
-            if let Ok(n) = d.name() {
-                out.insert(format!("Output:{idx}:{n}"));
-            }
-        }
+        let names = outputs.filter_map(|d| d.name().ok());
+        out.extend(stable_ids("Output", names).into_iter().map(|(id, _)| id));
     }
     out
 }

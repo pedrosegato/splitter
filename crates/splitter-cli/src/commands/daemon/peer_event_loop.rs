@@ -1,11 +1,12 @@
-use super::context::{pick_default_output_device_id, short, DaemonContext};
+use super::context::{short, DaemonContext};
+use splitter_core::net::crypto::SessionKeys;
 use splitter_core::net::signaling::client_ops::ConnEndpoints;
 use splitter_core::net::signaling::{
     spawn_control_plane, spawn_reconnect, ConnectOutcome, ControlPlaneDeps, ControlPlaneHost,
     ControlPlaneObserver, PeerEvent, ReconnectDriver, SignalingMessage, StreamAction,
 };
 use splitter_core::{PeerIdentity, SessionId, TrustStore};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -17,13 +18,19 @@ pub(crate) struct CliControlPlane {
     pub ctx: DaemonContext,
 }
 
-fn make_deps(ctx: &DaemonContext) -> Arc<ControlPlaneDeps> {
+fn make_deps(
+    ctx: &DaemonContext,
+    remote_ip: Option<IpAddr>,
+    session_keys: Option<SessionKeys>,
+) -> Arc<ControlPlaneDeps> {
     Arc::new(ControlPlaneDeps {
         sessions: ctx.sessions.clone(),
         stream_registry: ctx.stream_registry.clone(),
         local_peer_id: ctx.local_peer_id,
-        default_output: pick_default_output_device_id()
-            .unwrap_or_else(|| "Output:0:default".into()),
+        default_output: "Output:0:default".into(),
+        settings: ctx.settings.clone(),
+        remote_ip,
+        session_keys,
     })
 }
 
@@ -33,8 +40,10 @@ pub(crate) fn spawn_control_plane_loop(
     events: tokio::sync::broadcast::Receiver<PeerEvent>,
     peer_id: Uuid,
     connection_id: Option<Uuid>,
+    remote_ip: Option<IpAddr>,
+    session_keys: Option<SessionKeys>,
 ) -> tokio::task::AbortHandle {
-    let deps = make_deps(&ctx);
+    let deps = make_deps(&ctx, remote_ip, session_keys);
     spawn_control_plane(
         deps,
         peer_id,
@@ -181,6 +190,8 @@ impl ControlPlaneHost for CliControlPlane {
             endpoints.events.subscribe(),
             peer_id,
             Some(connection_id),
+            Some(endpoints.remote_addr.ip()),
+            endpoints.session_keys,
         )
     }
 
@@ -213,7 +224,7 @@ mod tests {
     ) {
         let (tx, rx) = broadcast::channel(16);
         let (conn_tx, conn_rx) = mpsc::channel(16);
-        spawn_control_plane_loop(ctx, conn_tx, rx, peer, None);
+        spawn_control_plane_loop(ctx, conn_tx, rx, peer, None, None, None);
         (tx, conn_rx)
     }
 

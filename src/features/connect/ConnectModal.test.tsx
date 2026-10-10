@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useUiStore } from "@/stores/ui";
+
 import { ConnectModal } from "./ConnectModal";
 
 const mockConnectMutate = vi.fn();
@@ -86,6 +88,21 @@ describe("ConnectModal", () => {
       { host: "10.0.0.42", port: 7100, peerId: null },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
+  });
+
+  it("shows the pairing code while a first-time pairing waits for the other machine", () => {
+    useUiStore.setState({ pairing: { peer_id: "peer-1", code: "654 321" } });
+    render(<ConnectModal open onOpenChange={vi.fn()} />, { wrapper: makeWrapper() });
+
+    expect(within(document.body).getByText("654 321")).toBeTruthy();
+    expect(within(document.body).getByText(/mesmo código/i)).toBeTruthy();
+  });
+
+  it("shows no code when nothing is being paired", () => {
+    useUiStore.setState({ pairing: null });
+    render(<ConnectModal open onOpenChange={vi.fn()} />, { wrapper: makeWrapper() });
+
+    expect(within(document.body).queryByText(/mesmo código/i)).toBeNull();
   });
 
   it("calls onOpenChange(false) when cancelar is clicked", () => {

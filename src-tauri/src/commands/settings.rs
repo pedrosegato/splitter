@@ -4,7 +4,17 @@ use splitter_core::{FecMode, JitterMode, LogLevel, Settings};
 use std::sync::Arc;
 use tauri::State;
 
+/// Leaves `s` untouched unless the result passes `Settings::validate`: AppCore::init
+/// refuses to start on a settings file that fails it.
 pub fn apply_setting(s: &mut Settings, key: &str, val: &str) -> Result<(), String> {
+    let mut next = s.clone();
+    set_field(&mut next, key, val)?;
+    next.validate().map_err(|e| e.to_string())?;
+    *s = next;
+    Ok(())
+}
+
+fn set_field(s: &mut Settings, key: &str, val: &str) -> Result<(), String> {
     match key {
         "auto_accept_trusted" => {
             s.auto_accept_trusted = val.parse().map_err(|_| "expected bool")?
@@ -43,7 +53,6 @@ pub fn apply_setting(s: &mut Settings, key: &str, val: &str) -> Result<(), Strin
                 _ => return Err("trace|debug|info|warn|error".into()),
             }
         }
-        "metrics_enabled" => s.metrics_enabled = val.parse().map_err(|_| "expected bool")?,
         "signaling_port" => s.signaling_port = val.parse().map_err(|_| "expected u16")?,
         other => return Err(format!("unknown setting: {other}")),
     }
@@ -113,6 +122,22 @@ mod tests {
         apply_setting(&mut s, "signaling_port", "8080").unwrap();
         assert_eq!(s.signaling_port, 8080);
         assert!(apply_setting(&mut s, "signaling_port", "not_a_number").is_err());
+    }
+
+    #[test]
+    fn apply_rejects_value_that_fails_validation_and_leaves_settings_untouched() {
+        let mut s = Settings::default();
+        // 9000 collides with the default metrics_port.
+        assert!(apply_setting(&mut s, "signaling_port", "9000").is_err());
+        assert!(apply_setting(&mut s, "default_bitrate", "5000").is_err());
+        assert_eq!(s, Settings::default());
+    }
+
+    #[test]
+    fn the_app_cannot_turn_on_the_metrics_endpoint() {
+        let mut s = Settings::default();
+        assert!(apply_setting(&mut s, "metrics_enabled", "true").is_err());
+        assert!(!s.metrics_enabled);
     }
 
     #[test]

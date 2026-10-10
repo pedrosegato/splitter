@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { StreamStat } from "@/bindings";
+import type { PairingCode, StreamStat } from "@/bindings";
 
 const HISTORY_CAP = 60;
 
@@ -33,10 +33,13 @@ interface UiState {
   stats: StreamStat[];
   statsHistory: Record<number, StreamHistory>;
   knownNames: Record<string, string>;
+  /** Set while dialing a first-time pairing. */
+  pairing: PairingCode | null;
   setTab: (t: UiState["activeTab"]) => void;
   selectStream: (id: number | null) => void;
   pushStats: (tick: StreamStat[]) => void;
   rememberNames: (names: Record<string, string>) => void;
+  setPairing: (pairing: PairingCode | null) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -45,6 +48,7 @@ export const useUiStore = create<UiState>((set) => ({
   stats: [],
   statsHistory: {},
   knownNames: {},
+  pairing: null,
   setTab: (activeTab) => set({ activeTab }),
   selectStream: (selectedStreamId) => set({ selectedStreamId }),
   pushStats: (tick) =>
@@ -53,4 +57,5 @@ export const useUiStore = create<UiState>((set) => ({
       statsHistory: pushStatsHistory(state.statsHistory, tick),
     })),
   rememberNames: (names) => set((state) => ({ knownNames: { ...state.knownNames, ...names } })),
+  setPairing: (pairing) => set({ pairing }),
 }));

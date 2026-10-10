@@ -1,10 +1,15 @@
+use crate::net::crypto::{SessionKeys, StreamKeys};
 use crate::net::manager::SessionManager;
 use crate::net::session::SessionId;
 use crate::net::signaling::{
     CodecParams, DeviceDescriptor, Endpoint, PeerEvent, SignalingMessage, SourceKind, StreamAction,
 };
 use crate::net::stream::{Stream, StreamId, StreamRoute};
-use crate::net::stream_runtime::{open_stream_as_sink, StreamControlSignal, StreamRegistry};
+use crate::net::stream_runtime::{
+    open_stream_as_sink, SinkConfig, StreamControlSignal, StreamRegistry,
+};
+use crate::settings::SettingsHandle;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
@@ -15,7 +20,13 @@ pub struct ControlPlaneDeps {
     pub sessions: Arc<SessionManager>,
     pub stream_registry: Arc<StreamRegistry>,
     pub local_peer_id: Uuid,
+    /// Fallback when the OS default output can't be resolved.
     pub default_output: String,
+    pub settings: SettingsHandle,
+    /// Sinks only accept audio from this peer.
+    pub remote_ip: Option<IpAddr>,
+    /// The connection's session; streams are refused without it rather than sent in clear.
+    pub session_keys: Option<SessionKeys>,
 }
 
 #[async_trait::async_trait]
@@ -116,10 +127,12 @@ async fn handle_message(
             source,
             sink,
             codec,
+            key_salt,
             ..
         } => {
             handle_stream_open(
                 deps, peer_id, conn_tx, observer, session_id, stream_id, source, sink, codec,
+                &key_salt,
             )
             .await
         }
@@ -131,7 +144,11 @@ async fn handle_message(
             accepted: false,
         } => handle_session_response_close(deps, peer_id, observer, &session_id).await,
         SignalingMessage::DeviceListRequest {} => {
-            let devices = crate::audio::devices::list_devices()
+            // Blocking WASAPI enumeration, and any peer can trigger it.
+            let devices = tokio::task::spawn_blocking(crate::audio::devices::list_devices)
+                .await
+                .ok()
+                .and_then(Result::ok)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|d| DeviceDescriptor {
@@ -184,6 +201,11 @@ async fn handle_session_request(
     let Ok(requester) = Uuid::parse_str(requested_by) else {
         return;
     };
+    // requested_by is wire data; a peer may only open (and evict) sessions in its own name.
+    if requester != peer_id {
+        tracing::warn!(peer = %peer_id, claimed = %requester, "session_request for another peer ignored");
+        return;
+    }
 
     let stale = deps.sessions.snapshot().await;
     for old in stale
@@ -214,6 +236,38 @@ async fn handle_session_request(
     tracing::info!(peer = %peer_id, session = %sid, "opened session");
 }
 
+/// Runs before any audio device or socket is opened.
+async fn validate_stream_open(
+    deps: &ControlPlaneDeps,
+    peer_id: Uuid,
+    session_id: Uuid,
+    stream_id: u8,
+    key_salt: &str,
+) -> Result<StreamKeys, String> {
+    let session_keys = deps
+        .session_keys
+        .as_ref()
+        .ok_or("connection has no session keys")?;
+    let snap = deps.sessions.snapshot().await;
+    let session = snap
+        .iter()
+        .find(|s| s.id.get() == session_id)
+        .ok_or_else(|| format!("unknown session {session_id}"))?;
+    if session.remote_peer_id != peer_id {
+        return Err(format!(
+            "session {session_id} does not belong to peer {peer_id}"
+        ));
+    }
+    if session
+        .streams
+        .iter()
+        .any(|st| st.id == StreamId(stream_id))
+    {
+        return Err(format!("stream {stream_id} is already open"));
+    }
+    Ok(session_keys.stream(session_id, stream_id, key_salt))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_stream_open(
     deps: &ControlPlaneDeps,
@@ -225,9 +279,24 @@ async fn handle_stream_open(
     source: Endpoint,
     sink: Endpoint,
     codec: CodecParams,
+    key_salt: &str,
 ) {
     let Ok(sid) = Uuid::parse_str(&session_id).map(SessionId) else {
         return;
+    };
+    let keys = match validate_stream_open(deps, peer_id, sid.get(), stream_id, key_salt).await {
+        Ok(keys) => keys,
+        Err(reason) => {
+            tracing::warn!(peer = %peer_id, stream_id, "stream_open rejected: {reason}");
+            let _ = conn_tx
+                .send(SignalingMessage::StreamOpenAck {
+                    stream_id,
+                    accepted: false,
+                    udp_port: None,
+                })
+                .await;
+            return;
+        }
     };
     let route = StreamRoute::new(
         Endpoint {
@@ -246,12 +315,18 @@ async fn handle_stream_open(
         1.0,
     );
     let chosen_output = if sink.device_id == "default" {
-        deps.default_output.clone()
+        tokio::task::spawn_blocking(crate::audio::devices::default_output_device_id)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| deps.default_output.clone())
     } else {
         sink.device_id.clone()
     };
     let mut session_route = route.clone();
     session_route.sink.device_id = chosen_output.clone();
+    let sink_config =
+        SinkConfig::from_settings(&*deps.settings.read().await, deps.remote_ip, Some(keys));
 
     let port = match open_stream_as_sink(
         deps.stream_registry.clone(),
@@ -259,6 +334,7 @@ async fn handle_stream_open(
         StreamId(stream_id),
         route,
         chosen_output.clone(),
+        sink_config,
     )
     .await
     {
@@ -486,6 +562,11 @@ mod tests {
             stream_registry: StreamRegistry::new(),
             local_peer_id: Uuid::new_v4(),
             default_output: "Output:0:default".into(),
+            settings: Arc::new(tokio::sync::RwLock::new(
+                crate::settings::Settings::default(),
+            )),
+            remote_ip: None,
+            session_keys: Some(crate::net::crypto::_session_for_tests()),
         })
     }
 
@@ -824,6 +905,91 @@ mod tests {
             Some(SessionState::Active),
             "the newer connection's session must survive a stale connection's late disconnect"
         );
+    }
+
+    #[tokio::test]
+    async fn session_request_naming_another_peer_cannot_evict_its_sessions() {
+        let deps = deps();
+        let victim = Uuid::new_v4();
+        let victim_sid = seed_active_stream(&deps, victim).await;
+        let attacker = Uuid::new_v4();
+        let (tx, _crx) = driven(deps.clone(), attacker, Arc::new(Recorder::default()));
+
+        let spoofed = Uuid::new_v4();
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: spoofed.to_string(),
+            requested_by: victim.to_string(),
+        }))
+        .unwrap();
+        // A legitimate request queued behind the spoofed one tells us it was processed.
+        let own = Uuid::new_v4();
+        tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
+            session_id: own.to_string(),
+            requested_by: attacker.to_string(),
+        }))
+        .unwrap();
+        let snap = await_sessions(&deps, |s| s.iter().any(|x| x.id == SessionId(own))).await;
+
+        assert!(
+            snap.iter()
+                .any(|x| x.id == victim_sid && x.state == SessionState::Active),
+            "a peer must not be able to tear down another peer's session"
+        );
+        assert!(!snap.iter().any(|x| x.id == SessionId(spoofed)));
+    }
+
+    #[tokio::test]
+    async fn stream_open_is_validated_before_any_device_is_opened() {
+        let deps = deps();
+        let owner = Uuid::new_v4();
+        let sid = seed_active_stream(&deps, owner).await;
+        let other = Uuid::new_v4();
+
+        assert!(
+            validate_stream_open(&deps, owner, Uuid::new_v4(), 1, "salt")
+                .await
+                .is_err()
+        );
+        assert!(
+            validate_stream_open(&deps, other, sid.get(), 1, "salt")
+                .await
+                .is_err(),
+            "a peer must not open streams on another peer's session"
+        );
+        assert!(
+            validate_stream_open(&deps, owner, sid.get(), 0, "salt")
+                .await
+                .is_err(),
+            "stream id 0 is already in use"
+        );
+        let keys = validate_stream_open(&deps, owner, sid.get(), 1, "salt")
+            .await
+            .unwrap();
+        let expected = deps
+            .session_keys
+            .as_ref()
+            .unwrap()
+            .stream(sid.get(), 1, "salt");
+        assert_eq!(
+            (keys.media, keys.report),
+            (expected.media, expected.report),
+            "the sink derives what the source derived"
+        );
+    }
+
+    #[tokio::test]
+    async fn streams_are_refused_on_a_connection_without_session_keys() {
+        let keyless = Arc::new(ControlPlaneDeps {
+            session_keys: None,
+            ..Arc::try_unwrap(deps()).ok().unwrap()
+        });
+        let owner = Uuid::new_v4();
+        let sid = seed_active_stream(&keyless, owner).await;
+
+        let err = validate_stream_open(&keyless, owner, sid.get(), 1, "salt")
+            .await
+            .unwrap_err();
+        assert!(err.contains("session keys"), "{err}");
     }
 
     #[tokio::test]

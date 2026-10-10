@@ -5,6 +5,9 @@ use bytes::BytesMut;
 use audiopus::{coder, packet::Packet, Application, Bitrate, Channels, MutSignals, SampleRate};
 use std::convert::TryFrom;
 
+// Largest single-frame Opus packet (RFC 6716 §3.4).
+const MAX_OPUS_FRAME_BYTES: usize = 1275;
+
 pub struct OpusEncoder {
     inner: coder::Encoder,
 
@@ -23,7 +26,9 @@ impl OpusEncoder {
                 source: Box::new(e),
             })?;
 
-        let max_bytes_per_frame = (bitrate as usize).div_ceil(8) / 50;
+        // libopus treats the buffer size as a hard per-packet cap; set_bitrate governs the
+        // average, so an average-sized buffer would clamp VBR peaks and in-band FEC.
+        let max_bytes_per_frame = MAX_OPUS_FRAME_BYTES;
         Ok(Self {
             inner: enc,
             max_bytes_per_frame,
@@ -197,6 +202,31 @@ mod tests {
             n,
             "payload length should match returned size after truncate"
         );
+    }
+
+    #[test]
+    fn vbr_frames_may_exceed_the_average_frame_size() {
+        // 64 kbps averages 160 B per 20ms frame.
+        let mut enc = OpusEncoder::new(64_000).unwrap();
+        let mut payload = BytesMut::with_capacity(4096);
+        let silence = vec![0.0f32; FRAME_STEREO_SAMPLES];
+        for _ in 0..5 {
+            enc.encode(&silence, &mut payload).unwrap();
+        }
+        let mut seed = 0x1234_5678u32;
+        let mut largest = 0;
+        for _ in 0..10 {
+            let noise: Vec<f32> = (0..FRAME_STEREO_SAMPLES)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    (seed as f32 / u32::MAX as f32) * 1.6 - 0.8
+                })
+                .collect();
+            largest = largest.max(enc.encode(&noise, &mut payload).unwrap());
+        }
+        assert!(largest > 160, "largest frame was {largest} B");
     }
 
     #[test]

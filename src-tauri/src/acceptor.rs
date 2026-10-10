@@ -1,5 +1,7 @@
 use crate::core::AppCore;
-use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged};
+use crate::events::{IncomingSession, PeerDisconnected, SnapshotChanged, StreamRequestsChanged};
+use crate::stream_requests::PendingStreamRequest;
+use splitter_core::net::crypto::SessionKeys;
 use splitter_core::net::session::SessionId;
 use splitter_core::net::signaling::client_ops::{find_conn, ConnEndpoints};
 use splitter_core::net::signaling::{
@@ -7,21 +9,10 @@ use splitter_core::net::signaling::{
     ControlPlaneObserver, PeerEvent, ReconnectDriver, SourceKind, StreamAction,
 };
 use splitter_core::{PeerIdentity, TrustStore};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use uuid::Uuid;
-
-fn pick_default_output_device_id() -> String {
-    splitter_core::audio::devices::list_devices()
-        .ok()
-        .and_then(|devs| {
-            devs.into_iter()
-                .find(|d| d.kind == splitter_core::audio::devices::DeviceKind::Output)
-                .map(|d| d.id)
-        })
-        .unwrap_or_else(|| "Output:0:default".into())
-}
 
 pub struct TauriControlPlane {
     pub core: Arc<AppCore>,
@@ -31,12 +22,19 @@ pub(crate) fn should_reconnect(had_active_session: bool, locally_torn_down: bool
     had_active_session && !locally_torn_down
 }
 
-fn make_deps(core: &Arc<AppCore>) -> Arc<ControlPlaneDeps> {
+fn make_deps(
+    core: &Arc<AppCore>,
+    remote_ip: IpAddr,
+    session_keys: Option<SessionKeys>,
+) -> Arc<ControlPlaneDeps> {
     Arc::new(ControlPlaneDeps {
         sessions: core.sessions.clone(),
         stream_registry: core.stream_registry.clone(),
         local_peer_id: core.identity.read().peer_id,
-        default_output: pick_default_output_device_id(),
+        default_output: "Output:0:default".into(),
+        settings: core.settings.clone(),
+        remote_ip: Some(remote_ip),
+        session_keys,
     })
 }
 
@@ -49,18 +47,18 @@ pub fn spawn_acceptor(
     peer_id: Uuid,
     connection_id: Uuid,
     events: broadcast::Receiver<PeerEvent>,
-    _addr: SocketAddr,
+    addr: SocketAddr,
 ) {
-    let deps = make_deps(&core);
     let obs = observer(&core);
     tokio::spawn(async move {
-        let conn_tx = match find_conn(&core.server.connections, &core.outgoing, peer_id).await {
-            Some(c) => c.tx,
-            None => {
-                let (tx, _rx) = mpsc::channel(1);
-                tx
-            }
-        };
+        let conn = find_conn(&core.server.connections, &core.outgoing, peer_id).await;
+        let deps = make_deps(
+            &core,
+            addr.ip(),
+            conn.as_ref().and_then(|c| c.session_keys.clone()),
+        );
+        // Without a live connection the loop still sees the disconnect and cleans up.
+        let conn_tx = conn.map_or_else(|| mpsc::channel(1).0, |c| c.tx);
         spawn_control_plane(deps, peer_id, conn_tx, events, obs, Some(connection_id));
     });
 }
@@ -68,27 +66,7 @@ pub fn spawn_acceptor(
 #[async_trait::async_trait]
 impl ControlPlaneObserver for TauriControlPlane {
     async fn on_session_opened(&self, _peer_id: Uuid, requester: Uuid, _session: SessionId) {
-        let peer_name = {
-            let trust_name = self
-                .core
-                .trust
-                .read()
-                .await
-                .peer_for(&requester)
-                .map(|p| p.peer_name.clone());
-            if let Some(name) = trust_name {
-                name
-            } else {
-                let discovered_name = self
-                    .core
-                    .peers
-                    .read()
-                    .await
-                    .get(&requester.to_string())
-                    .map(|p| p.peer_name.clone());
-                discovered_name.unwrap_or_else(|| requester.to_string()[..8].to_string())
-            }
-        };
+        let peer_name = self.core.peer_display_name(requester).await;
         self.core.emit(IncomingSession {
             peer_id: requester.to_string(),
             peer_name,
@@ -169,27 +147,20 @@ impl ControlPlaneObserver for TauriControlPlane {
         source: SourceKind,
         sink_device: String,
     ) {
-        let (source_device, source_is_system) = match source {
-            SourceKind::Mic { device_id } => (device_id, false),
-            SourceKind::System { device_id } => (device_id, true),
-        };
-        let core = self.core.clone();
-        tauri::async_runtime::spawn(async move {
-            match crate::commands::streams::open_stream_core(
-                &core,
-                session_id,
-                source_device,
-                source_is_system,
-                peer_id,
-                sink_device,
-                64_000,
-            )
+        // Starts local capture, so it waits for the user (accept_stream_request).
+        self.core
+            .stream_requests
+            .write()
             .await
-            {
-                Ok(_) => core.emit(SnapshotChanged),
-                Err(e) => tracing::warn!(peer = %peer_id, "stream request failed: {e}"),
-            }
-        });
+            .push(PendingStreamRequest {
+                id: Uuid::new_v4(),
+                peer_id,
+                session_id,
+                source,
+                sink_device,
+            });
+        tracing::info!(peer = %peer_id, %session_id, "stream request awaiting local consent");
+        self.core.emit(StreamRequestsChanged);
     }
 
     async fn on_peer_disconnected(&self, peer_id: Uuid, reason: &str, had_active_session: bool) {
@@ -219,6 +190,16 @@ impl ControlPlaneObserver for TauriControlPlane {
             }
         }
         self.core.remote_devices.write().await.remove(&peer_id);
+
+        let dropped = {
+            let mut requests = self.core.stream_requests.write().await;
+            let before = requests.len();
+            requests.retain(|r| r.peer_id != peer_id);
+            requests.len() != before
+        };
+        if dropped {
+            self.core.emit(StreamRequestsChanged);
+        }
     }
 }
 
@@ -290,7 +271,11 @@ impl ControlPlaneHost for TauriControlPlane {
     fn spawn_loop(&self, peer_id: Uuid, endpoints: ConnEndpoints) -> tokio::task::AbortHandle {
         let connection_id = endpoints.connection_id;
         spawn_control_plane(
-            make_deps(&self.core),
+            make_deps(
+                &self.core,
+                endpoints.remote_addr.ip(),
+                endpoints.session_keys.clone(),
+            ),
             peer_id,
             endpoints.tx,
             endpoints.events.subscribe(),
@@ -658,6 +643,91 @@ mod tests {
         );
     }
 
+    fn mic_request(sid: SessionId) -> SignalingMessage {
+        SignalingMessage::StreamRequest {
+            session_id: sid.to_string(),
+            source: SourceKind::Mic {
+                device_id: "Input:0:Studio Mic".into(),
+            },
+            sink_device: "Output:0:Speakers".into(),
+        }
+    }
+
+    async fn await_stream_requests(
+        core: &AppCore,
+    ) -> Vec<crate::stream_requests::PendingStreamRequest> {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let pending = core.stream_requests.read().await.clone();
+                if !pending.is_empty() {
+                    return pending;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stream request not queued for consent within 2s")
+    }
+
+    #[tokio::test]
+    async fn stream_request_waits_for_local_consent_instead_of_capturing() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer = Uuid::new_v4();
+        let sid = seed_active_session_with_stream(&core, local, peer).await;
+        let tx = driven_acceptor(core.clone(), peer);
+
+        tx.send(PeerEvent::Message(mic_request(sid))).unwrap();
+
+        let pending = await_stream_requests(&core).await;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].peer_id, peer);
+        assert_eq!(pending[0].session_id, sid.get());
+        assert!(
+            core.stream_registry.list().await.is_empty(),
+            "a remote peer must not be able to start local capture before the user accepts"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejecting_a_stream_request_discards_it() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer = Uuid::new_v4();
+        let sid = seed_active_session_with_stream(&core, local, peer).await;
+        let tx = driven_acceptor(core.clone(), peer);
+        tx.send(PeerEvent::Message(mic_request(sid))).unwrap();
+        let id = await_stream_requests(&core).await[0].id;
+
+        crate::commands::streams::reject_stream_request_core(&core, id)
+            .await
+            .expect("reject a queued request");
+
+        assert!(core.stream_requests.read().await.is_empty());
+        assert!(
+            crate::commands::streams::reject_stream_request_core(&core, id)
+                .await
+                .is_err(),
+            "an unknown request id must be reported, not silently ignored"
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_disconnect_drops_its_pending_stream_requests() {
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let peer = Uuid::new_v4();
+        let sid = seed_active_session_with_stream(&core, local, peer).await;
+        let tx = driven_acceptor(core.clone(), peer);
+        tx.send(PeerEvent::Message(mic_request(sid))).unwrap();
+        await_stream_requests(&core).await;
+
+        let obs = TauriControlPlane { core: core.clone() };
+        obs.on_peer_disconnected(peer, "test", false).await;
+
+        assert!(core.stream_requests.read().await.is_empty());
+    }
+
     #[tokio::test]
     #[ignore = "StreamOpen opens a real output audio device via open_stream_as_sink; device-dependent, not runnable headless"]
     async fn stream_open_adds_active_stream_to_session() {
@@ -665,7 +735,20 @@ mod tests {
         let requester = Uuid::new_v4();
         let local = core.identity.read().peer_id;
         let session_id = Uuid::new_v4();
-        let tx = driven_acceptor(core.clone(), requester);
+        let (tx, rx) = broadcast::channel(16);
+        let deps = make_deps(
+            &core,
+            "127.0.0.1".parse().unwrap(),
+            Some(splitter_core::net::crypto::_session_for_tests()),
+        );
+        spawn_control_plane(
+            deps,
+            requester,
+            mpsc::channel(1).0,
+            rx,
+            observer(&core),
+            None,
+        );
 
         tx.send(PeerEvent::Message(SignalingMessage::SessionRequest {
             session_id: session_id.to_string(),
@@ -691,6 +774,7 @@ mod tests {
                 frame_ms: 20,
             },
             udp_port: 0,
+            key_salt: "salt".into(),
         }))
         .unwrap();
 

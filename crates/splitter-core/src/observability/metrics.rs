@@ -100,11 +100,16 @@ impl MetricsRegistry {
     }
 }
 
+/// Loopback only: the endpoint has no auth and reveals peer and stream activity.
+fn listen_addr(port: u16) -> std::net::SocketAddr {
+    (std::net::Ipv4Addr::LOCALHOST, port).into()
+}
+
 pub async fn serve(metrics: Arc<MetricsRegistry>, port: u16) -> Result<(), NetError> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
 
-    let listener = TcpListener::bind(("0.0.0.0", port))
+    let listener = TcpListener::bind(listen_addr(port))
         .await
         .map_err(|e| NetError::ConfigIo(format!("metrics bind {port}: {e}")))?;
     tracing::info!(port, "metrics endpoint listening");
@@ -139,6 +144,12 @@ pub async fn serve(metrics: Arc<MetricsRegistry>, port: u16) -> Result<(), NetEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metrics_are_served_on_loopback_only() {
+        assert!(listen_addr(9000).ip().is_loopback());
+        assert_eq!(listen_addr(9000).port(), 9000);
+    }
 
     #[test]
     fn registry_renders_with_zero_counters() {

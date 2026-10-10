@@ -62,8 +62,8 @@ describe("useSettingsForm", () => {
       QueryClientProvider({ client: qc, children });
 
     const { result } = renderHook(() => useSettingsForm(), { wrapper });
-    result.current.set("metrics_enabled", false);
-    expect(mockMutate).toHaveBeenCalledWith({ key: "metrics_enabled", value: "false" });
+    result.current.set("auto_accept_trusted", false);
+    expect(mockMutate).toHaveBeenCalledWith({ key: "auto_accept_trusted", value: "false" });
   });
 
   it("set number → mutate with string", () => {

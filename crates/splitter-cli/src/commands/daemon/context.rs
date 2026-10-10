@@ -1,8 +1,8 @@
-use splitter_core::audio::devices::{list_devices, DeviceKind};
 use splitter_core::net::discovery::DiscoveredPeer;
 use splitter_core::net::signaling::{PeerConnectionHandle, PeerEvent};
 use splitter_core::net::stream_runtime::StreamRegistry;
 use splitter_core::net::trust::TrustStore;
+use splitter_core::settings::SettingsHandle;
 use splitter_core::{PeerIdentity, SessionManager};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,6 +21,7 @@ pub(crate) struct DaemonContext {
     pub discovered: DiscoveredPeers,
     pub outgoing_connections: PeerConnections,
     pub local_peer_id: Uuid,
+    pub settings: SettingsHandle,
 }
 
 impl DaemonContext {
@@ -51,6 +52,8 @@ impl DaemonContext {
             handle.events.subscribe(),
             peer_id,
             Some(handle.connection_id),
+            Some(handle.remote_addr.ip()),
+            handle.session_keys(),
         );
         let mut events_rx = handle.events.subscribe();
         self.outgoing_connections
@@ -91,14 +94,6 @@ pub(crate) fn short(u: &Uuid) -> String {
     u.to_string().chars().take(8).collect()
 }
 
-pub(crate) fn pick_default_output_device_id() -> Option<String> {
-    list_devices()
-        .ok()?
-        .into_iter()
-        .find(|d| d.kind == DeviceKind::Output)
-        .map(|d| d.id)
-}
-
 #[cfg(test)]
 pub(crate) fn test_ctx() -> DaemonContext {
     let dir = tempfile::tempdir().unwrap();
@@ -117,6 +112,7 @@ pub(crate) fn test_ctx() -> DaemonContext {
         discovered: Arc::default(),
         outgoing_connections: Arc::default(),
         local_peer_id: local,
+        settings: Arc::new(RwLock::new(splitter_core::Settings::default())),
     }
 }
 
@@ -159,7 +155,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let (client, _accepted) =
             tokio::join!(TcpStream::connect(addr), async { listener.accept().await });
-        spawn_peer_connection(client.unwrap(), None).unwrap()
+        spawn_peer_connection(client.unwrap()).unwrap()
     }
 
     #[tokio::test]

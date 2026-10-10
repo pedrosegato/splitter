@@ -10,7 +10,6 @@ pub struct StreamStats {
     pub bytes_received: AtomicU64,
     pub last_rtt_ms: AtomicU32,
     pub last_seq_received: AtomicU32,
-    pub last_heartbeat_echo_ms: AtomicU64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]

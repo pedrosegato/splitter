@@ -11,7 +11,8 @@
 
 use splitter_core::audio::ring::AudioRing;
 use splitter_core::net::stream_runtime::{
-    spawn_sink_pump_inner, spawn_source_pump_inner, StreamControlSignal, StreamStats,
+    spawn_sink_pump_inner, spawn_source_pump_inner, SinkConfig, SourceConfig, StreamControlSignal,
+    StreamStats,
 };
 use splitter_core::FRAME_STEREO_SAMPLES;
 use std::sync::atomic::Ordering;
@@ -89,7 +90,7 @@ async fn soak_30_minutes_no_leak_no_loss() {
         send_socket,
         src_rx,
         src_stats.clone(),
-        64_000,
+        SourceConfig::default(),
     ));
     let sink_handle = tokio::spawn(spawn_sink_pump_inner(
         session_id,
@@ -98,6 +99,7 @@ async fn soak_30_minutes_no_leak_no_loss() {
         play_prod,
         sink_rx,
         sink_stats.clone(),
+        SinkConfig::default(),
     ));
 
     // Background feeder task pushes sine frames at real-time pace for the whole soak.

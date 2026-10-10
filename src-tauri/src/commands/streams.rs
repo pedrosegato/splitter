@@ -1,11 +1,16 @@
 use crate::core::AppCore;
+use crate::dto::PendingStreamRequestDto;
+use crate::events::{SnapshotChanged, StreamRequestsChanged};
+use crate::stream_requests::PendingStreamRequest;
 use splitter_core::net::signaling::client_ops::{
     build_stream_route, find_conn, notify_remote_by_session, stream_open_message,
     wait_for_stream_open_ack, ConnEndpoints,
 };
 use splitter_core::net::signaling::SourceKind as WireSourceKind;
 use splitter_core::net::signaling::{SignalingMessage, StreamAction};
-use splitter_core::net::stream_runtime::{open_stream_as_source, SourceKind, StreamControlSignal};
+use splitter_core::net::stream_runtime::{
+    open_stream_as_source, SourceConfig, SourceKind, StreamControlSignal,
+};
 use splitter_core::{SessionId, SessionSnapshot, StreamId};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -109,18 +114,17 @@ pub(crate) async fn open_stream_core(
         .ok_or_else(|| "no live signaling connection to remote peer".to_string())?;
 
     let mut ack_rx = conn.events.subscribe();
-    conn.tx
-        .send(stream_open_message(
-            sid.get(),
-            stream_id,
-            local_peer_id,
-            sink_peer,
-            &source_device_id,
-            &sink_device_id,
-            bitrate,
-        ))
-        .await
-        .map_err(|e| e.to_string())?;
+    let (open_msg, keys) = stream_open_message(
+        conn.require_session_keys().map_err(|e| e.to_string())?,
+        sid.get(),
+        stream_id,
+        local_peer_id,
+        sink_peer,
+        &source_device_id,
+        &sink_device_id,
+        bitrate,
+    );
+    conn.tx.send(open_msg).await.map_err(|e| e.to_string())?;
 
     let ack_port = wait_for_stream_open_ack(&mut ack_rx, stream_id, Duration::from_secs(5))
         .await
@@ -149,6 +153,7 @@ pub(crate) async fn open_stream_core(
         SourceKind::Mic(source_device_id)
     };
     let session_route = route.clone();
+    let config = SourceConfig::from_settings(&*core.settings.read().await, bitrate, Some(keys));
     open_stream_as_source(
         core.stream_registry.clone(),
         sid,
@@ -156,6 +161,7 @@ pub(crate) async fn open_stream_core(
         route,
         remote,
         source_kind,
+        config,
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -193,7 +199,10 @@ pub async fn open_stream(
     bitrate: Option<u32>,
 ) -> Result<u8, String> {
     let sid = Uuid::parse_str(&session_id).map_err(|e| e.to_string())?;
-    let bitrate = bitrate.unwrap_or(64_000);
+    let bitrate = match bitrate {
+        Some(b) => b,
+        None => core.settings.read().await.default_bitrate,
+    };
     let remote_peer_id = core
         .sessions
         .snapshot()
@@ -251,6 +260,80 @@ pub async fn request_stream(
     Ok(())
 }
 
+async fn take_stream_request(core: &AppCore, id: Uuid) -> Result<PendingStreamRequest, String> {
+    let mut requests = core.stream_requests.write().await;
+    let idx = requests
+        .iter()
+        .position(|r| r.id == id)
+        .ok_or_else(|| format!("stream request {id} not found"))?;
+    Ok(requests.remove(idx))
+}
+
+pub(crate) async fn reject_stream_request_core(core: &AppCore, id: Uuid) -> Result<(), String> {
+    take_stream_request(core, id).await?;
+    core.emit(StreamRequestsChanged);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn pending_stream_requests(
+    core: State<'_, Arc<AppCore>>,
+) -> Result<Vec<PendingStreamRequestDto>, String> {
+    let requests = core.stream_requests.read().await.clone();
+    let mut out = Vec::with_capacity(requests.len());
+    for r in &requests {
+        let device_id = r.source_device_id();
+        out.push(PendingStreamRequestDto {
+            id: r.id.to_string(),
+            peer_id: r.peer_id.to_string(),
+            peer_name: core.peer_display_name(r.peer_id).await,
+            source_is_system: r.source_is_system(),
+            source_device_name: device_id
+                .splitn(3, ':')
+                .nth(2)
+                .unwrap_or(device_id)
+                .to_string(),
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn accept_stream_request(
+    core: State<'_, Arc<AppCore>>,
+    request_id: String,
+) -> Result<u8, String> {
+    let id = Uuid::parse_str(&request_id).map_err(|e| e.to_string())?;
+    let request = take_stream_request(&core, id).await?;
+    core.emit(StreamRequestsChanged);
+    let source_is_system = request.source_is_system();
+    let bitrate = core.settings.read().await.default_bitrate;
+    let stream_id = open_stream_core(
+        &core,
+        request.session_id,
+        request.source_device_id().to_string(),
+        source_is_system,
+        request.peer_id,
+        request.sink_device,
+        bitrate,
+    )
+    .await?;
+    core.emit(SnapshotChanged);
+    Ok(stream_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reject_stream_request(
+    core: State<'_, Arc<AppCore>>,
+    request_id: String,
+) -> Result<(), String> {
+    let id = Uuid::parse_str(&request_id).map_err(|e| e.to_string())?;
+    reject_stream_request_core(&core, id).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn close_stream(
@@ -259,17 +342,17 @@ pub async fn close_stream(
     stream_id: u8,
 ) -> Result<(), String> {
     let sid = SessionId(Uuid::parse_str(&session_id).map_err(|e| e.to_string())?);
+    close_stream_core(&core, sid, stream_id).await
+}
+
+async fn close_stream_core(core: &AppCore, sid: SessionId, stream_id: u8) -> Result<(), String> {
     core.stream_registry
         .close(&sid, StreamId(stream_id))
         .await
         .map_err(|e| e.to_string())?;
     let _ = core.sessions.remove_stream(&sid, StreamId(stream_id)).await;
-    notify_remote(&core, sid.get(), stream_id, StreamAction::Close).await;
+    notify_remote(core, sid.get(), stream_id, StreamAction::Close).await;
     Ok(())
-}
-
-fn should_notify_remote(action: &StreamAction) -> bool {
-    !matches!(action, StreamAction::Close)
 }
 
 #[tauri::command]
@@ -281,33 +364,36 @@ pub async fn stream_control(
     action: StreamAction,
 ) -> Result<(), String> {
     let sid = SessionId(Uuid::parse_str(&session_id).map_err(|e| e.to_string())?);
+    stream_control_core(&core, sid, stream_id, action).await
+}
+
+async fn stream_control_core(
+    core: &AppCore,
+    sid: SessionId,
+    stream_id: u8,
+    action: StreamAction,
+) -> Result<(), String> {
     let signal = StreamControlSignal::from(action.clone());
     if matches!(signal, StreamControlSignal::Close) {
-        core.stream_registry
-            .close(&sid, StreamId(stream_id))
-            .await
-            .map_err(|e| e.to_string())?;
-    } else {
-        if let StreamControlSignal::SetMuted(m) = signal {
-            core.sessions
-                .set_stream_muted(&sid, StreamId(stream_id), m)
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-        if let StreamControlSignal::SetVolume(v) = signal {
-            core.sessions
-                .set_stream_volume(&sid, StreamId(stream_id), v)
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-        core.stream_registry
-            .send_control(&sid, StreamId(stream_id), signal)
+        return close_stream_core(core, sid, stream_id).await;
+    }
+    if let StreamControlSignal::SetMuted(m) = signal {
+        core.sessions
+            .set_stream_muted(&sid, StreamId(stream_id), m)
             .await
             .map_err(|e| e.to_string())?;
     }
-    if should_notify_remote(&action) {
-        notify_remote(&core, sid.get(), stream_id, action).await;
+    if let StreamControlSignal::SetVolume(v) = signal {
+        core.sessions
+            .set_stream_volume(&sid, StreamId(stream_id), v)
+            .await
+            .map_err(|e| e.to_string())?;
     }
+    core.stream_registry
+        .send_control(&sid, StreamId(stream_id), signal)
+        .await
+        .map_err(|e| e.to_string())?;
+    notify_remote(core, sid.get(), stream_id, action).await;
     Ok(())
 }
 
@@ -419,15 +505,63 @@ mod tests {
         notify_remote(&core, Uuid::new_v4(), 0, StreamAction::Close).await;
     }
 
-    #[test]
-    fn mirrors_mute_and_volume_but_not_close() {
-        assert!(should_notify_remote(&StreamAction::SetMuted {
-            muted: true
-        }));
-        assert!(should_notify_remote(&StreamAction::SetVolume {
-            volume: 0.5
-        }));
-        assert!(should_notify_remote(&StreamAction::Pause));
-        assert!(!should_notify_remote(&StreamAction::Close));
+    #[tokio::test]
+    async fn stream_control_close_tears_down_like_close_stream() {
+        use splitter_core::net::signaling::{Codec, CodecParams, Endpoint};
+        use splitter_core::net::stream::{Stream, StreamRoute};
+        use splitter_core::net::stream_runtime::{DeviceGuard, StreamRuntime, StreamStats};
+
+        let core = new_core().await;
+        let local = core.identity.read().peer_id;
+        let sid = core.sessions.open_outgoing(local, Uuid::new_v4()).await;
+        core.sessions.accept(&sid).await.unwrap();
+        let route = StreamRoute::new(
+            Endpoint {
+                peer_id: local.to_string(),
+                device_id: "in".into(),
+            },
+            Endpoint {
+                peer_id: "remote".into(),
+                device_id: "out".into(),
+            },
+            CodecParams {
+                name: Codec::Opus,
+                bitrate: 64_000,
+                frame_ms: 20,
+            },
+            1.0,
+        );
+        core.sessions
+            .add_stream(&sid, Stream::new_negotiating(StreamId(0), route, 0))
+            .await
+            .unwrap();
+        let (control_tx, _control_rx) = tokio::sync::mpsc::channel(4);
+        core.stream_registry
+            .register(StreamRuntime {
+                session_id: sid,
+                stream_id: StreamId(0),
+                stats: Arc::new(StreamStats::default()),
+                control_tx,
+                bound_device_id: None,
+                join: tokio::spawn(async {}),
+                device_guard: DeviceGuard::None,
+            })
+            .await
+            .unwrap();
+
+        stream_control_core(&core, sid, 0, StreamAction::Close)
+            .await
+            .unwrap();
+
+        assert!(core.stream_registry.list().await.is_empty());
+        let snap = core.sessions.snapshot().await;
+        assert!(
+            snap.iter()
+                .find(|s| s.id == sid)
+                .unwrap()
+                .streams
+                .is_empty(),
+            "Close via stream_control must drop the stream from the session too"
+        );
     }
 }

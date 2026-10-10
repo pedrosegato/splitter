@@ -2,6 +2,8 @@ use crate::settings::FecMode;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+const MIN_FEC_LOSS_PCT: u32 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FecSetting {
     pub enable: bool,
@@ -50,6 +52,14 @@ impl FecController {
         }
     }
 
+    pub fn record_report(&mut self, now: Instant, received: u32, lost: u32) {
+        let total = (received + lost).min(1_000);
+        let lost = lost.min(total);
+        for i in 0..total {
+            self.record(now, i < lost);
+        }
+    }
+
     pub fn current_loss_pct(&self) -> u32 {
         if self.samples.is_empty() {
             return 0;
@@ -82,9 +92,15 @@ impl FecController {
                 tracing::info!(enabled = self.enabled, loss_pct = pct, "FEC state flipped");
             }
         }
+        // libopus only codes in-band FEC when packet_loss_perc > 0.
+        let packet_loss_perc = if self.enabled {
+            pct.clamp(MIN_FEC_LOSS_PCT, 100)
+        } else {
+            pct.min(100)
+        };
         FecSetting {
             enable: self.enabled,
-            packet_loss_perc: pct.min(100) as u8,
+            packet_loss_perc: packet_loss_perc as u8,
         }
     }
 }
@@ -145,6 +161,23 @@ mod tests {
         }
         let still = c.evaluate(t1);
         assert!(still.enable, "should be blocked by hysteresis");
+    }
+
+    #[test]
+    fn enabled_fec_never_reports_zero_loss_to_the_encoder() {
+        let mut c = FecController::new(FecMode::Always, 1, 0, 10);
+        let s = step(&mut c, Instant::now(), 0, 100);
+        assert!(s.enable);
+        assert!(s.packet_loss_perc > 0);
+    }
+
+    #[test]
+    fn receiver_report_feeds_the_loss_estimate() {
+        let mut c = FecController::new(FecMode::Auto, 1, 0, 0);
+        let now = Instant::now();
+        c.record_report(now, 45, 5);
+        assert_eq!(c.current_loss_pct(), 10);
+        assert!(c.evaluate(now).enable);
     }
 
     #[test]

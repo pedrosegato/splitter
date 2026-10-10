@@ -1,5 +1,5 @@
 use crate::error::NetError;
-use crate::net::fs_util::write_atomic;
+use crate::net::fs_util::{create_new_atomic, write_atomic};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -24,11 +24,7 @@ impl PeerIdentity {
 
     pub fn load_or_create(path: &Path) -> Result<Self, NetError> {
         if path.exists() {
-            let raw = std::fs::read_to_string(path)
-                .map_err(|e| NetError::ConfigIo(format!("read {}: {e}", path.display())))?;
-            let parsed: Self = toml::from_str(&raw)
-                .map_err(|e| NetError::ConfigIo(format!("parse {}: {e}", path.display())))?;
-            return Ok(parsed);
+            return Self::read(path);
         }
         if let Some(parent) = path.parent() {
             crate::net::fs_util::ensure_private_dir(parent)
@@ -46,9 +42,21 @@ impl PeerIdentity {
         };
         let serialized = toml::to_string_pretty(&identity)
             .map_err(|e| NetError::ConfigIo(format!("serialize: {e}")))?;
-        write_atomic(path, serialized.as_bytes())
+        let created = create_new_atomic(path, serialized.as_bytes())
             .map_err(|e| NetError::ConfigIo(format!("write {}: {e}", path.display())))?;
+        if !created {
+            // Another process (the app and the CLI on first run) got there first; adopt
+            // its identity so both agree.
+            return Self::read(path);
+        }
         Ok(identity)
+    }
+
+    fn read(path: &Path) -> Result<Self, NetError> {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|e| NetError::ConfigIo(format!("read {}: {e}", path.display())))?;
+        toml::from_str(&raw)
+            .map_err(|e| NetError::ConfigIo(format!("parse {}: {e}", path.display())))
     }
 }
 
@@ -62,6 +70,24 @@ pub fn identity_path() -> Result<PathBuf, NetError> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn concurrent_first_runs_agree_on_one_identity() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identity.toml");
+        let runs: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || PeerIdentity::load_or_create(&path))
+            })
+            .collect();
+        let ids: Vec<Uuid> = runs
+            .into_iter()
+            .map(|r| r.join().unwrap().expect("every process must start").peer_id)
+            .collect();
+        assert!(ids.iter().all(|id| *id == ids[0]), "{ids:?}");
+        assert_eq!(PeerIdentity::load_or_create(&path).unwrap().peer_id, ids[0]);
+    }
 
     #[test]
     fn load_or_create_creates_file_when_missing() {

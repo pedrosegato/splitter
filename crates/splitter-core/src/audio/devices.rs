@@ -240,9 +240,18 @@ mod tests {
             return;
         };
         let name = default.name().unwrap();
-        let id = default_output_device_id().expect("default output must be listed");
-        assert!(id.starts_with("Output:"), "got {id}");
-        assert!(id.ends_with(&name), "id {id} must name {name}");
+        // Without a sound card, ALSA's virtual "default" is not among the listed outputs.
+        let listed = list_devices()
+            .unwrap()
+            .iter()
+            .any(|d| d.kind == DeviceKind::Output && d.name == name);
+        match default_output_device_id() {
+            Some(id) => {
+                assert!(id.starts_with("Output:"), "got {id}");
+                assert!(id.ends_with(&name), "id {id} must name {name}");
+            }
+            None => assert!(!listed, "{name} is listed, so its id must be returned"),
+        }
     }
 
     #[test]
